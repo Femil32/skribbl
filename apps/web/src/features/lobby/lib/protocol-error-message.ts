@@ -10,6 +10,12 @@ export function messageForProtocolErrorCode(code: string): string {
       return "Room codes are six characters long. Use the letters and numbers your host shared (2–9 and A–Z, without O, I, or L). You can paste from an invite link or type the code without spaces.";
     case "UNKNOWN_ROOM":
       return "That room is not available. Check the code and try again, or ask the host for a new invite.";
+    case "HOST_RECLAIM_DENIED":
+      return "We could not restore your host session to this room. Create a new room.";
+    case "HOST_SESSION_LOST":
+      return "This lobby is no longer on the game server (it may have closed or the server restarted). Create a new room.";
+    case "ALREADY_CONNECTED":
+      return "This host session looks like it is already connected elsewhere. Close other tabs or try again.";
     case "ROOM_FULL":
       return "That room is full. Try again later or ask the host to make space.";
     // Epic 2+: when match is not in lobby — placeholder until server emits this code.

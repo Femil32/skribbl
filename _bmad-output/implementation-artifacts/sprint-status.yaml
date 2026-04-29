@@ -1,5 +1,5 @@
 # generated: 2026-04-29T12:00:00Z
-# last_updated: 2026-04-29 (1-6 in progress)
+# last_updated: 2026-04-29 (1-7 done: reconnectHost + review fixes)
 # project: skribbl
 # project_key: NOKEY
 # tracking_system: file-system
@@ -36,7 +36,7 @@
 
 generated: '2026-04-29T00:00:00Z'
 last_updated: '2026-04-29'
-# story 1-6 marked done after code review
+# story 1-7 done (reconnectHost + review fixes)
 project: skribbl
 project_key: NOKEY
 tracking_system: file-system
@@ -50,7 +50,7 @@ development_status:
   1-4-join-flow-ux-paste-friendly-code-entry: done
   1-5-lobby-identity-nickname-avatar-presets: done
   1-6-live-roster-host-badge-start-gate: done
-  1-7-connection-trust-banner-during-lobby-states: backlog
+  1-7-connection-trust-banner-during-lobby-states: done
   epic-1-retrospective: optional
 
   epic-2: backlog

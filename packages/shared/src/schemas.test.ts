@@ -126,4 +126,17 @@ describe("serializeClientCommand", () => {
     const parsed = clientCommandSchema.safeParse(JSON.parse(line));
     expect(parsed.success).toBe(true);
   });
+
+  it("round-trips reconnectHost", () => {
+    const line = serializeClientCommand({
+      type: "reconnectHost",
+      roomId: "550e8400-e29b-41d4-a716-446655440000",
+      playerId: "660e8400-e29b-41d4-a716-446655440001",
+      displayName: "Pat",
+      avatarPresetId: "preset-1",
+    });
+    const parsed = clientCommandSchema.safeParse(JSON.parse(line));
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.type).toBe("reconnectHost");
+  });
 });

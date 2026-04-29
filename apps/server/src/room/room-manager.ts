@@ -25,6 +25,13 @@ export type JoinRoomFailureReason =
   | "ROOM_FULL"
   | "JOIN_NOT_ALLOWED";
 
+export type ReconnectHostFailureReason =
+  | "UNKNOWN_ROOM"
+  | "JOIN_NOT_ALLOWED"
+  | "NOT_HOST"
+  | "ROOM_FULL"
+  | "ALREADY_CONNECTED";
+
 export type NewLobbyPlayer = Pick<
   LobbySessionIdentity,
   "displayName" | "avatarPresetId"
@@ -152,6 +159,7 @@ export class RoomManager {
       id: randomUUID(),
       code,
       maxPlayers: this.maxPlayersPerRoom,
+      hostPlayerId: playerId,
     });
     room.sockets.add(ws);
     room.hostSocket = ws;
@@ -159,6 +167,37 @@ export class RoomManager {
     this.roomsById.set(room.id, room);
     this.socketToRoomId.set(ws, room.id);
     return room;
+  }
+
+  reconnectHost(
+    ws: WebSocket,
+    roomId: string,
+    expectedPlayerId: string,
+    player: NewLobbyPlayer,
+  ): { ok: true; room: Room } | { ok: false; reason: ReconnectHostFailureReason } {
+    const room = this.roomsById.get(roomId);
+    if (!room) return { ok: false, reason: "UNKNOWN_ROOM" };
+    if (room.phase !== "lobby") return { ok: false, reason: "JOIN_NOT_ALLOWED" };
+    if (room.hostPlayerId !== expectedPlayerId) return { ok: false, reason: "NOT_HOST" };
+
+    for (const s of room.sockets) {
+      const id = this.socketLobbyIdentity.get(s);
+      if (id?.playerId === expectedPlayerId) return { ok: false, reason: "ALREADY_CONNECTED" };
+    }
+
+    if (!room.hasCapacity()) return { ok: false, reason: "ROOM_FULL" };
+
+    this.leaveSocketRoom(ws);
+
+    this.socketLobbyIdentity.set(ws, {
+      playerId: expectedPlayerId,
+      displayName: player.displayName,
+      avatarPresetId: player.avatarPresetId,
+    });
+    room.sockets.add(ws);
+    room.hostSocket = ws;
+    this.socketToRoomId.set(ws, room.id);
+    return { ok: true, room };
   }
 
   joinRoom(

@@ -11,6 +11,7 @@ import {
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useHostCreateRoom } from "@/features/lobby/hooks/use-host-create-room";
+import { LobbyConnectionBanner } from "@/features/lobby/components/LobbyConnectionBanner";
 import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster";
 import {
   buildRoomInviteUrl,
@@ -70,12 +71,23 @@ export function LobbyHostPage() {
 
   const shouldConnect = submitted && nicknameOk;
 
-  const { state, startMatch } = useHostCreateRoom({
+  const {
+    state,
+    transport,
+    connectionReason,
+    transportErrorMessage,
+    awaitingRoomHandshake,
+    startMatch,
+  } = useHostCreateRoom({
     shouldConnect,
     attemptId,
     displayName: nicknameTrimmed,
     avatarPresetId: avatarId,
   });
+
+  const bumpConnectionAttempt = useCallback(() => {
+    setAttemptId((n) => n + 1);
+  }, []);
 
   const [toast, setToast] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
@@ -188,11 +200,18 @@ export function LobbyHostPage() {
 
   if (state.status === "connecting") {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-base-200 p-8">
-        <div className="card bg-base-100 shadow-xl w-full max-w-lg">
-          <div className="card-body items-center text-center gap-4">
-            <span className="loading loading-spinner loading-lg text-primary" />
-            <p className="text-base-content/80">Creating your room…</p>
+      <div className="min-h-screen flex flex-col bg-base-200">
+        <LobbyConnectionBanner
+          transport={transport}
+          reason={connectionReason}
+          errorMessage={transportErrorMessage}
+          awaitingRoomHandshake={awaitingRoomHandshake}
+        />
+        <div className="flex flex-1 flex-col items-center justify-center p-8">
+          <div className="card bg-base-100 shadow-xl w-full max-w-lg">
+            <div className="card-body items-center text-center gap-4">
+              <p className="text-base-content/80">Setting up your lobby session…</p>
+            </div>
           </div>
         </div>
       </div>
@@ -201,27 +220,30 @@ export function LobbyHostPage() {
 
   if (state.status === "error") {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-base-200 p-8">
-        <div className="card bg-base-100 shadow-xl w-full max-w-lg">
-          <div className="card-body gap-4">
-            <h1 className="card-title text-2xl">Could not create room</h1>
-            <div className="alert alert-warning" role="alert">
-              <span>{state.message}</span>
-            </div>
-            <div className="card-actions justify-end">
-              <Link href="/" className="btn btn-ghost">
-                Back home
-              </Link>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => {
-                  setSubmitted(false);
-                  setAttemptId((n) => n + 1);
-                }}
-              >
-                Try again
-              </button>
+      <div className="min-h-screen flex flex-col bg-base-200">
+        <LobbyConnectionBanner
+          transport={transport}
+          reason={connectionReason}
+          errorMessage={state.message}
+          awaitingRoomHandshake={awaitingRoomHandshake}
+          onRetry={
+            transport === "fatal" || transport === "disconnected"
+              ? bumpConnectionAttempt
+              : undefined
+          }
+        />
+        <div className="flex flex-1 flex-col items-center justify-center p-8">
+          <div className="card bg-base-100 shadow-xl w-full max-w-lg">
+            <div className="card-body gap-4">
+              <h1 className="card-title text-2xl">Could not create room</h1>
+              <div className="card-actions justify-end">
+                <Link href="/" className="btn btn-ghost">
+                  Back home
+                </Link>
+                <button type="button" className="btn btn-primary" onClick={bumpConnectionAttempt}>
+                  Try again
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -231,11 +253,18 @@ export function LobbyHostPage() {
 
   if (state.status !== "lobby") {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-base-200 p-8">
-        <div className="card bg-base-100 shadow-xl w-full max-w-lg">
-          <div className="card-body items-center text-center gap-4">
-            <span className="loading loading-spinner loading-lg text-primary" />
-            <p className="text-base-content/80">Creating your room…</p>
+      <div className="min-h-screen flex flex-col bg-base-200">
+        <LobbyConnectionBanner
+          transport={transport}
+          reason={connectionReason}
+          errorMessage={transportErrorMessage}
+          awaitingRoomHandshake={awaitingRoomHandshake}
+        />
+        <div className="flex flex-1 flex-col items-center justify-center p-8">
+          <div className="card bg-base-100 shadow-xl w-full max-w-lg">
+            <div className="card-body items-center text-center gap-4">
+              <p className="text-base-content/80">Setting up your lobby session…</p>
+            </div>
           </div>
         </div>
       </div>
@@ -264,18 +293,26 @@ export function LobbyHostPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-base-200 p-8">
-      <div
-        className="toast toast-end toast-bottom z-50"
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        {toast ? (
-          <div className="alert alert-success shadow-md">
-            <span>{toast}</span>
-          </div>
-        ) : null}
-      </div>
+    <div className="min-h-screen flex flex-col bg-base-200">
+      <LobbyConnectionBanner
+        transport={transport}
+        reason={connectionReason}
+        errorMessage={transportErrorMessage}
+        awaitingRoomHandshake={awaitingRoomHandshake}
+        onRetry={transport === "disconnected" ? bumpConnectionAttempt : undefined}
+      />
+      <div className="flex flex-1 flex-col items-center justify-center p-8">
+        <div
+          className="toast toast-end toast-bottom z-50"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {toast ? (
+            <div className="alert alert-success shadow-md">
+              <span>{toast}</span>
+            </div>
+          ) : null}
+        </div>
 
       <div className="card bg-base-100 shadow-xl w-full max-w-lg">
         <div className="card-body gap-6">
@@ -285,7 +322,9 @@ export function LobbyHostPage() {
             in this room. Share the link or code so friends can join.
           </p>
 
-          <div className="space-y-2">
+          <div
+            className={`space-y-2 ${transport === "disconnected" ? "opacity-60 pointer-events-none" : ""}`}
+          >
             <span className="text-sm font-medium text-base-content/70">
               Players ({String(state.players.length)})
             </span>
@@ -301,10 +340,16 @@ export function LobbyHostPage() {
               className={`${canOfferStart ? "btn btn-primary" : "btn btn-outline"} w-full sm:w-auto self-center`}
               onClick={() => startMatch()}
               disabled={
-                state.phase !== "lobby" || state.isStartPending || !minPlayersOk
+                state.phase !== "lobby" ||
+                state.isStartPending ||
+                !minPlayersOk ||
+                transport !== "live"
               }
               aria-disabled={
-                state.phase !== "lobby" || state.isStartPending || !minPlayersOk
+                state.phase !== "lobby" ||
+                state.isStartPending ||
+                !minPlayersOk ||
+                transport !== "live"
                   ? true
                   : undefined
               }
@@ -378,6 +423,7 @@ export function LobbyHostPage() {
             </Link>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

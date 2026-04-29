@@ -332,4 +332,69 @@ describe("handleClientCommand + RoomManager", () => {
     expect(r?.players.some((p) => p.displayName === "Guesty")).toBe(false);
     expect(r?.players.some((p) => p.displayName === "Hosty" && p.isHost)).toBe(true);
   });
+
+  it("reconnectHost reclaims lobby when the room still exists", () => {
+    const rm = new RoomManager(8);
+    const host = captureWs();
+    const guest = captureWs();
+
+    handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+    const created = parseServerEvent(JSON.parse(host.sent[0]!));
+    if (created.type !== "roomCreated") throw new Error("unexpected");
+
+    handleClientCommand(
+      guest.ws,
+      { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+      rm,
+    );
+
+    rm.leaveSocketRoom(host.ws);
+
+    const host2 = captureWs();
+    handleClientCommand(
+      host2.ws,
+      {
+        type: "reconnectHost",
+        roomId: created.roomId,
+        playerId: created.playerId,
+        displayName: "Hosty",
+        avatarPresetId: "preset-1",
+      },
+      rm,
+    );
+
+    const reclaim = parseServerEvent(JSON.parse(host2.sent[0]!));
+    expect(reclaim.type).toBe("roomCreated");
+    if (reclaim.type === "roomCreated") {
+      expect(reclaim.roomId).toBe(created.roomId);
+      expect(reclaim.playerId).toBe(created.playerId);
+    }
+    const r = lastLobbyRoster(host2.sent);
+    expect(r?.players.length).toBe(2);
+  });
+
+  it("reconnectHost after room dissolved yields HOST_SESSION_LOST", () => {
+    const rm = new RoomManager(8);
+    const host = captureWs();
+    handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+    const created = parseServerEvent(JSON.parse(host.sent[0]!));
+    if (created.type !== "roomCreated") throw new Error("unexpected");
+    rm.leaveSocketRoom(host.ws);
+
+    const host2 = captureWs();
+    handleClientCommand(
+      host2.ws,
+      {
+        type: "reconnectHost",
+        roomId: created.roomId,
+        playerId: created.playerId,
+        displayName: "Hosty",
+        avatarPresetId: "preset-1",
+      },
+      rm,
+    );
+    const ev = parseServerEvent(JSON.parse(host2.sent[0]!));
+    expect(ev.type).toBe("error");
+    if (ev.type === "error") expect(ev.code).toBe("HOST_SESSION_LOST");
+  });
 });

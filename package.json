@@ -4,7 +4,7 @@
   "scripts": {
     "dev:web": "pnpm --filter @skribbl/web dev",
     "dev:server": "pnpm --filter @skribbl/server dev",
-    "dev": "pnpm run --parallel dev:server dev:web",
+    "dev": "pnpm --parallel --filter @skribbl/server --filter @skribbl/web dev",
     "build": "pnpm --filter @skribbl/shared build && pnpm --filter @skribbl/web build",
     "typecheck": "pnpm --filter @skribbl/shared build && pnpm -r run typecheck",
     "test": "pnpm --filter @skribbl/shared build && pnpm -r run test"

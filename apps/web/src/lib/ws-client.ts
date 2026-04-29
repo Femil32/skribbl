@@ -26,6 +26,22 @@ export function serializeCreateRoomCommand(
   });
 }
 
+/** Host reclaim after transport drop — same `playerId` from the original `roomCreated`. */
+export function serializeReconnectHostCommand(
+  roomId: string,
+  playerId: string,
+  displayName: string,
+  avatarPresetId: AvatarPresetId,
+): string {
+  return serializeClientCommand({
+    type: "reconnectHost",
+    roomId,
+    playerId,
+    displayName,
+    avatarPresetId,
+  });
+}
+
 /** Validated JSON line for `joinRoom` — outbound shape matches `@skribbl/shared`. */
 export function serializeJoinRoomCommand(
   roomCode: string,

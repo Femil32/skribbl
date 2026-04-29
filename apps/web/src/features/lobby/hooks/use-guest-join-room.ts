@@ -11,11 +11,13 @@ import {
   messageForProtocolErrorCode,
   protocolParseErrorMessage,
 } from "@/features/lobby/lib/protocol-error-message";
-import { resolveGameWebSocketUrl } from "@/lib/game-ws-url";
+import {
+  transportCloseBeforeHandshakeMessage,
+  transportOpenFailedMessage,
+} from "@/features/lobby/lib/transport-user-messages";
+import type { LobbyConnectionReason, LobbyTransportPhase } from "@/features/lobby/lib/lobby-transport";
+import { missingGameWebSocketUrlUserMessage, resolveGameWebSocketUrl } from "@/lib/game-ws-url";
 import { serializeJoinRoomCommand } from "@/lib/ws-client";
-
-const missingWsUrlMessage =
-  "Real-time play is not configured for this deployment. Set NEXT_PUBLIC_WS_URL to your game server WebSocket URL (for example ws://localhost:3001 when running the game server locally).";
 
 export type GuestJoinLobbyState =
   | { status: "idle" }
@@ -46,12 +48,29 @@ export type UseGuestJoinRoomArgs = {
   avatarPresetId?: AvatarPresetId;
 };
 
+export type UseGuestJoinRoomResult = {
+  state: GuestJoinLobbyState;
+  transport: LobbyTransportPhase;
+  connectionReason: LobbyConnectionReason;
+  transportErrorMessage?: string;
+  awaitingRoomHandshake: boolean;
+};
+
 /**
  * Opens one WebSocket, sends **`joinRoom`** via **`serializeJoinRoomCommand`**, demuxes with
  * **`safeParseServerEvent`**. Keeps the socket open after **`roomJoined`** for lobby roster /
  * match start events (Story 1.6+).
  */
-export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): GuestJoinLobbyState {
+const TERMINAL_PROTOCOL_CODES_AFTER_JOINED = new Set([
+  "BAD_PAYLOAD",
+  "INTERNAL",
+  "JOIN_NOT_ALLOWED",
+  "HOST_SESSION_LOST",
+  "HOST_RECLAIM_DENIED",
+  "ALREADY_CONNECTED",
+]);
+
+export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomResult {
   const {
     connectionAttemptId,
     activeJoinAttempt,
@@ -63,7 +82,14 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): GuestJoinLobbyStat
   const normalized = normalizeRoomCode(roomCodeInput);
 
   const [state, setState] = useState<GuestJoinLobbyState>({ status: "idle" });
+  const [transport, setTransport] = useState<LobbyTransportPhase>("idle");
+  const [connectionReason, setConnectionReason] = useState<LobbyConnectionReason>("first");
+  const [transportErrorMessage, setTransportErrorMessage] = useState<string | undefined>(
+    undefined,
+  );
+
   const reachedJoinedRef = useRef(false);
+  const closedWhileJoinedRef = useRef(false);
 
   useLayoutEffect(() => {
     if (!activeJoinAttempt || !wsUrl || !isValidRoomCodeForJoin(normalized)) {
@@ -76,8 +102,11 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): GuestJoinLobbyStat
     });
   }, [activeJoinAttempt, connectionAttemptId, normalized, wsUrl]);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- WebSocket subscription: transport and join state track open/message/error/close. */
   useEffect(() => {
     if (!activeJoinAttempt) {
+      reachedJoinedRef.current = false;
+      closedWhileJoinedRef.current = false;
       return;
     }
 
@@ -89,16 +118,26 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): GuestJoinLobbyStat
       return;
     }
 
+    reachedJoinedRef.current = false;
+    setTransportErrorMessage(undefined);
+
+    const retryAfterJoinedDrop = closedWhileJoinedRef.current;
+    setConnectionReason(retryAfterJoinedDrop ? "after-drop" : "first");
+    setTransport(retryAfterJoinedDrop ? "reconnecting" : "connecting");
+
     const ws = new WebSocket(wsUrl);
     let closedByCleanup = false;
 
     function fail(message: string) {
       if (!closedByCleanup && !reachedJoinedRef.current) {
+        setTransport("fatal");
+        setTransportErrorMessage(message);
         setState({ status: "error", message });
       }
     }
 
     ws.addEventListener("open", () => {
+      setTransport("live");
       try {
         ws.send(
           serializeJoinRoomCommand(normalized, displayName, avatarPresetId),
@@ -126,6 +165,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): GuestJoinLobbyStat
       switch (parsed.data.type) {
         case "roomJoined":
           reachedJoinedRef.current = true;
+          closedWhileJoinedRef.current = false;
           setState({
             status: "joined",
             roomId: parsed.data.roomId,
@@ -137,6 +177,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): GuestJoinLobbyStat
             avatarPresetId: parsed.data.avatarPresetId,
             players: [],
           });
+          setTransport("live");
           return;
         case "lobbyRoster": {
           const roster = parsed.data;
@@ -165,6 +206,19 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): GuestJoinLobbyStat
         }
         case "error":
           if (!reachedJoinedRef.current) {
+            setTransport("fatal");
+            setTransportErrorMessage(messageForProtocolErrorCode(parsed.data.code));
+            setState({
+              status: "error",
+              message: messageForProtocolErrorCode(parsed.data.code),
+              protocolCode: parsed.data.code,
+            });
+            return;
+          }
+          if (TERMINAL_PROTOCOL_CODES_AFTER_JOINED.has(parsed.data.code)) {
+            reachedJoinedRef.current = false;
+            setTransport("fatal");
+            setTransportErrorMessage(messageForProtocolErrorCode(parsed.data.code));
             setState({
               status: "error",
               message: messageForProtocolErrorCode(parsed.data.code),
@@ -184,13 +238,19 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): GuestJoinLobbyStat
     });
 
     ws.addEventListener("error", () => {
-      fail("Could not connect to the game server. Check your network and try again.");
+      if (reachedJoinedRef.current) return;
+      fail(transportOpenFailedMessage);
     });
 
     ws.addEventListener("close", () => {
       if (closedByCleanup) return;
-      if (reachedJoinedRef.current) return;
-      fail("The connection closed before you joined. Try again.");
+      if (reachedJoinedRef.current) {
+        closedWhileJoinedRef.current = true;
+        setTransport("disconnected");
+        setTransportErrorMessage(undefined);
+        return;
+      }
+      fail(transportCloseBeforeHandshakeMessage);
     });
 
     return () => {
@@ -205,18 +265,45 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): GuestJoinLobbyStat
     displayName,
     avatarPresetId,
   ]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   if (!activeJoinAttempt) {
-    return { status: "idle" };
+    return {
+      state: { status: "idle" },
+      transport: "idle",
+      connectionReason: "first",
+      transportErrorMessage: undefined,
+      awaitingRoomHandshake: false,
+    };
   }
 
   if (!wsUrl) {
-    return { status: "error", message: missingWsUrlMessage };
+    return {
+      state: { status: "error", message: missingGameWebSocketUrlUserMessage() },
+      transport: "blocked",
+      connectionReason: "first",
+      transportErrorMessage: missingGameWebSocketUrlUserMessage(),
+      awaitingRoomHandshake: false,
+    };
   }
+
+  const awaitingRoomHandshake = state.status === "connecting" && transport === "live";
 
   if (state.status === "idle") {
-    return { status: "connecting" };
+    return {
+      state: { status: "connecting" },
+      transport: transport === "idle" ? "connecting" : transport,
+      connectionReason,
+      transportErrorMessage,
+      awaitingRoomHandshake: false,
+    };
   }
 
-  return state;
+  return {
+    state,
+    transport,
+    connectionReason,
+    transportErrorMessage,
+    awaitingRoomHandshake,
+  };
 }

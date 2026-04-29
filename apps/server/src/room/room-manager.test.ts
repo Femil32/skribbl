@@ -75,4 +75,23 @@ describe("RoomManager", () => {
       reason: "ROOM_FULL",
     });
   });
+
+  it("reconnectHost restores canonical host when socket was dropped", () => {
+    const m = new RoomManager(8);
+    const h = stubSocket();
+    const g = stubSocket();
+    const room = m.createRoom(h, player("Hosta"));
+    const createdId = m.getLobbySession(h)!.playerId;
+    expect(room.hostPlayerId).toBe(createdId);
+    m.joinRoom(g, room.code, player("G"));
+
+    m.leaveSocketRoom(h);
+
+    const h2 = stubSocket();
+    const out = m.reconnectHost(h2, room.id, createdId, player("Hosta"));
+    expect(out.ok).toBe(true);
+    if (!out.ok) throw new Error("unexpected");
+    expect(out.room.hostSocket).toBe(h2);
+    expect(m.getLobbySession(h2)?.playerId).toBe(createdId);
+  });
 });

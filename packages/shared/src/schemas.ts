@@ -49,6 +49,17 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
     displayName: z.string(),
     avatarPresetId: avatarPresetIdSchema.optional(),
   }),
+  /**
+   * Host-only: reclaim the same lobby after a transport drop (Story 1.7+).
+   * Requires the canonical `playerId` issued in the original `roomCreated`.
+   */
+  z.object({
+    type: z.literal("reconnectHost"),
+    roomId: z.string(),
+    playerId: z.string(),
+    displayName: z.string(),
+    avatarPresetId: avatarPresetIdSchema.optional(),
+  }),
   /** Host-only: request transition from lobby to match handshake (Story 1.6+). */
   z.object({
     type: z.literal("startMatch"),

@@ -7,11 +7,17 @@ import {
   messageForProtocolErrorCode,
   protocolParseErrorMessage,
 } from "@/features/lobby/lib/protocol-error-message";
-import { resolveGameWebSocketUrl } from "@/lib/game-ws-url";
-import { serializeCreateRoomCommand, serializeStartMatchCommand } from "@/lib/ws-client";
-
-const missingWsUrlMessage =
-  "Real-time play is not configured for this deployment. Set NEXT_PUBLIC_WS_URL to your game server WebSocket URL (for example ws://localhost:3001 when running the game server locally).";
+import type { LobbyConnectionReason, LobbyTransportPhase } from "@/features/lobby/lib/lobby-transport";
+import {
+  transportCloseBeforeHandshakeMessage,
+  transportOpenFailedMessage,
+} from "@/features/lobby/lib/transport-user-messages";
+import { missingGameWebSocketUrlUserMessage, resolveGameWebSocketUrl } from "@/lib/game-ws-url";
+import {
+  serializeCreateRoomCommand,
+  serializeReconnectHostCommand,
+  serializeStartMatchCommand,
+} from "@/lib/ws-client";
 
 export type HostLobbyState =
   | { status: "idle" }
@@ -40,8 +46,30 @@ export type UseHostCreateRoomParams = {
 
 export type UseHostCreateRoomResult = {
   state: HostLobbyState;
+  transport: LobbyTransportPhase;
+  connectionReason: LobbyConnectionReason;
+  /** Blocking/fatal copy for the banner (missing URL, protocol, or transport failure). */
+  transportErrorMessage?: string;
+  /** Socket is open but `roomCreated` not yet received. */
+  awaitingRoomHandshake: boolean;
   /** Authoritative host start — no-op unless lobby state is active. */
   startMatch: () => void;
+};
+
+const TERMINAL_PROTOCOL_CODES_AFTER_LOBBY = new Set([
+  "BAD_PAYLOAD",
+  "INTERNAL",
+  "JOIN_NOT_ALLOWED",
+  "HOST_SESSION_LOST",
+  "HOST_RECLAIM_DENIED",
+  "ALREADY_CONNECTED",
+]);
+
+type HostResumeContext = {
+  roomId: string;
+  playerId: string;
+  displayName: string;
+  avatarPresetId: AvatarPresetId;
 };
 
 export function useHostCreateRoom(
@@ -50,12 +78,26 @@ export function useHostCreateRoom(
   const { shouldConnect, attemptId, displayName, avatarPresetId } = params;
   const wsUrl = resolveGameWebSocketUrl();
   const [state, setState] = useState<HostLobbyState>({ status: "idle" });
+  const [transport, setTransport] = useState<LobbyTransportPhase>("idle");
+  const [connectionReason, setConnectionReason] = useState<LobbyConnectionReason>("first");
+  const [transportErrorMessage, setTransportErrorMessage] = useState<string | undefined>(
+    undefined,
+  );
+  const [awaitingHandshake, setAwaitingHandshake] = useState(false);
+
   const reachedLobbyRef = useRef(false);
   const wsRef = useRef<WebSocket | null>(null);
+  /** Set when the socket closes after the host reached the lobby; drives “reconnecting” copy on retry. */
+  const closedWhileInLobbyRef = useRef(false);
+  /** Latest successful `roomCreated` — used for `reconnectHost` after a transport drop. */
+  const hostResumeContextRef = useRef<HostResumeContext | null>(null);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- WebSocket subscription: transport and lobby state track open/message/error/close. */
   useEffect(() => {
     if (!shouldConnect) {
       reachedLobbyRef.current = false;
+      closedWhileInLobbyRef.current = false;
+      hostResumeContextRef.current = null;
       return;
     }
 
@@ -64,24 +106,47 @@ export function useHostCreateRoom(
     }
 
     reachedLobbyRef.current = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: align UI with subscription start
-    setState({ status: "connecting" });
+    setTransportErrorMessage(undefined);
+
+    const retryAfterLobbyDrop = closedWhileInLobbyRef.current;
+    const resume = retryAfterLobbyDrop ? hostResumeContextRef.current : null;
+    setConnectionReason(retryAfterLobbyDrop ? "after-drop" : "first");
+    setTransport(retryAfterLobbyDrop ? "reconnecting" : "connecting");
+    if (!retryAfterLobbyDrop) {
+      setState({ status: "connecting" });
+    }
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
     let closedByCleanup = false;
 
     function fail(message: string) {
+      setAwaitingHandshake(false);
       if (!closedByCleanup && !reachedLobbyRef.current) {
+        setTransport("fatal");
+        setTransportErrorMessage(message);
         setState({ status: "error", message });
       }
     }
 
     ws.addEventListener("open", () => {
+      setTransport("live");
+      setAwaitingHandshake(true);
       try {
-        ws.send(serializeCreateRoomCommand(displayName, avatarPresetId));
+        if (resume) {
+          ws.send(
+            serializeReconnectHostCommand(
+              resume.roomId,
+              resume.playerId,
+              resume.displayName,
+              resume.avatarPresetId,
+            ),
+          );
+        } else {
+          ws.send(serializeCreateRoomCommand(displayName, avatarPresetId));
+        }
       } catch {
-        fail("Could not send create request. Try again.");
+        fail("Could not send request. Try again.");
       }
     });
 
@@ -103,6 +168,14 @@ export function useHostCreateRoom(
       switch (parsed.data.type) {
         case "roomCreated":
           reachedLobbyRef.current = true;
+          closedWhileInLobbyRef.current = false;
+          setAwaitingHandshake(false);
+          hostResumeContextRef.current = {
+            roomId: parsed.data.roomId,
+            playerId: parsed.data.playerId,
+            displayName: parsed.data.displayName,
+            avatarPresetId: parsed.data.avatarPresetId,
+          };
           setState({
             status: "lobby",
             roomId: parsed.data.roomId,
@@ -114,6 +187,7 @@ export function useHostCreateRoom(
             players: [],
             isStartPending: false,
           });
+          setTransport("live");
           return;
         case "lobbyRoster": {
           const roster = parsed.data;
@@ -143,6 +217,30 @@ export function useHostCreateRoom(
         case "error": {
           const err = parsed.data;
           if (!reachedLobbyRef.current) {
+            setAwaitingHandshake(false);
+            if (
+              err.code === "HOST_SESSION_LOST" ||
+              err.code === "HOST_RECLAIM_DENIED" ||
+              err.code === "ALREADY_CONNECTED"
+            ) {
+              hostResumeContextRef.current = null;
+              closedWhileInLobbyRef.current = false;
+            }
+            setTransport("fatal");
+            setTransportErrorMessage(messageForProtocolErrorCode(err.code));
+            setState({
+              status: "error",
+              message: messageForProtocolErrorCode(err.code),
+            });
+            return;
+          }
+          if (TERMINAL_PROTOCOL_CODES_AFTER_LOBBY.has(err.code)) {
+            setAwaitingHandshake(false);
+            hostResumeContextRef.current = null;
+            closedWhileInLobbyRef.current = false;
+            reachedLobbyRef.current = false;
+            setTransport("fatal");
+            setTransportErrorMessage(messageForProtocolErrorCode(err.code));
             setState({
               status: "error",
               message: messageForProtocolErrorCode(err.code),
@@ -166,13 +264,20 @@ export function useHostCreateRoom(
     });
 
     ws.addEventListener("error", () => {
-      fail("Could not connect to the game server. Check your network and try again.");
+      if (reachedLobbyRef.current) return;
+      fail(transportOpenFailedMessage);
     });
 
     ws.addEventListener("close", () => {
+      setAwaitingHandshake(false);
       if (closedByCleanup) return;
-      if (reachedLobbyRef.current) return;
-      fail("The connection closed before the room was ready. Try again.");
+      if (reachedLobbyRef.current) {
+        closedWhileInLobbyRef.current = true;
+        setTransport("disconnected");
+        setTransportErrorMessage(undefined);
+        return;
+      }
+      fail(transportCloseBeforeHandshakeMessage);
     });
 
     return () => {
@@ -181,6 +286,7 @@ export function useHostCreateRoom(
       ws.close();
     };
   }, [wsUrl, shouldConnect, attemptId, displayName, avatarPresetId]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const startMatch = useCallback(() => {
     const w = wsRef.current;
@@ -200,16 +306,44 @@ export function useHostCreateRoom(
   }, []);
 
   if (!shouldConnect) {
-    return { state: { status: "idle" }, startMatch };
+    return {
+      state: { status: "idle" },
+      transport: "idle",
+      connectionReason: "first",
+      transportErrorMessage: undefined,
+      awaitingRoomHandshake: false,
+      startMatch,
+    };
   }
 
   if (!wsUrl) {
-    return { state: { status: "error", message: missingWsUrlMessage }, startMatch };
+    return {
+      state: { status: "error", message: missingGameWebSocketUrlUserMessage() },
+      transport: "blocked",
+      connectionReason: "first",
+      transportErrorMessage: missingGameWebSocketUrlUserMessage(),
+      awaitingRoomHandshake: false,
+      startMatch,
+    };
   }
 
   if (state.status === "idle") {
-    return { state: { status: "connecting" }, startMatch };
+    return {
+      state: { status: "connecting" },
+      transport: transport === "idle" ? "connecting" : transport,
+      connectionReason,
+      transportErrorMessage,
+      awaitingRoomHandshake: false,
+      startMatch,
+    };
   }
 
-  return { state, startMatch };
+  return {
+    state,
+    transport,
+    connectionReason,
+    transportErrorMessage,
+    awaitingRoomHandshake: awaitingHandshake,
+    startMatch,
+  };
 }

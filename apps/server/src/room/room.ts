@@ -7,15 +7,18 @@ import type { RoomPhase } from "@skribbl/shared";
 export class Room {
   readonly id: string;
   readonly code: string;
+  /** Canonical host player id from the first `roomCreated` (Story 1.7 reconnect). */
+  readonly hostPlayerId: string;
   phase: RoomPhase = "lobby";
   readonly sockets = new Set<WebSocket>();
   hostSocket: WebSocket | null = null;
   readonly maxPlayers: number;
 
-  constructor(opts: { id: string; code: string; maxPlayers: number }) {
+  constructor(opts: { id: string; code: string; maxPlayers: number; hostPlayerId: string }) {
     this.id = opts.id;
     this.code = opts.code;
     this.maxPlayers = opts.maxPlayers;
+    this.hostPlayerId = opts.hostPlayerId;
   }
 
   get playerCount(): number {

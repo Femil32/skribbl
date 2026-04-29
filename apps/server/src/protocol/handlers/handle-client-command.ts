@@ -184,6 +184,67 @@ export function handleClientCommand(
       roomManager.broadcastLobbyRoster(room);
       return;
     }
+    case "reconnectHost": {
+      const identity = parseLobbyPlayer(cmd);
+      if (!identity.ok) {
+        sendProtocolError(
+          ws,
+          identity.code,
+          identity.code === "BAD_NICKNAME"
+            ? "Pick a short display name."
+            : identity.code === "NICKNAME_TOO_LONG"
+              ? "That name is too long."
+              : "Pick one of the avatar options.",
+          roomManager,
+        );
+        return;
+      }
+      const outcome = roomManager.reconnectHost(ws, cmd.roomId, cmd.playerId, identity);
+      if (!outcome.ok) {
+        const errorCode =
+          outcome.reason === "UNKNOWN_ROOM"
+            ? "HOST_SESSION_LOST"
+            : outcome.reason === "NOT_HOST"
+              ? "HOST_RECLAIM_DENIED"
+              : outcome.reason;
+        sendProtocolError(
+          ws,
+          errorCode,
+          outcome.reason === "UNKNOWN_ROOM"
+            ? "This lobby is no longer on the server. Create a new room."
+            : outcome.reason === "JOIN_NOT_ALLOWED"
+              ? "Game already started"
+              : outcome.reason === "NOT_HOST"
+                ? "Could not reclaim the host session. Create a new room."
+                : outcome.reason === "ROOM_FULL"
+                  ? "Room is full"
+                  : "This host session is already connected.",
+          roomManager,
+        );
+        return;
+      }
+      const { room } = outcome;
+      const session = roomManager.getLobbySession(ws);
+      if (!session) {
+        sendProtocolError(ws, "INTERNAL", "Could not create session", roomManager);
+        return;
+      }
+      sendServerEvent(
+        ws,
+        {
+          type: "roomCreated",
+          roomId: room.id,
+          roomCode: room.code,
+          phase: room.phase,
+          playerId: session.playerId,
+          displayName: session.displayName,
+          avatarPresetId: session.avatarPresetId,
+        },
+        roomManager,
+      );
+      roomManager.broadcastLobbyRoster(room);
+      return;
+    }
     case "startMatch": {
       const outcome = roomManager.startMatch(ws);
       if (!outcome.ok) {
