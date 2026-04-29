@@ -153,7 +153,10 @@ export class RoomManager {
   ): void {
     room.roundSecretWord = word;
     room.phase = "drawing";
-    this.broadcastMatchPhase(room, Date.now() + resolveRoundMs(), drawerId, roundIndex);
+    const roundMs = resolveRoundMs();
+    const drawingEndsAt = Date.now() + roundMs;
+    this.broadcastMatchPhase(room, drawingEndsAt, drawerId, roundIndex);
+    /** Story 2.4: timer expiry → `roundResult`. Epic 4: clear this timeout on correct guess and transition early (see `clearMatchTimers` / guess adjudication). */
     const drawingEnd = setTimeout(() => {
       if (!this.roomsById.get(room.id) || room.phase !== "drawing") return;
       room.phase = "roundResult";
@@ -165,7 +168,7 @@ export class RoomManager {
         );
         timeouts.push(next);
       }
-    }, resolveRoundMs());
+    }, roundMs);
     timeouts.push(drawingEnd);
   }
 
@@ -205,13 +208,14 @@ export class RoomManager {
       room.roundWordOptions = this.wordBank.sampleThree();
       room.roundSecretWord = null;
       room.phase = "choosingWord";
-      const choiceDeadline = Date.now() + resolveWordChoiceMs();
+      const wordChoiceMs = resolveWordChoiceMs();
+      const choiceDeadline = Date.now() + wordChoiceMs;
       this.broadcastMatchPhase(room, choiceDeadline, drawerId, roundIndex);
       this.emitWordChoiceOffer(room, drawerId, room.roundWordOptions, roundIndex, choiceDeadline);
 
       const wordChoiceTimer = setTimeout(
         () => this.onWordChoiceDeadline(room, timeouts, drawerId, roundIndex),
-        resolveWordChoiceMs(),
+        wordChoiceMs,
       );
       room.wordChoiceTimerHandle = wordChoiceTimer;
       timeouts.push(wordChoiceTimer);

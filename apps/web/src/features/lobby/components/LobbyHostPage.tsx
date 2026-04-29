@@ -378,9 +378,11 @@ export function LobbyHostPage() {
             ) : null}
             {isMatchFlowPhase(state.phase) ? (
               <PhaseBar
+                phase={state.phase}
                 players={state.players}
                 drawerPlayerId={state.drawerPlayerId}
                 matchRoundIndex={state.matchRoundIndex}
+                phaseDeadlineMs={state.phaseDeadlineMs}
               />
             ) : null}
             {state.phase === "choosingWord" &&
@@ -391,6 +393,12 @@ export function LobbyHostPage() {
                 errorMessage={state.wordChoicePickError ?? null}
                 onPick={chooseWord}
                 disabled={transport !== "live"}
+                phaseDeadlineMs={state.phaseDeadlineMs}
+                deadlineResetKey={
+                  state.matchRoundIndex !== undefined
+                    ? `${state.roomId}-${String(state.matchRoundIndex)}`
+                    : state.roomId
+                }
               />
             ) : null}
             {isMatchFlowPhase(state.phase) ? (

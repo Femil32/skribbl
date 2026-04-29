@@ -36,6 +36,8 @@ export type HostLobbyState =
       /** Server match meta (Story 2.2+). */
       drawerPlayerId?: string;
       matchRoundIndex?: number;
+      /** Unix ms when current timed phase ends (from **`matchPhase`**, Story 2.4). Cleared when absent. */
+      phaseDeadlineMs?: number;
       /** Offer payload — drawer only; cleared when phase leaves `choosingWord`. */
       wordChoiceOffer?: {
         words: readonly [string, string, string];
@@ -242,6 +244,8 @@ export function useHostCreateRoom(
                 mp.matchRoundIndex !== undefined
                   ? mp.matchRoundIndex
                   : prev.matchRoundIndex,
+              phaseDeadlineMs:
+                mp.phaseDeadlineMs !== undefined ? mp.phaseDeadlineMs : undefined,
               wordChoiceOffer,
               wordChoicePickError,
             };

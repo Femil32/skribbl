@@ -286,6 +286,14 @@ describe("handleClientCommand + RoomManager", () => {
       expect(matchPhases(a.sent).some((p) => p.phase === "choosingWord")).toBe(true);
       vi.advanceTimersByTime(resolveWordChoiceMs());
       expect(matchPhases(a.sent).some((p) => p.phase === "drawing")).toBe(true);
+
+      const afterChoose = Date.now();
+      const drawingEvents = matchPhases(a.sent).filter((p) => p.phase === "drawing");
+      const latestDrawing = drawingEvents[drawingEvents.length - 1]!;
+      expect(latestDrawing.phaseDeadlineMs).toBeDefined();
+      expect(latestDrawing.phaseDeadlineMs!).toBeGreaterThan(afterChoose);
+      expect(latestDrawing.phaseDeadlineMs! - afterChoose).toBeLessThanOrEqual(resolveRoundMs());
+
       vi.advanceTimersByTime(resolveRoundMs());
       expect(matchPhases(a.sent).some((p) => p.phase === "roundResult")).toBe(true);
 

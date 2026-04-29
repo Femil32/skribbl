@@ -232,9 +232,11 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
               </p>
               {isMatchFlowPhase(guestState.phase) ? (
                 <PhaseBar
+                  phase={guestState.phase}
                   players={guestState.players}
                   drawerPlayerId={guestState.drawerPlayerId}
                   matchRoundIndex={guestState.matchRoundIndex}
+                  phaseDeadlineMs={guestState.phaseDeadlineMs}
                 />
               ) : null}
               {guestState.phase === "choosingWord" &&
@@ -245,6 +247,12 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                   errorMessage={guestState.wordChoicePickError ?? null}
                   onPick={guestChooseWord}
                   disabled={guestTransport !== "live"}
+                  phaseDeadlineMs={guestState.phaseDeadlineMs}
+                  deadlineResetKey={
+                    guestState.matchRoundIndex !== undefined
+                      ? `${guestState.roomId}-${String(guestState.matchRoundIndex)}`
+                      : guestState.roomId
+                  }
                 />
               ) : null}
               {isMatchFlowPhase(guestState.phase) ? (

@@ -1,11 +1,17 @@
 "use client";
 
+import { PhaseCountdownChip } from "@/features/match/components/PhaseCountdownChip";
+
 export type WordChoicePanelProps = {
   words: readonly [string, string, string] | null;
   isLoading: boolean;
   errorMessage: string | null;
   onPick: (index: 0 | 1 | 2) => void;
   disabled?: boolean;
+  /** Server `matchPhase.phaseDeadlineMs` — single source of truth vs offer-only timestamps (Story 2.4). */
+  phaseDeadlineMs?: number;
+  /** Join with `phaseDeadlineMs` so the chip resets per round/word window. */
+  deadlineResetKey?: string;
 };
 
 /**
@@ -17,14 +23,34 @@ export function WordChoicePanel({
   errorMessage,
   onPick,
   disabled,
+  phaseDeadlineMs,
+  deadlineResetKey,
 }: WordChoicePanelProps) {
+  const showDeadline =
+    phaseDeadlineMs !== undefined && deadlineResetKey !== undefined;
+
   return (
     <section
       className="rounded-box border border-primary/30 bg-base-200/80 px-4 py-4 shadow-sm"
       data-testid="word-choice-panel"
       aria-label="Choose a word to draw"
     >
-      <h2 className="text-sm font-semibold text-base-content mb-3">Pick a word to draw</h2>
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <h2 className="text-sm font-semibold text-base-content">Pick a word to draw</h2>
+        {showDeadline ? (
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium uppercase tracking-wide text-base-content/65">
+              Time left
+            </span>
+            <PhaseCountdownChip
+              key={`wcp-${deadlineResetKey}-${String(phaseDeadlineMs)}`}
+              resetKey={`${deadlineResetKey}-${String(phaseDeadlineMs)}`}
+              deadlineMs={phaseDeadlineMs}
+              data-testid="word-choice-timer"
+            />
+          </div>
+        ) : null}
+      </div>
       {isLoading && !words ? (
         <div className="flex items-center gap-2 text-sm text-base-content/70">
           <span className="loading loading-spinner loading-sm text-primary" />

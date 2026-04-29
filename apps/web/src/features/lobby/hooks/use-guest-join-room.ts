@@ -34,6 +34,8 @@ export type GuestJoinLobbyState =
       players: LobbyRosterPlayer[];
       drawerPlayerId?: string;
       matchRoundIndex?: number;
+      /** Unix ms when current timed phase ends (**`matchPhase`**, Story 2.4). Cleared when absent. */
+      phaseDeadlineMs?: number;
       wordChoiceOffer?: {
         words: readonly [string, string, string];
         phaseDeadlineMs: number;
@@ -231,6 +233,8 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
                 mp.matchRoundIndex !== undefined
                   ? mp.matchRoundIndex
                   : prev.matchRoundIndex,
+              phaseDeadlineMs:
+                mp.phaseDeadlineMs !== undefined ? mp.phaseDeadlineMs : undefined,
               wordChoiceOffer,
               wordChoicePickError,
             };

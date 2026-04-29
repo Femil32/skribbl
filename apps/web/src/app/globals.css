@@ -11,12 +11,20 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  /* Story 2.4 — countdown urgency (cyan family + warning/red stops; aligns with UX-DR5) */
+  --color-timer-healthy: oklch(0.72 0.12 228);
+  --color-timer-urgent: oklch(0.78 0.16 78);
+  --color-timer-critical: oklch(0.63 0.22 27);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+    /* Brighter timer stops for contrast on dark surfaces (2.4 review) */
+    --color-timer-healthy: oklch(0.78 0.11 228);
+    --color-timer-urgent: oklch(0.84 0.14 78);
+    --color-timer-critical: oklch(0.72 0.2 27);
   }
 }
 
