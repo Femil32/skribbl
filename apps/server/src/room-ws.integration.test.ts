@@ -297,11 +297,103 @@ describe("handleClientCommand + RoomManager", () => {
       vi.advanceTimersByTime(resolveRoundMs());
       expect(matchPhases(a.sent).some((p) => p.phase === "roundResult")).toBe(true);
 
+      vi.advanceTimersByTime(resolveInterRoundGapMs());
+      const endedEv = matchPhases(a.sent).filter((p) => p.phase === "matchEnded");
+      expect(endedEv.length).toBeGreaterThanOrEqual(1);
+      const lastEnded = endedEv[endedEv.length - 1]!;
+      expect(lastEnded.phaseDeadlineMs).toBeUndefined();
+      expect(lastEnded.matchRoundIndex).toBe(0);
+      const rosterAfterEnd = lastLobbyRoster(a.sent);
+      expect(rosterAfterEnd?.type).toBe("lobbyRoster");
+      if (rosterAfterEnd?.type === "lobbyRoster") {
+        expect(rosterAfterEnd.players.length).toBe(2);
+        for (const p of rosterAfterEnd.players) expect(typeof p.score).toBe("number");
+      }
+
       const choosing = matchPhases(a.sent).find((p) => p.phase === "choosingWord");
       const drawing = matchPhases(a.sent).find((p) => p.phase === "drawing");
       expect(typeof choosing?.phaseDeadlineMs).toBe("number");
       expect(typeof drawing?.phaseDeadlineMs).toBe("number");
       expect(choosing!.phaseDeadlineMs!).toBeLessThan(drawing!.phaseDeadlineMs!);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
+
+  it("returnToLobby: host resets to lobby with zero scores after matchEnded", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.useFakeTimers();
+    try {
+      const rm = new RoomManager(8, integrationWordBank());
+      const a = captureWs();
+      const b = captureWs();
+
+      handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(a.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        b.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+      handleClientCommand(a.ws, { type: "startMatch" }, rm);
+
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+      vi.advanceTimersByTime(resolveWordChoiceMs());
+      vi.advanceTimersByTime(resolveRoundMs());
+      vi.advanceTimersByTime(resolveInterRoundGapMs());
+
+      handleClientCommand(a.ws, { type: "returnToLobby" }, rm);
+
+      function matchPhases(sent: string[]) {
+        return sent
+          .map((line) => parseServerEvent(JSON.parse(line)))
+          .filter((e): e is Extract<typeof e, { type: "matchPhase" }> => e.type === "matchPhase");
+      }
+      expect(matchPhases(a.sent).some((p) => p.phase === "lobby")).toBe(true);
+      expect(matchPhases(b.sent).some((p) => p.phase === "lobby")).toBe(true);
+      const roster = lastLobbyRoster(a.sent);
+      if (roster?.type === "lobbyRoster") {
+        expect(roster.players.every((p) => p.score === 0)).toBe(true);
+      }
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
+
+  it("returnToLobby: guest gets NOT_HOST", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.useFakeTimers();
+    try {
+      const rm = new RoomManager(8, integrationWordBank());
+      const a = captureWs();
+      const b = captureWs();
+
+      handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(a.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        b.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+      handleClientCommand(a.ws, { type: "startMatch" }, rm);
+
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+      vi.advanceTimersByTime(resolveWordChoiceMs());
+      vi.advanceTimersByTime(resolveRoundMs());
+      vi.advanceTimersByTime(resolveInterRoundGapMs());
+
+      handleClientCommand(b.ws, { type: "returnToLobby" }, rm);
+      const errEv = b.sent
+        .map((line) => parseServerEvent(JSON.parse(line)))
+        .find((e) => e.type === "error");
+      expect(errEv?.type).toBe("error");
+      if (errEv?.type === "error") expect(errEv.code).toBe("NOT_HOST");
     } finally {
       vi.unstubAllEnvs();
       vi.useRealTimers();

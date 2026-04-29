@@ -7,6 +7,7 @@ import {
   avatarPresets,
   countGraphemes,
   isMatchFlowPhase,
+  isRosterScoreVisiblePhase,
   sanitizeDisplayName,
 } from "@skribbl/shared";
 import Link from "next/link";
@@ -15,6 +16,7 @@ import { useHostCreateRoom } from "@/features/lobby/hooks/use-host-create-room";
 import { LobbyConnectionBanner } from "@/features/lobby/components/LobbyConnectionBanner";
 import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster";
 import { PhaseBar } from "@/features/match/components/PhaseBar";
+import { ScoreboardSummary } from "@/features/match/components/ScoreboardSummary";
 import { WordChoicePanel } from "@/features/match/components/WordChoicePanel";
 import {
   buildRoomInviteUrl,
@@ -82,6 +84,7 @@ export function LobbyHostPage() {
     awaitingRoomHandshake,
     startMatch,
     chooseWord,
+    returnToLobby,
   } = useHostCreateRoom({
     shouldConnect,
     attemptId,
@@ -335,7 +338,7 @@ export function LobbyHostPage() {
             <LobbyPlayerRoster
               players={state.players}
               localPlayerId={state.playerId}
-              showScores={isMatchFlowPhase(state.phase)}
+              showScores={isRosterScoreVisiblePhase(state.phase)}
             />
           </div>
 
@@ -377,7 +380,7 @@ export function LobbyHostPage() {
                 Need at least two players in the room to start.
               </p>
             ) : null}
-            {isMatchFlowPhase(state.phase) ? (
+            {isMatchFlowPhase(state.phase) || state.phase === "matchEnded" ? (
               <PhaseBar
                 phase={state.phase}
                 players={state.players}
@@ -385,6 +388,15 @@ export function LobbyHostPage() {
                 drawerPlayerId={state.drawerPlayerId}
                 matchRoundIndex={state.matchRoundIndex}
                 phaseDeadlineMs={state.phaseDeadlineMs}
+              />
+            ) : null}
+            {state.phase === "matchEnded" ? (
+              <ScoreboardSummary
+                players={state.players}
+                localPlayerId={state.playerId}
+                isHost
+                onPlayAgain={returnToLobby}
+                playAgainDisabled={transport !== "live"}
               />
             ) : null}
             {state.phase === "choosingWord" &&
@@ -407,6 +419,10 @@ export function LobbyHostPage() {
               <div className="alert alert-info shadow-sm">
                 Match in progress. Full gameplay shell arrives in Epic 3.
               </div>
+            ) : state.phase === "matchEnded" ? (
+              <p className="text-sm text-center text-base-content/70">
+                Final scores are above. Play again resets everyone to zero.
+              </p>
             ) : null}
           </div>
 

@@ -4,6 +4,7 @@ export {
   roomPhaseSchema,
   lobbyRosterPlayerSchema,
   isMatchFlowPhase,
+  isRosterScoreVisiblePhase,
   safeParseClientCommand,
   safeParseServerEvent,
   parseClientCommand,

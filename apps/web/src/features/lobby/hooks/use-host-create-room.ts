@@ -18,6 +18,7 @@ import {
   serializeReconnectHostCommand,
   serializeStartMatchCommand,
   serializeChooseWordCommand,
+  serializeReturnToLobbyCommand,
 } from "@/lib/ws-client";
 
 export type HostLobbyState =
@@ -69,6 +70,8 @@ export type UseHostCreateRoomResult = {
   startMatch: () => void;
   /** Send drawer word pick (no-op unless lobby socket open). */
   chooseWord: (choiceIndex: 0 | 1 | 2) => void;
+  /** Host-only: return from `matchEnded` to lobby (Story 2.7). */
+  returnToLobby: () => void;
 };
 
 const TERMINAL_PROTOCOL_CODES_AFTER_LOBBY = new Set([
@@ -236,18 +239,29 @@ export function useHostCreateRoom(
               wordChoiceOffer = null;
               wordChoicePickError = null;
             }
+            const drawerPlayerId =
+              mp.phase === "matchEnded" || mp.phase === "lobby"
+                ? undefined
+                : mp.drawerPlayerId !== undefined
+                  ? mp.drawerPlayerId
+                  : prev.drawerPlayerId;
+            const matchRoundIndex =
+              mp.phase === "lobby"
+                ? undefined
+                : mp.matchRoundIndex !== undefined
+                  ? mp.matchRoundIndex
+                  : prev.matchRoundIndex;
+            const phaseDeadlineMs =
+              mp.phaseDeadlineMs !== undefined ? mp.phaseDeadlineMs : undefined;
             return {
               ...prev,
               phase: mp.phase,
-              drawerPlayerId: mp.drawerPlayerId ?? prev.drawerPlayerId,
-              matchRoundIndex:
-                mp.matchRoundIndex !== undefined
-                  ? mp.matchRoundIndex
-                  : prev.matchRoundIndex,
-              phaseDeadlineMs:
-                mp.phaseDeadlineMs !== undefined ? mp.phaseDeadlineMs : undefined,
+              drawerPlayerId,
+              matchRoundIndex,
+              phaseDeadlineMs,
               wordChoiceOffer,
               wordChoicePickError,
+              ...(mp.phase === "lobby" ? { isStartPending: false } : {}),
             };
           });
           return;
@@ -415,6 +429,16 @@ export function useHostCreateRoom(
     }
   }, []);
 
+  const returnToLobby = useCallback(() => {
+    const w = wsRef.current;
+    if (!w || w.readyState !== WebSocket.OPEN) return;
+    try {
+      w.send(serializeReturnToLobbyCommand());
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   if (!shouldConnect) {
     return {
       state: { status: "idle" },
@@ -424,6 +448,7 @@ export function useHostCreateRoom(
       awaitingRoomHandshake: false,
       startMatch,
       chooseWord,
+      returnToLobby,
     };
   }
 
@@ -436,6 +461,7 @@ export function useHostCreateRoom(
       awaitingRoomHandshake: false,
       startMatch,
       chooseWord,
+      returnToLobby,
     };
   }
 
@@ -448,6 +474,7 @@ export function useHostCreateRoom(
       awaitingRoomHandshake: false,
       startMatch,
       chooseWord,
+      returnToLobby,
     };
   }
 
@@ -459,5 +486,6 @@ export function useHostCreateRoom(
     awaitingRoomHandshake: awaitingHandshake,
     startMatch,
     chooseWord,
+    returnToLobby,
   };
 }

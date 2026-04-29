@@ -2,6 +2,7 @@
 
 import { isMatchFlowPhase, type LobbyRosterPlayer, type RoomPhase } from "@skribbl/shared";
 import { PhaseCountdownChip } from "@/features/match/components/PhaseCountdownChip";
+import { sortPlayersByFinalScore } from "@/features/match/lib/sort-players-by-final-score";
 
 export type PhaseBarProps = {
   phase: RoomPhase;
@@ -27,12 +28,7 @@ function resolveLeaderChip(players: LobbyRosterPlayer[]): {
   score: number;
 } | null {
   if (players.length === 0) return null;
-  const sorted = [...players].sort((a, b) => {
-    const ds = (b.score ?? 0) - (a.score ?? 0);
-    if (ds !== 0) return ds;
-    return a.playerId.localeCompare(b.playerId);
-  });
-  const top = sorted[0]!;
+  const top = sortPlayersByFinalScore(players)[0]!;
   return { displayName: top.displayName, score: top.score ?? 0 };
 }
 
@@ -51,6 +47,16 @@ export function PhaseBar({
   matchRoundIndex,
   phaseDeadlineMs,
 }: PhaseBarProps) {
+  if (phase === "matchEnded") {
+    return (
+      <div className="rounded-box border border-base-300 bg-base-200 px-4 py-3 shadow-sm">
+        <div role="status" aria-live="polite" className="text-sm font-medium text-base-content/80">
+          Match complete
+        </div>
+      </div>
+    );
+  }
+
   const drawerName = resolveDrawerName(players, drawerPlayerId);
   const showTimer =
     phaseDeadlineMs !== undefined && phaseShowsCountdownTimer(phase);

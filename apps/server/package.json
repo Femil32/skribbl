@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "node --import tsx src/index.ts",
+    "dev": "WORDS_PATH=../../data/words.json tsx watch src/index.ts",
+    "start": "WORDS_PATH=../../data/words.json node --import tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

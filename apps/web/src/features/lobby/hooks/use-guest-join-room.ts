@@ -225,16 +225,26 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
               wordChoiceOffer = null;
               wordChoicePickError = null;
             }
+            const drawerPlayerId =
+              mp.phase === "matchEnded" || mp.phase === "lobby"
+                ? undefined
+                : mp.drawerPlayerId !== undefined
+                  ? mp.drawerPlayerId
+                  : prev.drawerPlayerId;
+            const matchRoundIndex =
+              mp.phase === "lobby"
+                ? undefined
+                : mp.matchRoundIndex !== undefined
+                  ? mp.matchRoundIndex
+                  : prev.matchRoundIndex;
+            const phaseDeadlineMs =
+              mp.phaseDeadlineMs !== undefined ? mp.phaseDeadlineMs : undefined;
             return {
               ...prev,
               phase: mp.phase,
-              drawerPlayerId: mp.drawerPlayerId ?? prev.drawerPlayerId,
-              matchRoundIndex:
-                mp.matchRoundIndex !== undefined
-                  ? mp.matchRoundIndex
-                  : prev.matchRoundIndex,
-              phaseDeadlineMs:
-                mp.phaseDeadlineMs !== undefined ? mp.phaseDeadlineMs : undefined,
+              drawerPlayerId,
+              matchRoundIndex,
+              phaseDeadlineMs,
               wordChoiceOffer,
               wordChoicePickError,
             };

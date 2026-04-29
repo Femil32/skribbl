@@ -66,6 +66,11 @@ export function serializeChooseWordCommand(choiceIndex: 0 | 1 | 2): string {
   return serializeClientCommand({ type: "chooseWord", choiceIndex });
 }
 
+/** Host-only: leave post-match scoreboard and reset room to lobby (Story 2.7). */
+export function serializeReturnToLobbyCommand(): string {
+  return serializeClientCommand({ type: "returnToLobby" });
+}
+
 /**
  * Optional dev helper: open a WebSocket and send one ping when NEXT_PUBLIC debug WS URL is set.
  * Gated so production bundles do not require a live game server.

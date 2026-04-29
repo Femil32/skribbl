@@ -105,26 +105,17 @@ export class RoomManager {
   private broadcastMatchPhase(
     room: Room,
     phaseDeadlineMs: number | undefined,
-    drawerPlayerId: string,
-    matchRoundIndex: number,
+    drawerPlayerId: string | undefined,
+    matchRoundIndex: number | undefined,
   ): void {
-    const payload: ServerEvent =
-      phaseDeadlineMs === undefined
-        ? {
-            type: "matchPhase",
-            roomId: room.id,
-            phase: room.phase,
-            drawerPlayerId,
-            matchRoundIndex,
-          }
-        : {
-            type: "matchPhase",
-            roomId: room.id,
-            phase: room.phase,
-            phaseDeadlineMs,
-            drawerPlayerId,
-            matchRoundIndex,
-          };
+    const payload: ServerEvent = {
+      type: "matchPhase",
+      roomId: room.id,
+      phase: room.phase,
+      ...(phaseDeadlineMs !== undefined ? { phaseDeadlineMs } : {}),
+      ...(drawerPlayerId !== undefined ? { drawerPlayerId } : {}),
+      ...(matchRoundIndex !== undefined ? { matchRoundIndex } : {}),
+    };
     for (const sock of room.sockets) this.sendEvent(sock, payload);
   }
 
@@ -175,6 +166,13 @@ export class RoomManager {
           resolveInterRoundGapMs(),
         );
         timeouts.push(next);
+      } else {
+        /** Story 2.7: same inter-round gap, then terminal `matchEnded` + fresh roster. */
+        const endMatch = setTimeout(() => {
+          if (!this.roomsById.get(room.id) || room.phase !== "roundResult") return;
+          this.enterMatchEnded(room, roundIndex);
+        }, resolveInterRoundGapMs());
+        timeouts.push(endMatch);
       }
     }, roundMs);
     timeouts.push(drawingEnd);
@@ -193,6 +191,49 @@ export class RoomManager {
     if (!opts) return;
     if (room.roundSecretWord !== null) return;
     this.lockWordAndBeginDrawing(room, timeouts, drawerId, roundIndex, opts[0]!);
+  }
+
+  private enterMatchEnded(room: Room, lastRoundIndex: number): void {
+    room.phase = "matchEnded";
+    room.roundWordOptions = null;
+    room.roundSecretWord = null;
+    if (room.wordChoiceTimerHandle) {
+      clearTimeout(room.wordChoiceTimerHandle);
+      room.wordChoiceTimerHandle = null;
+    }
+    this.broadcastMatchPhase(room, undefined, undefined, lastRoundIndex);
+    this.broadcastLobbyRoster(room);
+  }
+
+  /**
+   * Host-only: rematch in the same room (Story 2.7). Clears match timers and per-match state;
+   * scores reset to zero for current roster.
+   */
+  returnToLobby(actor: WebSocket): { ok: true } | { ok: false; code: string } {
+    const room = this.getRoomForSocket(actor);
+    if (!room) return { ok: false, code: "INTERNAL" };
+    if (room.hostSocket !== actor) return { ok: false, code: "NOT_HOST" };
+    if (room.phase !== "matchEnded") return { ok: false, code: "WRONG_PHASE" };
+
+    this.clearMatchTimers(room.id);
+    room.phase = "lobby";
+    room.matchPlayerOrder = null;
+    room.currentDrawerPlayerId = null;
+    room.matchRoundIndex = 0;
+    room.roundWordOptions = null;
+    room.roundSecretWord = null;
+    room.drawingPhaseStartedAtMs = null;
+    room.drawingPhaseAwardedGuesserIds = null;
+
+    const roster = this.buildLobbyRosterPlayers(room);
+    room.scoresByPlayerId = {};
+    for (const p of roster) {
+      room.scoresByPlayerId[p.playerId] = 0;
+    }
+
+    this.broadcastMatchPhase(room, undefined, undefined, undefined);
+    this.broadcastLobbyRoster(room);
+    return { ok: true };
   }
 
   /** Chain entry: first round after `matchStarting`, or later rounds after `roundResult` gap. */

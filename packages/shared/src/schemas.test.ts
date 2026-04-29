@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   clientCommandSchema,
   isMatchFlowPhase,
+  isRosterScoreVisiblePhase,
   lobbyRosterPlayerSchema,
   safeParseServerEvent,
   serializeClientCommand,
@@ -52,6 +53,12 @@ describe("clientCommandSchema", () => {
     const result = clientCommandSchema.safeParse({ type: "chooseWord", choiceIndex: 1 });
     expect(result.success).toBe(true);
     if (result.success) expect(result.data).toEqual({ type: "chooseWord", choiceIndex: 1 });
+  });
+
+  it("accepts returnToLobby", () => {
+    const result = clientCommandSchema.safeParse({ type: "returnToLobby" });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual({ type: "returnToLobby" });
   });
 
   it("rejects chooseWord index out of range", () => {
@@ -122,6 +129,16 @@ describe("serverEventSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts matchPhase with matchEnded", () => {
+    const result = serverEventSchema.safeParse({
+      type: "matchPhase",
+      roomId: "550e8400-e29b-41d4-a716-446655440000",
+      phase: "matchEnded",
+      matchRoundIndex: 0,
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("accepts wordChoiceOffer", () => {
     const result = serverEventSchema.safeParse({
       type: "wordChoiceOffer",
@@ -139,9 +156,24 @@ describe("isMatchFlowPhase", () => {
     expect(isMatchFlowPhase("lobby")).toBe(false);
   });
 
+  it("is false for matchEnded (post-match shell, not active round flow)", () => {
+    expect(isMatchFlowPhase("matchEnded")).toBe(false);
+  });
+
   it("is true for match phases", () => {
     expect(isMatchFlowPhase("choosingWord")).toBe(true);
     expect(isMatchFlowPhase("drawing")).toBe(true);
+  });
+});
+
+describe("isRosterScoreVisiblePhase", () => {
+  it("is true for match flow and matchEnded", () => {
+    expect(isRosterScoreVisiblePhase("drawing")).toBe(true);
+    expect(isRosterScoreVisiblePhase("matchEnded")).toBe(true);
+  });
+
+  it("is false for pre-match lobby", () => {
+    expect(isRosterScoreVisiblePhase("lobby")).toBe(false);
   });
 });
 
@@ -167,6 +199,12 @@ describe("serializeClientCommand", () => {
     expect(JSON.parse(line)).toEqual({ type: "startMatch" });
     const parsed = clientCommandSchema.safeParse(JSON.parse(line));
     expect(parsed.success).toBe(true);
+  });
+
+  it("round-trips returnToLobby", () => {
+    const line = serializeClientCommand({ type: "returnToLobby" });
+    expect(JSON.parse(line)).toEqual({ type: "returnToLobby" });
+    expect(clientCommandSchema.safeParse(JSON.parse(line)).success).toBe(true);
   });
 
   it("round-trips reconnectHost", () => {

@@ -1,5 +1,5 @@
 # generated: 2026-04-29T12:00:00Z
-# last_updated: 2026-04-29 (2-6 → done)
+# last_updated: 2026-04-29 (2-7 → review)
 # project: skribbl
 # project_key: NOKEY
 # tracking_system: file-system
@@ -36,7 +36,7 @@
 
 generated: '2026-04-29T00:00:00Z'
 last_updated: '2026-04-29'
-# Epic 2 in-progress — 2-6 done
+# Epic 2 in-progress — 2-7 review
 project: skribbl
 project_key: NOKEY
 tracking_system: file-system
@@ -60,7 +60,7 @@ development_status:
   2-4-drawing-phase-countdown-timer-driven-round-end: done
   2-5-progressive-letter-hints-cadence: backlog
   2-6-score-rules-running-totals: done
-  2-7-match-end-scoreboardsummary: backlog
+  2-7-match-end-scoreboardsummary: review
   epic-2-retrospective: optional
 
   epic-3: backlog

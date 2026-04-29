@@ -17,6 +17,8 @@ export const roomPhaseSchema = z.enum([
   "choosingWord",
   "drawing",
   "roundResult",
+  /** Terminal phase after the last scheduled round (FR11); roster carries final totals. */
+  "matchEnded",
 ]);
 export type RoomPhase = z.infer<typeof roomPhaseSchema>;
 
@@ -30,6 +32,11 @@ const MATCH_FLOW_PHASES = new Set<RoomPhase>([
 /** True when the room has left pre-match lobby (UI placeholder for in-match surfaces). */
 export function isMatchFlowPhase(phase: RoomPhase): boolean {
   return MATCH_FLOW_PHASES.has(phase);
+}
+
+/** True when lobby roster should show running / final match totals (2.6 + 2.7). */
+export function isRosterScoreVisiblePhase(phase: RoomPhase): boolean {
+  return isMatchFlowPhase(phase) || phase === "matchEnded";
 }
 
 export const lobbyRosterPlayerSchema = z.object({
@@ -88,6 +95,10 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("chooseWord"),
     choiceIndex: z.number().int().min(0).max(2),
+  }),
+  /** Host-only: after `matchEnded`, reset the room to lobby for a rematch (Story 2.7). */
+  z.object({
+    type: z.literal("returnToLobby"),
   }),
 ]);
 

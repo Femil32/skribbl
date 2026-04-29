@@ -10,6 +10,7 @@ import {
   avatarPresets,
   countGraphemes,
   isMatchFlowPhase,
+  isRosterScoreVisiblePhase,
   isValidRoomCodeForJoin,
   normalizeRoomCode,
   sanitizeDisplayName,
@@ -18,6 +19,7 @@ import { useGuestJoinRoom } from "@/features/lobby/hooks/use-guest-join-room";
 import { LobbyConnectionBanner } from "@/features/lobby/components/LobbyConnectionBanner";
 import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster";
 import { PhaseBar } from "@/features/match/components/PhaseBar";
+import { ScoreboardSummary } from "@/features/match/components/ScoreboardSummary";
 import { WordChoicePanel } from "@/features/match/components/WordChoicePanel";
 
 const formatHintId = "join-room-code-format-hint";
@@ -225,12 +227,32 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
             }`}
           >
             <div className="card-body gap-6 text-center">
-              <h1 className="card-title text-2xl justify-center">You joined the room</h1>
+              <h1 className="card-title text-2xl justify-center">
+                {guestState.phase === "matchEnded"
+                  ? "Match finished"
+                  : isMatchFlowPhase(guestState.phase)
+                    ? "Match in progress"
+                    : "You joined the room"}
+              </h1>
               <p className="text-base-content/80">
-                You are <span className="font-semibold">{guestState.displayName}</span>{" "}
-                in the lobby as a guest — the host starts the match.
+                {guestState.phase === "matchEnded" ? (
+                  <>
+                    You are <span className="font-semibold">{guestState.displayName}</span> in
+                    this room. Final scores are below — wait for the host to play again.
+                  </>
+                ) : isMatchFlowPhase(guestState.phase) ? (
+                  <>
+                    You are <span className="font-semibold">{guestState.displayName}</span> in
+                    this room as a guest.
+                  </>
+                ) : (
+                  <>
+                    You are <span className="font-semibold">{guestState.displayName}</span> in
+                    the lobby as a guest — the host starts the match.
+                  </>
+                )}
               </p>
-              {isMatchFlowPhase(guestState.phase) ? (
+              {isMatchFlowPhase(guestState.phase) || guestState.phase === "matchEnded" ? (
                 <PhaseBar
                   phase={guestState.phase}
                   players={guestState.players}
@@ -238,6 +260,13 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                   drawerPlayerId={guestState.drawerPlayerId}
                   matchRoundIndex={guestState.matchRoundIndex}
                   phaseDeadlineMs={guestState.phaseDeadlineMs}
+                />
+              ) : null}
+              {guestState.phase === "matchEnded" ? (
+                <ScoreboardSummary
+                  players={guestState.players}
+                  localPlayerId={guestState.playerId}
+                  isHost={false}
                 />
               ) : null}
               {guestState.phase === "choosingWord" &&
@@ -260,6 +289,10 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                 <div className="alert alert-info shadow-sm">
                   Match in progress. Full gameplay shell arrives in Epic 3.
                 </div>
+              ) : guestState.phase === "matchEnded" ? (
+                <p className="text-sm text-base-content/70">
+                  Match finished — scores are above. Wait for the host to play again.
+                </p>
               ) : (
                 <p className="text-sm text-base-content/70">
                   Waiting for the host to begin. You will not have a Start control here.
@@ -273,7 +306,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                 <LobbyPlayerRoster
                   players={guestState.players}
                   localPlayerId={guestState.playerId}
-                  showScores={isMatchFlowPhase(guestState.phase)}
+                  showScores={isRosterScoreVisiblePhase(guestState.phase)}
                 />
               </div>
               <div className="space-y-2">

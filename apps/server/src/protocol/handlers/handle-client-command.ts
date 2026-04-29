@@ -285,6 +285,22 @@ export function handleClientCommand(
       }
       return;
     }
+    case "returnToLobby": {
+      const outcome = roomManager.returnToLobby(ws);
+      if (!outcome.ok) {
+        sendProtocolError(
+          ws,
+          outcome.code,
+          outcome.code === "NOT_HOST"
+            ? "Only the host can start a new match."
+            : outcome.code === "WRONG_PHASE"
+              ? "The room is not in the post-match screen right now."
+              : "Could not return to the lobby.",
+          roomManager,
+        );
+      }
+      return;
+    }
     default: {
       const _exhaustive: never = cmd;
       return _exhaustive;
