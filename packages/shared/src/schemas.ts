@@ -22,6 +22,15 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("noop"),
   }),
+  /** Create a new lobby room; server assigns a non-guessable room code. */
+  z.object({
+    type: z.literal("createRoom"),
+  }),
+  /** Join an existing room by code (server normalizes casing / whitespace). */
+  z.object({
+    type: z.literal("joinRoom"),
+    roomCode: z.string(),
+  }),
 ]);
 
 /** Server → client events pushed over WebSocket. */
@@ -35,6 +44,19 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     code: z.string(),
     message: z.string().optional(),
     correlationId: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal("roomCreated"),
+    roomId: z.string(),
+    roomCode: z.string(),
+    phase: z.literal("lobby"),
+  }),
+  z.object({
+    type: z.literal("roomJoined"),
+    roomId: z.string(),
+    roomCode: z.string(),
+    phase: z.literal("lobby"),
+    playerCount: z.number().int().nonnegative(),
   }),
 ]);
 

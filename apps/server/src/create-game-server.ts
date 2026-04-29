@@ -1,45 +1,22 @@
 import http from "node:http";
-import type { WebSocket } from "ws";
 import { WebSocketServer } from "ws";
 import pino from "pino";
+import { safeParseClientCommand } from "@skribbl/shared";
 import {
-  safeParseClientCommand,
-  serializeServerEvent,
-  type ClientCommand,
-} from "@skribbl/shared";
+  MAX_WS_MESSAGE_BYTES,
+  inboundWsMessageByteLength,
+} from "./config/game.js";
+import { RoomManager } from "./room/room-manager.js";
+import {
+  handleClientCommand,
+  sendProtocolError,
+} from "./protocol/handlers/handle-client-command.js";
 
 const log = pino({ level: process.env.LOG_LEVEL ?? "info" });
 
-function handleClientCommand(ws: WebSocket, cmd: ClientCommand) {
-  switch (cmd.type) {
-    case "ping":
-      ws.send(
-        serializeServerEvent({
-          type: "pong",
-          ts: Date.now(),
-        }),
-      );
-      return;
-    case "noop":
-      return;
-    default: {
-      const _exhaustive: never = cmd;
-      return _exhaustive;
-    }
-  }
-}
-
-function sendError(ws: WebSocket, code: string, message?: string) {
-  ws.send(
-    serializeServerEvent({
-      type: "error",
-      code,
-      message,
-    }),
-  );
-}
-
 export function createGameServer() {
+  const roomManager = new RoomManager();
+
   const server = http.createServer((req, res) => {
     if (req.method === "GET" && req.url?.split("?")[0] === "/healthz") {
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -50,27 +27,50 @@ export function createGameServer() {
     res.end(JSON.stringify({ ok: false }));
   });
 
-  const wss = new WebSocketServer({ server });
+  const wss = new WebSocketServer({
+    server,
+    maxPayload: MAX_WS_MESSAGE_BYTES,
+  });
 
   wss.on("connection", (ws) => {
+    ws.on("close", () => {
+      roomManager.leaveSocketRoom(ws);
+    });
+
     ws.on("message", (raw) => {
+      if (inboundWsMessageByteLength(raw) > MAX_WS_MESSAGE_BYTES) {
+        sendProtocolError(
+          ws,
+          "BAD_PAYLOAD",
+          "Message too large",
+          roomManager,
+        );
+        return;
+      }
+
       let body: unknown;
       try {
-        body = JSON.parse(String(raw));
+        body = JSON.parse(
+          Buffer.isBuffer(raw)
+            ? raw.toString("utf8")
+            : raw instanceof ArrayBuffer
+              ? Buffer.from(raw).toString("utf8")
+              : Buffer.concat(raw).toString("utf8"),
+        );
       } catch {
-        sendError(ws, "BAD_PAYLOAD", "Invalid JSON");
+        sendProtocolError(ws, "BAD_PAYLOAD", "Invalid JSON", roomManager);
         return;
       }
       const parsed = safeParseClientCommand(body);
       if (!parsed.success) {
-        sendError(ws, "BAD_PAYLOAD", "Message validation failed");
+        sendProtocolError(ws, "BAD_PAYLOAD", "Message validation failed", roomManager);
         return;
       }
       try {
-        handleClientCommand(ws, parsed.data);
+        handleClientCommand(ws, parsed.data, roomManager);
       } catch (err) {
         log.error({ err }, "handler error");
-        sendError(ws, "INTERNAL", "Unexpected handler error");
+        sendProtocolError(ws, "INTERNAL", "Unexpected handler error", roomManager);
       }
     });
   });
