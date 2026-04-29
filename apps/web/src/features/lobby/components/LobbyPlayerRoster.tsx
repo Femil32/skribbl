@@ -9,6 +9,8 @@ import {
 type LobbyPlayerRosterProps = {
   players: LobbyRosterPlayer[];
   localPlayerId: string;
+  /** When true, show authoritative match totals (tabular numerals UX-DR5). */
+  showScores?: boolean;
 };
 
 function presetLabel(id: AvatarPresetId): string {
@@ -18,7 +20,11 @@ function presetLabel(id: AvatarPresetId): string {
 /**
  * Lobby roster rows: avatar preset, display name (plain text), host badge, accessible status hints (UX-DR8).
  */
-export function LobbyPlayerRoster({ players, localPlayerId }: LobbyPlayerRosterProps) {
+export function LobbyPlayerRoster({
+  players,
+  localPlayerId,
+  showScores = false,
+}: LobbyPlayerRosterProps) {
   if (players.length === 0) {
     return (
       <p className="text-sm text-base-content/70" id="lobby-roster-empty">
@@ -59,6 +65,14 @@ export function LobbyPlayerRoster({ players, localPlayerId }: LobbyPlayerRosterP
                 {p.isHost ? " · Host can start the match" : " · Connected"}
               </span>
             </div>
+            {showScores ? (
+              <span
+                className="shrink-0 text-lg font-semibold tabular-nums text-base-content/90 text-right min-w-[2.5rem]"
+                aria-label={`Score for ${p.displayName}: ${String(p.score ?? 0)}`}
+              >
+                {p.score ?? 0}
+              </span>
+            ) : null}
           </li>
         );
       })}

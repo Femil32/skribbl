@@ -32,3 +32,4 @@ export {
   countGraphemes,
   type AvatarPresetId,
 } from "./player-identity.js";
+export { computeGuesserPoints } from "./scoring.js";

@@ -22,6 +22,21 @@ export class Room {
   /** Cleared when choice resolves or on room teardown (Story 2.3). */
   wordChoiceTimerHandle: ReturnType<typeof setTimeout> | null = null;
 
+  /**
+   * Monotonic/session clock ms when {@link phase} transitioned to `drawing` (Story 2.6).
+   * Cleared when leaving `drawing` (timer-driven `roundResult` or future early guess).
+   */
+  drawingPhaseStartedAtMs: number | null = null;
+
+  /**
+   * Guessers already credited this drawing phase (Story 2.6).
+   * Cleared when entering and when leaving `drawing`; prevents duplicate awards for the same guesser id.
+   */
+  drawingPhaseAwardedGuesserIds: Set<string> | null = null;
+
+  /** Match session totals keyed by stable `playerId` (Story 2.6). Cleared/`startMatch`. */
+  scoresByPlayerId: Record<string, number> = {};
+
   readonly sockets = new Set<WebSocket>();
   hostSocket: WebSocket | null = null;
   readonly maxPlayers: number;

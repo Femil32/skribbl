@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   clientCommandSchema,
   isMatchFlowPhase,
+  lobbyRosterPlayerSchema,
   safeParseServerEvent,
   serializeClientCommand,
   serverEventSchema,
@@ -88,16 +89,28 @@ describe("serverEventSchema", () => {
           displayName: "Hue",
           avatarPresetId: "preset-1",
           isHost: true,
+          score: 0,
         },
         {
           playerId: "b",
           displayName: "Gue",
           avatarPresetId: "preset-2",
           isHost: false,
+          score: 42,
         },
       ],
     });
     expect(result.success).toBe(true);
+  });
+
+  it("lobby roster player defaults score to 0 when omitted", () => {
+    const row = lobbyRosterPlayerSchema.parse({
+      playerId: "a",
+      displayName: "Hue",
+      avatarPresetId: "preset-1",
+      isHost: true,
+    });
+    expect(row.score).toBe(0);
   });
 
   it("accepts matchStarting with phase literal", () => {

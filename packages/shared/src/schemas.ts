@@ -37,6 +37,8 @@ export const lobbyRosterPlayerSchema = z.object({
   displayName: z.string(),
   avatarPresetId: avatarPresetIdSchema,
   isHost: z.boolean(),
+  /** Running total for the match (FR10); omitted on wire is treated as 0 in parsers. */
+  score: z.number().int().nonnegative().default(0),
 });
 
 export type LobbyRosterPlayer = z.infer<typeof lobbyRosterPlayerSchema>;

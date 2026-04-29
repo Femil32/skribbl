@@ -234,6 +234,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                 <PhaseBar
                   phase={guestState.phase}
                   players={guestState.players}
+                  localPlayerId={guestState.playerId}
                   drawerPlayerId={guestState.drawerPlayerId}
                   matchRoundIndex={guestState.matchRoundIndex}
                   phaseDeadlineMs={guestState.phaseDeadlineMs}
@@ -272,6 +273,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                 <LobbyPlayerRoster
                   players={guestState.players}
                   localPlayerId={guestState.playerId}
+                  showScores={isMatchFlowPhase(guestState.phase)}
                 />
               </div>
               <div className="space-y-2">

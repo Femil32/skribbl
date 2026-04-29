@@ -335,6 +335,7 @@ export function LobbyHostPage() {
             <LobbyPlayerRoster
               players={state.players}
               localPlayerId={state.playerId}
+              showScores={isMatchFlowPhase(state.phase)}
             />
           </div>
 
@@ -380,6 +381,7 @@ export function LobbyHostPage() {
               <PhaseBar
                 phase={state.phase}
                 players={state.players}
+                localPlayerId={state.playerId}
                 drawerPlayerId={state.drawerPlayerId}
                 matchRoundIndex={state.matchRoundIndex}
                 phaseDeadlineMs={state.phaseDeadlineMs}

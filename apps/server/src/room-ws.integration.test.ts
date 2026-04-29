@@ -560,4 +560,82 @@ describe("handleClientCommand + RoomManager", () => {
       vi.useRealTimers();
     }
   });
+
+  it("applyCorrectGuessAward updates totals; rejects drawer-as-guesser", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.stubEnv("ROUND_MS", "80000");
+    vi.useFakeTimers();
+    try {
+      const rm = new RoomManager(8, integrationWordBank());
+      const host = captureWs();
+      const guest = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        guest.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+      const guestJoined = parseServerEvent(JSON.parse(guest.sent[0]!));
+      expect(guestJoined.type).toBe("roomJoined");
+      const guestPlayerId =
+        guestJoined.type === "roomJoined" ? guestJoined.playerId : "";
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+      vi.advanceTimersByTime(resolveWordChoiceMs());
+
+      const room = rm.getRoomForSocket(host.ws);
+      expect(room).toBeDefined();
+      if (!room) throw new Error("unexpected");
+
+      const drawerId = room.currentDrawerPlayerId!;
+      const drawerCapt = drawerId === created.playerId ? host : guest;
+      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
+
+      expect(room.phase).toBe("drawing");
+      const start = room.drawingPhaseStartedAtMs!;
+      const guesserId = drawerId === created.playerId ? guestPlayerId : created.playerId;
+
+      expect(
+        rm.applyCorrectGuessAward({
+          roomId: room.id,
+          guesserPlayerId: guesserId,
+          occurredAtMs: start + resolveRoundMs() / 2,
+        }),
+      ).toEqual({ ok: true });
+
+      const roster = lastLobbyRoster([...host.sent, ...guest.sent]);
+      expect(roster?.type).toBe("lobbyRoster");
+      if (roster?.type !== "lobbyRoster") throw new Error("unexpected");
+
+      const byId = Object.fromEntries(
+        roster.players.map((p) => [p.playerId, p.score]),
+      );
+      expect(byId[guesserId]).toBe(55);
+      expect(byId[drawerId]).toBe(10);
+
+      expect(
+        rm.applyCorrectGuessAward({
+          roomId: room.id,
+          guesserPlayerId: guesserId,
+          occurredAtMs: start + resolveRoundMs() / 2,
+        }),
+      ).toEqual({ ok: false, code: "ALREADY_AWARDED_THIS_DRAWING" });
+
+      expect(
+        rm.applyCorrectGuessAward({
+          roomId: room.id,
+          guesserPlayerId: drawerId,
+          occurredAtMs: Date.now(),
+        }),
+      ).toEqual({ ok: false, code: "GUESSER_IS_DRAWER" });
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
 });

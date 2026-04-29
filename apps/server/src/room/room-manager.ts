@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import {
+  computeGuesserPoints,
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,
   isValidRoomCodeForJoin,
@@ -10,6 +11,8 @@ import {
 } from "@skribbl/shared";
 import type { WebSocket } from "ws";
 import {
+  resolveDrawerAssistPerCorrect,
+  resolveGuesserScoreBracket,
   resolveInterRoundGapMs,
   resolveMaxPlayers,
   resolveMatchStartHandshakeMs,
@@ -72,6 +75,7 @@ export class RoomManager {
         displayName: identity.displayName,
         avatarPresetId: identity.avatarPresetId,
         isHost: room.hostSocket === ws,
+        score: room.scoresByPlayerId[identity.playerId] ?? 0,
       });
     }
     rows.sort((a, b) => a.playerId.localeCompare(b.playerId));
@@ -153,6 +157,8 @@ export class RoomManager {
   ): void {
     room.roundSecretWord = word;
     room.phase = "drawing";
+    room.drawingPhaseStartedAtMs = Date.now();
+    room.drawingPhaseAwardedGuesserIds = new Set();
     const roundMs = resolveRoundMs();
     const drawingEndsAt = Date.now() + roundMs;
     this.broadcastMatchPhase(room, drawingEndsAt, drawerId, roundIndex);
@@ -160,6 +166,8 @@ export class RoomManager {
     const drawingEnd = setTimeout(() => {
       if (!this.roomsById.get(room.id) || room.phase !== "drawing") return;
       room.phase = "roundResult";
+      room.drawingPhaseStartedAtMs = null;
+      room.drawingPhaseAwardedGuesserIds = null;
       this.broadcastMatchPhase(room, undefined, drawerId, roundIndex);
       if (roundIndex + 1 < resolveRoundsPerMatch()) {
         const next = setTimeout(
@@ -232,10 +240,72 @@ export class RoomManager {
     this.matchTimersByRoomId.set(room.id, timeouts);
 
     const roster = this.buildLobbyRosterPlayers(room);
+    room.scoresByPlayerId = {};
+    for (const p of roster) {
+      room.scoresByPlayerId[p.playerId] = 0;
+    }
     room.matchPlayerOrder = roster.map((p) => p.playerId);
     room.matchRoundIndex = 0;
 
     this.queueRoundStart(room, 0, resolveMatchStartHandshakeMs(), "matchStarting", timeouts);
+  }
+
+  /**
+   * Single entry point for correct-guess awards (FR10; Epic 4 chat will delegate here).
+   * Validates phase, roster, excludes the drawer as guesser, and awards each guesser at most once per
+   * drawing phase (duplicate invokes return `"ALREADY_AWARDED_THIS_DRAWING"`).
+   *
+   * **Time basis:** Prefer `occurredAtMs = Date.now()` at the instant the server adjudicates an exact word
+   * match (same clock basis as when drawing started — see `drawingPhaseStartedAtMs` on the room). Tests may
+   * pass offsets from the drawing start when using fake timers; trusting client timestamps would allow
+   * gaming scores.
+   */
+  applyCorrectGuessAward(opts: {
+    roomId: string;
+    guesserPlayerId: string;
+    occurredAtMs: number;
+  }): { ok: true } | { ok: false; code: string } {
+    const room = this.roomsById.get(opts.roomId);
+    if (!room) return { ok: false, code: "UNKNOWN_ROOM" };
+    if (room.phase !== "drawing") {
+      return { ok: false, code: "WRONG_PHASE" };
+    }
+    const drawerId = room.currentDrawerPlayerId;
+    if (!drawerId) {
+      return { ok: false, code: "NO_DRAWER" };
+    }
+    if (opts.guesserPlayerId === drawerId) {
+      return { ok: false, code: "GUESSER_IS_DRAWER" };
+    }
+    const order = room.matchPlayerOrder;
+    if (!order?.includes(opts.guesserPlayerId)) {
+      return { ok: false, code: "NOT_IN_MATCH" };
+    }
+    const start = room.drawingPhaseStartedAtMs;
+    if (start === null || !Number.isFinite(start)) {
+      return { ok: false, code: "NO_DRAWING_START" };
+    }
+    const awarded = room.drawingPhaseAwardedGuesserIds;
+    if (!awarded) {
+      return { ok: false, code: "NO_DRAWING_START" };
+    }
+    if (awarded.has(opts.guesserPlayerId)) {
+      return { ok: false, code: "ALREADY_AWARDED_THIS_DRAWING" };
+    }
+
+    const roundMs = resolveRoundMs();
+    const elapsed = opts.occurredAtMs - start;
+    const { max: maxPts, min: minPts } = resolveGuesserScoreBracket();
+    const guesserPts = computeGuesserPoints(elapsed, roundMs, maxPts, minPts);
+    const assist = resolveDrawerAssistPerCorrect();
+
+    const scores = room.scoresByPlayerId;
+    scores[opts.guesserPlayerId] = (scores[opts.guesserPlayerId] ?? 0) + guesserPts;
+    scores[drawerId] = (scores[drawerId] ?? 0) + assist;
+    awarded.add(opts.guesserPlayerId);
+
+    this.broadcastLobbyRoster(room);
+    return { ok: true };
   }
 
   /** Drawer-only: lock word and skip remaining word-choice wait (Story 2.3). */

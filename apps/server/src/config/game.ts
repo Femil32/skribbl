@@ -129,6 +129,75 @@ export function resolveInterRoundGapMs(): number {
   return DEFAULT_INTER_ROUND_GAP_MS;
 }
 
+/** Max guesser points at instant solve (elapsed 0). Override: `GUESSER_SCORE_MAX`. */
+export const DEFAULT_GUESSER_SCORE_MAX = 100;
+
+/** Min guesser points at round end / max latency. Override: `GUESSER_SCORE_MIN`. */
+export const DEFAULT_GUESSER_SCORE_MIN = 10;
+
+/** Drawer receives this many points per distinct correct guesser (assist). Override: `DRAWER_ASSIST_PER_CORRECT`. */
+export const DEFAULT_DRAWER_ASSIST_PER_CORRECT = 10;
+
+let didWarnInvalidGuesserBracket = false;
+let didWarnInvalidDrawerAssist = false;
+
+export function resolveGuesserScoreMax(): number {
+  const raw = process.env.GUESSER_SCORE_MAX;
+  if (!raw) return DEFAULT_GUESSER_SCORE_MAX;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isFinite(n) && n >= 1 && n <= 10_000) return n;
+  if (!didWarnInvalidGuesserBracket) {
+    didWarnInvalidGuesserBracket = true;
+    console.warn(
+      `[game] GUESSER_SCORE_MAX env invalid (${JSON.stringify(raw)}); using ${DEFAULT_GUESSER_SCORE_MAX} (allowed 1–10000)`,
+    );
+  }
+  return DEFAULT_GUESSER_SCORE_MAX;
+}
+
+export function resolveGuesserScoreMin(): number {
+  const raw = process.env.GUESSER_SCORE_MIN;
+  if (!raw) return DEFAULT_GUESSER_SCORE_MIN;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isFinite(n) && n >= 0 && n <= 10_000) return n;
+  if (!didWarnInvalidGuesserBracket) {
+    didWarnInvalidGuesserBracket = true;
+    console.warn(
+      `[game] GUESSER_SCORE_MIN env invalid (${JSON.stringify(raw)}); using ${DEFAULT_GUESSER_SCORE_MIN} (allowed 0–10000)`,
+    );
+  }
+  return DEFAULT_GUESSER_SCORE_MIN;
+}
+
+/**
+ * Validates max ≥ min after env resolution; swaps with a single structured warning when inconsistent.
+ */
+export function resolveGuesserScoreBracket(): { max: number; min: number } {
+  let max = resolveGuesserScoreMax();
+  let min = resolveGuesserScoreMin();
+  if (max < min) {
+    console.warn(`[game] GUESSER_SCORE_MAX (${max}) < GUESSER_SCORE_MIN (${min}); swapping`);
+    const t = max;
+    max = min;
+    min = t;
+  }
+  return { max, min };
+}
+
+export function resolveDrawerAssistPerCorrect(): number {
+  const raw = process.env.DRAWER_ASSIST_PER_CORRECT;
+  if (!raw) return DEFAULT_DRAWER_ASSIST_PER_CORRECT;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isFinite(n) && n >= 0 && n <= 10_000) return n;
+  if (!didWarnInvalidDrawerAssist) {
+    didWarnInvalidDrawerAssist = true;
+    console.warn(
+      `[game] DRAWER_ASSIST_PER_CORRECT env invalid (${JSON.stringify(raw)}); using ${DEFAULT_DRAWER_ASSIST_PER_CORRECT} (allowed 0–10000)`,
+    );
+  }
+  return DEFAULT_DRAWER_ASSIST_PER_CORRECT;
+}
+
 /** Byte length of an inbound WS message (ws `RawData`) before JSON parse. */
 export function inboundWsMessageByteLength(raw: RawData): number {
   if (Buffer.isBuffer(raw)) return raw.length;
