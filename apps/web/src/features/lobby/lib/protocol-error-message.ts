@@ -23,6 +23,12 @@ export function messageForProtocolErrorCode(code: string): string {
       return "That avatar choice is not valid. Pick one of the presets shown.";
     case "INTERNAL":
       return "Something went wrong. Try again shortly.";
+    case "NOT_HOST":
+      return "Only the host can do that.";
+    case "NOT_ENOUGH_PLAYERS":
+      return "You need at least two players before starting.";
+    case "WRONG_PHASE":
+      return "That action is not available for this room right now.";
     default:
       return "Something went wrong. Try again.";
   }

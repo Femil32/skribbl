@@ -10,6 +10,19 @@
 import { z } from "zod";
 import { avatarPresetIdSchema } from "./player-identity.js";
 
+/** Shared room phase literals — server is authoritative; Epic 2.1 extends from `matchStarting`. */
+export const roomPhaseSchema = z.enum(["lobby", "matchStarting"]);
+export type RoomPhase = z.infer<typeof roomPhaseSchema>;
+
+export const lobbyRosterPlayerSchema = z.object({
+  playerId: z.string(),
+  displayName: z.string(),
+  avatarPresetId: avatarPresetIdSchema,
+  isHost: z.boolean(),
+});
+
+export type LobbyRosterPlayer = z.infer<typeof lobbyRosterPlayerSchema>;
+
 /** Client → server commands (extend in Story 1.2+ with joinRoom, etc.). */
 export const clientCommandSchema = z.discriminatedUnion("type", [
   z.object({
@@ -36,6 +49,10 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
     displayName: z.string(),
     avatarPresetId: avatarPresetIdSchema.optional(),
   }),
+  /** Host-only: request transition from lobby to match handshake (Story 1.6+). */
+  z.object({
+    type: z.literal("startMatch"),
+  }),
 ]);
 
 /** Server → client events pushed over WebSocket. */
@@ -54,7 +71,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     type: z.literal("roomCreated"),
     roomId: z.string(),
     roomCode: z.string(),
-    phase: z.literal("lobby"),
+    phase: roomPhaseSchema,
     playerId: z.string(),
     /** Sanitized display name (plain text; never HTML). */
     displayName: z.string(),
@@ -64,11 +81,21 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     type: z.literal("roomJoined"),
     roomId: z.string(),
     roomCode: z.string(),
-    phase: z.literal("lobby"),
+    phase: roomPhaseSchema,
     playerCount: z.number().int().nonnegative(),
     playerId: z.string(),
     displayName: z.string(),
     avatarPresetId: avatarPresetIdSchema,
+  }),
+  z.object({
+    type: z.literal("lobbyRoster"),
+    roomId: z.string(),
+    players: z.array(lobbyRosterPlayerSchema),
+  }),
+  z.object({
+    type: z.literal("matchStarting"),
+    roomId: z.string(),
+    phase: z.literal("matchStarting"),
   }),
 ]);
 

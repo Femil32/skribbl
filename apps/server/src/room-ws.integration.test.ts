@@ -24,6 +24,14 @@ function captureWs(): { ws: WebSocket; sent: string[] } {
 const hostIdentity = { displayName: "Hosty", avatarPresetId: "preset-1" as const };
 const guestIdentity = { displayName: "Guesty", avatarPresetId: "preset-2" as const };
 
+function lastLobbyRoster(sent: string[]) {
+  for (let i = sent.length - 1; i >= 0; i--) {
+    const ev = parseServerEvent(JSON.parse(sent[i]!));
+    if (ev.type === "lobbyRoster") return ev;
+  }
+  return undefined;
+}
+
 describe("handleClientCommand + RoomManager", () => {
   it("createRoom then joinRoom succeeds for second socket", () => {
     const rm = new RoomManager(8);
@@ -31,7 +39,7 @@ describe("handleClientCommand + RoomManager", () => {
     const b = captureWs();
 
     handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
-    expect(a.sent).toHaveLength(1);
+    expect(a.sent.length).toBeGreaterThanOrEqual(1);
     const created = parseServerEvent(JSON.parse(a.sent[0]!));
     expect(created.type).toBe("roomCreated");
     if (created.type !== "roomCreated") throw new Error("unexpected");
@@ -43,11 +51,13 @@ describe("handleClientCommand + RoomManager", () => {
       { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
       rm,
     );
-    expect(b.sent).toHaveLength(1);
-    const joined = parseServerEvent(JSON.parse(b.sent[0]!));
-    expect(joined.type).toBe("roomJoined");
-    if (joined.type === "roomJoined") expect(joined.playerCount).toBe(2);
-    if (joined.type === "roomJoined") expect(joined.displayName).toBe("Guesty");
+    expect(parseServerEvent(JSON.parse(b.sent[0]!)).type).toBe("roomJoined");
+    expect(
+      b.sent.some((line) => {
+        const ev = parseServerEvent(JSON.parse(line));
+        return ev.type === "lobbyRoster" && ev.players.length === 2;
+      }),
+    ).toBe(true);
   });
 
   it("unknown room yields UNKNOWN_ROOM", () => {
@@ -142,7 +152,7 @@ describe("handleClientCommand + RoomManager", () => {
         roomCode: created.roomCode,
         displayName: "Guy",
         avatarPresetId: "not-a-listed-preset",
-      } as ClientCommand,
+      } as unknown as ClientCommand,
       rm,
     );
     expect(b.sent).toHaveLength(1);
@@ -179,5 +189,147 @@ describe("handleClientCommand + RoomManager", () => {
       code: "BAD_PAYLOAD",
       message: "bad",
     });
+  });
+
+  it("lobby roster after create and join: host flagged, deterministic order by playerId", () => {
+    const rm = new RoomManager(8);
+    const a = captureWs();
+    const b = captureWs();
+
+    handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+    const created = parseServerEvent(JSON.parse(a.sent[0]!));
+    if (created.type !== "roomCreated") throw new Error("unexpected");
+
+    handleClientCommand(
+      b.ws,
+      { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+      rm,
+    );
+
+    const rA = lastLobbyRoster(a.sent);
+    const rB = lastLobbyRoster(b.sent);
+    expect(rA?.type).toBe("lobbyRoster");
+    expect(rB?.type).toBe("lobbyRoster");
+    if (rA?.type !== "lobbyRoster" || rB?.type !== "lobbyRoster") throw new Error("x");
+    expect(rA.players.map((p) => p.playerId).join()).toBe(
+      [...rA.players].map((p) => p.playerId).sort().join(),
+    );
+    expect(rA.players.some((p) => p.playerId === created.playerId && p.isHost)).toBe(true);
+    expect(rA.players.some((p) => p.displayName === "Guesty" && !p.isHost)).toBe(true);
+  });
+
+  it("startMatch: two players succeeds; emits matchStarting to both", () => {
+    const rm = new RoomManager(8);
+    const a = captureWs();
+    const b = captureWs();
+
+    handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+    const created = parseServerEvent(JSON.parse(a.sent[0]!));
+    if (created.type !== "roomCreated") throw new Error("unexpected");
+
+    handleClientCommand(
+      b.ws,
+      { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+      rm,
+    );
+
+    handleClientCommand(a.ws, { type: "startMatch" }, rm);
+
+    const startA = a.sent.map((line) => parseServerEvent(JSON.parse(line)));
+    const startB = b.sent.map((line) => parseServerEvent(JSON.parse(line)));
+    expect(startA.some((e) => e.type === "matchStarting")).toBe(true);
+    expect(startB.some((e) => e.type === "matchStarting")).toBe(true);
+    const ms = startA.find((e) => e.type === "matchStarting");
+    expect(ms).toEqual(
+      expect.objectContaining({
+        type: "matchStarting",
+        phase: "matchStarting",
+      }),
+    );
+  });
+
+  it("startMatch: non-host rejected with NOT_HOST", () => {
+    const rm = new RoomManager(8);
+    const a = captureWs();
+    const b = captureWs();
+
+    handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+    const created = parseServerEvent(JSON.parse(a.sent[0]!));
+    if (created.type !== "roomCreated") throw new Error("unexpected");
+
+    handleClientCommand(
+      b.ws,
+      { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+      rm,
+    );
+
+    handleClientCommand(b.ws, { type: "startMatch" }, rm);
+    const last = parseServerEvent(JSON.parse(b.sent[b.sent.length - 1]!));
+    expect(last.type).toBe("error");
+    if (last.type === "error") expect(last.code).toBe("NOT_HOST");
+  });
+
+  it("startMatch: one player yields NOT_ENOUGH_PLAYERS", () => {
+    const rm = new RoomManager(8);
+    const a = captureWs();
+    handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+    handleClientCommand(a.ws, { type: "startMatch" }, rm);
+    const last = parseServerEvent(JSON.parse(a.sent[a.sent.length - 1]!));
+    expect(last.type).toBe("error");
+    if (last.type === "error") expect(last.code).toBe("NOT_ENOUGH_PLAYERS");
+  });
+
+  it("join after start yields JOIN_NOT_ALLOWED", () => {
+    const rm = new RoomManager(8);
+    const a = captureWs();
+    const b = captureWs();
+    const c = captureWs();
+
+    handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+    const created = parseServerEvent(JSON.parse(a.sent[0]!));
+    if (created.type !== "roomCreated") throw new Error("unexpected");
+
+    handleClientCommand(
+      b.ws,
+      { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+      rm,
+    );
+    handleClientCommand(a.ws, { type: "startMatch" }, rm);
+
+    handleClientCommand(
+      c.ws,
+      {
+        type: "joinRoom",
+        roomCode: created.roomCode,
+        displayName: "Late",
+        avatarPresetId: "preset-3",
+      },
+      rm,
+    );
+
+    const last = parseServerEvent(JSON.parse(c.sent[c.sent.length - 1]!));
+    expect(last.type).toBe("error");
+    if (last.type === "error") expect(last.code).toBe("JOIN_NOT_ALLOWED");
+  });
+
+  it("leaveSocketRoom broadcasts updated roster", () => {
+    const rm = new RoomManager(8);
+    const a = captureWs();
+    const b = captureWs();
+
+    handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+    const created = parseServerEvent(JSON.parse(a.sent[0]!));
+    if (created.type !== "roomCreated") throw new Error("unexpected");
+
+    handleClientCommand(
+      b.ws,
+      { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+      rm,
+    );
+
+    rm.leaveSocketRoom(b.ws);
+    const r = lastLobbyRoster(a.sent);
+    expect(r?.players.some((p) => p.displayName === "Guesty")).toBe(false);
+    expect(r?.players.some((p) => p.displayName === "Hosty" && p.isHost)).toBe(true);
   });
 });

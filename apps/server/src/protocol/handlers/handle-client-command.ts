@@ -117,13 +117,14 @@ export function handleClientCommand(
           type: "roomCreated",
           roomId: room.id,
           roomCode: room.code,
-          phase: "lobby",
+          phase: room.phase,
           playerId: session.playerId,
           displayName: session.displayName,
           avatarPresetId: session.avatarPresetId,
         },
         roomManager,
       );
+      roomManager.broadcastLobbyRoster(room);
       return;
     }
     case "joinRoom": {
@@ -153,7 +154,9 @@ export function handleClientCommand(
           outcome.reason,
           outcome.reason === "UNKNOWN_ROOM"
             ? "Room not found"
-            : "Room is full",
+            : outcome.reason === "JOIN_NOT_ALLOWED"
+              ? "Game already started"
+              : "Room is full",
           roomManager,
         );
         return;
@@ -170,7 +173,7 @@ export function handleClientCommand(
           type: "roomJoined",
           roomId: room.id,
           roomCode: room.code,
-          phase: "lobby",
+          phase: room.phase,
           playerCount: room.playerCount,
           playerId: session.playerId,
           displayName: session.displayName,
@@ -178,6 +181,25 @@ export function handleClientCommand(
         },
         roomManager,
       );
+      roomManager.broadcastLobbyRoster(room);
+      return;
+    }
+    case "startMatch": {
+      const outcome = roomManager.startMatch(ws);
+      if (!outcome.ok) {
+        sendProtocolError(
+          ws,
+          outcome.code,
+          outcome.code === "NOT_HOST"
+            ? "Only the host can start"
+            : outcome.code === "NOT_ENOUGH_PLAYERS"
+              ? "Need at least two players"
+              : outcome.code === "WRONG_PHASE"
+                ? "Room is not in lobby"
+                : "Unable to start",
+          roomManager,
+        );
+      }
       return;
     }
     default: {

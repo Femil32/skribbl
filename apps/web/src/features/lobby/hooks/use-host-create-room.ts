@@ -1,14 +1,14 @@
 "use client";
 
-import type { AvatarPresetId } from "@skribbl/shared";
+import type { AvatarPresetId, LobbyRosterPlayer, RoomPhase } from "@skribbl/shared";
 import { safeParseServerEvent } from "@skribbl/shared";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   messageForProtocolErrorCode,
   protocolParseErrorMessage,
 } from "@/features/lobby/lib/protocol-error-message";
 import { resolveGameWebSocketUrl } from "@/lib/game-ws-url";
-import { serializeCreateRoomCommand } from "@/lib/ws-client";
+import { serializeCreateRoomCommand, serializeStartMatchCommand } from "@/lib/ws-client";
 
 const missingWsUrlMessage =
   "Real-time play is not configured for this deployment. Set NEXT_PUBLIC_WS_URL to your game server WebSocket URL (for example ws://localhost:3001 when running the game server locally).";
@@ -23,6 +23,9 @@ export type HostLobbyState =
       playerId: string;
       displayName: string;
       avatarPresetId: AvatarPresetId;
+      phase: RoomPhase;
+      players: LobbyRosterPlayer[];
+      isStartPending: boolean;
     }
   | { status: "error"; message: string };
 
@@ -35,13 +38,20 @@ export type UseHostCreateRoomParams = {
   avatarPresetId?: AvatarPresetId;
 };
 
+export type UseHostCreateRoomResult = {
+  state: HostLobbyState;
+  /** Authoritative host start — no-op unless lobby state is active. */
+  startMatch: () => void;
+};
+
 export function useHostCreateRoom(
   params: UseHostCreateRoomParams,
-): HostLobbyState {
+): UseHostCreateRoomResult {
   const { shouldConnect, attemptId, displayName, avatarPresetId } = params;
   const wsUrl = resolveGameWebSocketUrl();
   const [state, setState] = useState<HostLobbyState>({ status: "idle" });
   const reachedLobbyRef = useRef(false);
+  const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     if (!shouldConnect) {
@@ -54,11 +64,11 @@ export function useHostCreateRoom(
     }
 
     reachedLobbyRef.current = false;
-    // Sync "connecting" with starting the WebSocket in this effect; async handlers perform other updates.
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: align UI with subscription start
     setState({ status: "connecting" });
 
     const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
     let closedByCleanup = false;
 
     function fail(message: string) {
@@ -100,15 +110,51 @@ export function useHostCreateRoom(
             playerId: parsed.data.playerId,
             displayName: parsed.data.displayName,
             avatarPresetId: parsed.data.avatarPresetId,
+            phase: parsed.data.phase,
+            players: [],
+            isStartPending: false,
           });
           return;
-        case "error":
-          if (reachedLobbyRef.current) return;
-          setState({
-            status: "error",
-            message: messageForProtocolErrorCode(parsed.data.code),
+        case "lobbyRoster": {
+          const roster = parsed.data;
+          setState((prev) => {
+            if (prev.status !== "lobby") return prev;
+            if (roster.roomId !== prev.roomId) return prev;
+            return {
+              ...prev,
+              players: roster.players,
+            };
           });
           return;
+        }
+        case "matchStarting": {
+          const start = parsed.data;
+          setState((prev) => {
+            if (prev.status !== "lobby") return prev;
+            if (start.roomId !== prev.roomId) return prev;
+            return {
+              ...prev,
+              phase: start.phase,
+              isStartPending: false,
+            };
+          });
+          return;
+        }
+        case "error": {
+          const err = parsed.data;
+          if (!reachedLobbyRef.current) {
+            setState({
+              status: "error",
+              message: messageForProtocolErrorCode(err.code),
+            });
+            return;
+          }
+          setState((prev) => {
+            if (prev.status !== "lobby") return prev;
+            return { ...prev, isStartPending: false };
+          });
+          return;
+        }
         case "pong":
         case "roomJoined":
           return;
@@ -131,21 +177,39 @@ export function useHostCreateRoom(
 
     return () => {
       closedByCleanup = true;
+      wsRef.current = null;
       ws.close();
     };
   }, [wsUrl, shouldConnect, attemptId, displayName, avatarPresetId]);
 
+  const startMatch = useCallback(() => {
+    const w = wsRef.current;
+    if (!w || w.readyState !== WebSocket.OPEN) return;
+    try {
+      setState((prev) => {
+        if (prev.status !== "lobby") return prev;
+        return { ...prev, isStartPending: true };
+      });
+      w.send(serializeStartMatchCommand());
+    } catch {
+      setState((prev) => {
+        if (prev.status !== "lobby") return prev;
+        return { ...prev, isStartPending: false };
+      });
+    }
+  }, []);
+
   if (!shouldConnect) {
-    return { status: "idle" };
+    return { state: { status: "idle" }, startMatch };
   }
 
   if (!wsUrl) {
-    return { status: "error", message: missingWsUrlMessage };
+    return { state: { status: "error", message: missingWsUrlMessage }, startMatch };
   }
 
   if (state.status === "idle") {
-    return { status: "connecting" };
+    return { state: { status: "connecting" }, startMatch };
   }
 
-  return state;
+  return { state, startMatch };
 }

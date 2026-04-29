@@ -11,6 +11,7 @@ import {
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useHostCreateRoom } from "@/features/lobby/hooks/use-host-create-room";
+import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster";
 import {
   buildRoomInviteUrl,
   resolvePublicWebOrigin,
@@ -69,7 +70,7 @@ export function LobbyHostPage() {
 
   const shouldConnect = submitted && nicknameOk;
 
-  const state = useHostCreateRoom({
+  const { state, startMatch } = useHostCreateRoom({
     shouldConnect,
     attemptId,
     displayName: nicknameTrimmed,
@@ -242,6 +243,9 @@ export function LobbyHostPage() {
   }
 
   const { roomCode } = state;
+  const minPlayersOk = state.players.length >= 2;
+  const canOfferStart =
+    state.phase === "lobby" && minPlayersOk && !state.isStartPending;
   const publicOrigin =
     resolvePublicWebOrigin() ||
     (typeof window !== "undefined" ? window.location.origin : "");
@@ -280,6 +284,55 @@ export function LobbyHostPage() {
             You are <span className="font-semibold">{state.displayName}</span>{" "}
             in this room. Share the link or code so friends can join.
           </p>
+
+          <div className="space-y-2">
+            <span className="text-sm font-medium text-base-content/70">
+              Players ({String(state.players.length)})
+            </span>
+            <LobbyPlayerRoster
+              players={state.players}
+              localPlayerId={state.playerId}
+            />
+          </div>
+
+          <div className="flex flex-col gap-2 w-full border-t border-base-300 pt-4">
+            <button
+              type="button"
+              className={`${canOfferStart ? "btn btn-primary" : "btn btn-outline"} w-full sm:w-auto self-center`}
+              onClick={() => startMatch()}
+              disabled={
+                state.phase !== "lobby" || state.isStartPending || !minPlayersOk
+              }
+              aria-disabled={
+                state.phase !== "lobby" || state.isStartPending || !minPlayersOk
+                  ? true
+                  : undefined
+              }
+              aria-busy={state.isStartPending}
+            >
+              {state.isStartPending ? (
+                <>
+                  <span className="loading loading-spinner loading-sm" />
+                  Starting…
+                </>
+              ) : (
+                "Start"
+              )}
+            </button>
+            {!minPlayersOk && state.phase === "lobby" ? (
+              <p
+                className="text-sm text-base-content/70 text-center"
+                id="start-hint-min-players"
+              >
+                Need at least two players in the room to start.
+              </p>
+            ) : null}
+            {state.phase === "matchStarting" ? (
+              <div className="alert alert-info shadow-sm">
+                Match is starting. Gameplay arrives in the next milestone.
+              </div>
+            ) : null}
+          </div>
 
           <div className="space-y-2">
             <span className="text-sm font-medium text-base-content/70">

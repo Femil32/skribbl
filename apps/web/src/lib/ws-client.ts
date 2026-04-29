@@ -40,6 +40,11 @@ export function serializeJoinRoomCommand(
   });
 }
 
+/** Host-only validated JSON for `startMatch` (Story 1.6+). */
+export function serializeStartMatchCommand(): string {
+  return serializeClientCommand({ type: "startMatch" });
+}
+
 /**
  * Optional dev helper: open a WebSocket and send one ping when NEXT_PUBLIC debug WS URL is set.
  * Gated so production bundles do not require a live game server.

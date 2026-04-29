@@ -45,6 +45,12 @@ describe("clientCommandSchema", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("accepts startMatch with no extra fields", () => {
+    const result = clientCommandSchema.safeParse({ type: "startMatch" });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual({ type: "startMatch" });
+  });
 });
 
 describe("serverEventSchema", () => {
@@ -61,6 +67,37 @@ describe("serverEventSchema", () => {
       playerId: "660e8400-e29b-41d4-a716-446655440001",
       displayName: "Pat",
       avatarPresetId: "preset-1",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts lobbyRoster golden payload", () => {
+    const result = serverEventSchema.safeParse({
+      type: "lobbyRoster",
+      roomId: "550e8400-e29b-41d4-a716-446655440000",
+      players: [
+        {
+          playerId: "a",
+          displayName: "Hue",
+          avatarPresetId: "preset-1",
+          isHost: true,
+        },
+        {
+          playerId: "b",
+          displayName: "Gue",
+          avatarPresetId: "preset-2",
+          isHost: false,
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts matchStarting with phase literal", () => {
+    const result = serverEventSchema.safeParse({
+      type: "matchStarting",
+      roomId: "550e8400-e29b-41d4-a716-446655440000",
+      phase: "matchStarting",
     });
     expect(result.success).toBe(true);
   });
@@ -81,5 +118,12 @@ describe("serializeClientCommand", () => {
         displayName: "Alex",
         avatarPresetId: "preset-2",
       });
+  });
+
+  it("round-trips startMatch", () => {
+    const line = serializeClientCommand({ type: "startMatch" });
+    expect(JSON.parse(line)).toEqual({ type: "startMatch" });
+    const parsed = clientCommandSchema.safeParse(JSON.parse(line));
+    expect(parsed.success).toBe(true);
   });
 });

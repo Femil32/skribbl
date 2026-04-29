@@ -14,6 +14,7 @@ import {
   sanitizeDisplayName,
 } from "@skribbl/shared";
 import { useGuestJoinRoom } from "@/features/lobby/hooks/use-guest-join-room";
+import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster";
 
 const formatHintId = "join-room-code-format-hint";
 const protocolErrId = "join-room-protocol-error";
@@ -185,9 +186,28 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
           <div className="card-body gap-6 text-center">
             <h1 className="card-title text-2xl justify-center">You joined the room</h1>
             <p className="text-base-content/80">
-              You are <span className="font-semibold">{guestState.displayName}</span> in the lobby.
-              Live roster and host controls arrive in a later update.
+              You are <span className="font-semibold">{guestState.displayName}</span>{" "}
+              in the lobby as a guest — the host starts the match.
             </p>
+            {guestState.phase === "matchStarting" ? (
+              <div className="alert alert-info shadow-sm">
+                Match is starting. Gameplay arrives in the next milestone.
+              </div>
+            ) : (
+              <p className="text-sm text-base-content/70">
+                Waiting for the host to begin. You will not have a Start control here.
+              </p>
+            )}
+
+            <div className="space-y-2 text-left w-full max-w-md mx-auto">
+              <span className="text-sm font-medium text-base-content/70">
+                Players ({String(guestState.players.length)})
+              </span>
+              <LobbyPlayerRoster
+                players={guestState.players}
+                localPlayerId={guestState.playerId}
+              />
+            </div>
             <div className="space-y-2">
               <span className="text-sm font-medium text-base-content/70">
                 Room code

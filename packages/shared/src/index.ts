@@ -1,6 +1,8 @@
 export {
   clientCommandSchema,
   serverEventSchema,
+  roomPhaseSchema,
+  lobbyRosterPlayerSchema,
   safeParseClientCommand,
   safeParseServerEvent,
   parseClientCommand,
@@ -9,6 +11,8 @@ export {
   serializeServerEvent,
   type ClientCommand,
   type ServerEvent,
+  type RoomPhase,
+  type LobbyRosterPlayer,
 } from "./schemas.js";
 export {
   ROOM_CODE_ALPHABET,

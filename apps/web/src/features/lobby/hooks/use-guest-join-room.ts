@@ -1,6 +1,6 @@
 "use client";
 
-import type { AvatarPresetId } from "@skribbl/shared";
+import type { AvatarPresetId, LobbyRosterPlayer, RoomPhase } from "@skribbl/shared";
 import {
   isValidRoomCodeForJoin,
   normalizeRoomCode,
@@ -24,11 +24,12 @@ export type GuestJoinLobbyState =
       status: "joined";
       roomId: string;
       roomCode: string;
-      phase: "lobby";
+      phase: RoomPhase;
       playerCount: number;
       playerId: string;
       displayName: string;
       avatarPresetId: AvatarPresetId;
+      players: LobbyRosterPlayer[];
     }
   | {
       /** Server `error.code` when the failure came from an `error` event; omit for generic failures. */
@@ -47,8 +48,8 @@ export type UseGuestJoinRoomArgs = {
 
 /**
  * Opens one WebSocket, sends **`joinRoom`** via **`serializeJoinRoomCommand`**, demuxes with
- * **`safeParseServerEvent`**. Keeps the socket open after **`roomJoined`** for later lobby work
- * (Story 1.6+); closes on unmount or when join is deactivated.
+ * **`safeParseServerEvent`**. Keeps the socket open after **`roomJoined`** for lobby roster /
+ * match start events (Story 1.6+).
  */
 export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): GuestJoinLobbyState {
   const {
@@ -134,15 +135,43 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): GuestJoinLobbyStat
             playerId: parsed.data.playerId,
             displayName: parsed.data.displayName,
             avatarPresetId: parsed.data.avatarPresetId,
+            players: [],
           });
           return;
-        case "error":
-          if (reachedJoinedRef.current) return;
-          setState({
-            status: "error",
-            message: messageForProtocolErrorCode(parsed.data.code),
-            protocolCode: parsed.data.code,
+        case "lobbyRoster": {
+          const roster = parsed.data;
+          setState((prev) => {
+            if (prev.status !== "joined") return prev;
+            if (roster.roomId !== prev.roomId) return prev;
+            return {
+              ...prev,
+              players: roster.players,
+              playerCount: roster.players.length,
+            };
           });
+          return;
+        }
+        case "matchStarting": {
+          const match = parsed.data;
+          setState((prev) => {
+            if (prev.status !== "joined") return prev;
+            if (match.roomId !== prev.roomId) return prev;
+            return {
+              ...prev,
+              phase: match.phase,
+            };
+          });
+          return;
+        }
+        case "error":
+          if (!reachedJoinedRef.current) {
+            setState({
+              status: "error",
+              message: messageForProtocolErrorCode(parsed.data.code),
+              protocolCode: parsed.data.code,
+            });
+            return;
+          }
           return;
         case "pong":
         case "roomCreated":

@@ -1,6 +1,5 @@
 import type { WebSocket } from "ws";
-
-export type RoomPhase = "lobby";
+import type { RoomPhase } from "@skribbl/shared";
 
 /**
  * In-memory room aggregate (Story 1.2 skeleton): code, capacity, lobby phase.

@@ -4,6 +4,9 @@ import {
   ROOM_CODE_LENGTH,
   isValidRoomCodeForJoin,
   normalizeRoomCode,
+  serializeServerEvent,
+  type LobbyRosterPlayer,
+  type ServerEvent,
 } from "@skribbl/shared";
 import type { WebSocket } from "ws";
 import { resolveMaxPlayers } from "../config/game.js";
@@ -17,7 +20,10 @@ export {
   normalizeRoomCode,
 };
 
-export type JoinRoomFailureReason = "UNKNOWN_ROOM" | "ROOM_FULL";
+export type JoinRoomFailureReason =
+  | "UNKNOWN_ROOM"
+  | "ROOM_FULL"
+  | "JOIN_NOT_ALLOWED";
 
 export type NewLobbyPlayer = Pick<
   LobbySessionIdentity,
@@ -34,6 +40,58 @@ export class RoomManager {
 
   constructor(maxPlayersPerRoom?: number) {
     this.maxPlayersPerRoom = maxPlayersPerRoom ?? resolveMaxPlayers();
+  }
+
+  /** Sorted by `playerId` (deterministic roster order — Story 1.6). */
+  buildLobbyRosterPlayers(room: Room): LobbyRosterPlayer[] {
+    const rows: LobbyRosterPlayer[] = [];
+    for (const ws of room.sockets) {
+      const identity = this.socketLobbyIdentity.get(ws);
+      if (!identity) continue;
+      rows.push({
+        playerId: identity.playerId,
+        displayName: identity.displayName,
+        avatarPresetId: identity.avatarPresetId,
+        isHost: room.hostSocket === ws,
+      });
+    }
+    rows.sort((a, b) => a.playerId.localeCompare(b.playerId));
+    return rows;
+  }
+
+  private sendEvent(ws: WebSocket, event: ServerEvent): void {
+    try {
+      ws.send(serializeServerEvent(event));
+    } catch {
+      this.leaveSocketRoom(ws);
+    }
+  }
+
+  broadcastLobbyRoster(room: Room): void {
+    const payload: ServerEvent = {
+      type: "lobbyRoster",
+      roomId: room.id,
+      players: this.buildLobbyRosterPlayers(room),
+    };
+    for (const sock of room.sockets) this.sendEvent(sock, payload);
+  }
+
+  /** Host-only authoritative start (Story 1.6). Transitions phase to `matchStarting`. */
+  startMatch(actor: WebSocket): { ok: true } | { ok: false; code: string } {
+    const room = this.getRoomForSocket(actor);
+    if (!room) return { ok: false, code: "INTERNAL" };
+    if (room.hostSocket !== actor) return { ok: false, code: "NOT_HOST" };
+    if (room.phase !== "lobby") return { ok: false, code: "WRONG_PHASE" };
+    if (room.playerCount < 2) return { ok: false, code: "NOT_ENOUGH_PLAYERS" };
+
+    room.phase = "matchStarting";
+    const payload: ServerEvent = {
+      type: "matchStarting",
+      roomId: room.id,
+      phase: "matchStarting",
+    };
+    for (const sock of room.sockets) this.sendEvent(sock, payload);
+    return { ok: true };
   }
 
   /** Unique non-guessable code using crypto-grade randomness + collision retry. */
@@ -65,9 +123,12 @@ export class RoomManager {
         const next = room.sockets.values().next().value as WebSocket | undefined;
         room.hostSocket = next ?? null;
       }
-      if (room.sockets.size === 0) {
+      const survivors = room.sockets.size;
+      if (survivors === 0) {
         this.roomsByCode.delete(room.code);
         this.roomsById.delete(room.id);
+      } else {
+        this.broadcastLobbyRoster(room);
       }
     }
     this.socketToRoomId.delete(ws);
@@ -113,6 +174,10 @@ export class RoomManager {
     const current = this.getRoomForSocket(ws);
     if (current?.id === room.id) {
       return { ok: true, room };
+    }
+
+    if (room.phase !== "lobby") {
+      return { ok: false, reason: "JOIN_NOT_ALLOWED" };
     }
 
     if (!room.hasCapacity()) return { ok: false, reason: "ROOM_FULL" };
