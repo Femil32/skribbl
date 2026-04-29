@@ -56,7 +56,7 @@ development_status:
   epic-2: in-progress
   2-1-match-state-machine-skeleton-server-timers: done
   2-2-round-robin-drawer-rotation: done
-  2-3-word-bank-loading-drawer-wordchoicepanel: backlog
+  2-3-word-bank-loading-drawer-wordchoicepanel: done
   2-4-drawing-phase-countdown-timer-driven-round-end: backlog
   2-5-progressive-letter-hints-cadence: backlog
   2-6-score-rules-running-totals: backlog
