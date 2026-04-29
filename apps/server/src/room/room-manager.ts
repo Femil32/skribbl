@@ -7,6 +7,7 @@ import {
 } from "@skribbl/shared";
 import type { WebSocket } from "ws";
 import { resolveMaxPlayers } from "../config/game.js";
+import type { LobbySessionIdentity } from "./lobby-session.js";
 import { Room } from "./room.js";
 
 export {
@@ -18,10 +19,16 @@ export {
 
 export type JoinRoomFailureReason = "UNKNOWN_ROOM" | "ROOM_FULL";
 
+export type NewLobbyPlayer = Pick<
+  LobbySessionIdentity,
+  "displayName" | "avatarPresetId"
+>;
+
 export class RoomManager {
   private readonly roomsByCode = new Map<string, Room>();
   private readonly roomsById = new Map<string, Room>();
   private readonly socketToRoomId = new Map<WebSocket, string>();
+  private readonly socketLobbyIdentity = new Map<WebSocket, LobbySessionIdentity>();
 
   readonly maxPlayersPerRoom: number;
 
@@ -47,7 +54,10 @@ export class RoomManager {
 
   leaveSocketRoom(ws: WebSocket): void {
     const roomId = this.socketToRoomId.get(ws);
-    if (!roomId) return;
+    if (!roomId) {
+      this.socketLobbyIdentity.delete(ws);
+      return;
+    }
     const room = this.roomsById.get(roomId);
     if (room) {
       room.sockets.delete(ws);
@@ -61,10 +71,21 @@ export class RoomManager {
       }
     }
     this.socketToRoomId.delete(ws);
+    this.socketLobbyIdentity.delete(ws);
   }
 
-  createRoom(ws: WebSocket): Room {
+  getLobbySession(ws: WebSocket): LobbySessionIdentity | undefined {
+    return this.socketLobbyIdentity.get(ws);
+  }
+
+  createRoom(ws: WebSocket, player: NewLobbyPlayer): Room {
     this.leaveSocketRoom(ws);
+    const playerId = randomUUID();
+    this.socketLobbyIdentity.set(ws, {
+      playerId,
+      displayName: player.displayName,
+      avatarPresetId: player.avatarPresetId,
+    });
     const code = this.generateUniqueCode();
     const room = new Room({
       id: randomUUID(),
@@ -82,6 +103,7 @@ export class RoomManager {
   joinRoom(
     ws: WebSocket,
     normalizedCode: string,
+    player: NewLobbyPlayer,
   ):
     | { ok: true; room: Room }
     | { ok: false; reason: JoinRoomFailureReason } {
@@ -96,6 +118,12 @@ export class RoomManager {
     if (!room.hasCapacity()) return { ok: false, reason: "ROOM_FULL" };
 
     this.leaveSocketRoom(ws);
+    const playerId = randomUUID();
+    this.socketLobbyIdentity.set(ws, {
+      playerId,
+      displayName: player.displayName,
+      avatarPresetId: player.avatarPresetId,
+    });
     room.sockets.add(ws);
     this.socketToRoomId.set(ws, room.id);
     return { ok: true, room };

@@ -15,6 +15,12 @@ export function messageForProtocolErrorCode(code: string): string {
     // Epic 2+: when match is not in lobby — placeholder until server emits this code.
     case "JOIN_NOT_ALLOWED":
       return "That room is not accepting joins right now. The match may have already started.";
+    case "BAD_NICKNAME":
+      return "Enter a display name (letters, numbers, or symbols — no HTML).";
+    case "NICKNAME_TOO_LONG":
+      return "That name is too long. Use a shorter display name.";
+    case "INVALID_AVATAR":
+      return "That avatar choice is not valid. Pick one of the presets shown.";
     case "INTERNAL":
       return "Something went wrong. Try again shortly.";
     default:

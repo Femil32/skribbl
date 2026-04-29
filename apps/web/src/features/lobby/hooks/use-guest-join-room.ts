@@ -1,5 +1,6 @@
 "use client";
 
+import type { AvatarPresetId } from "@skribbl/shared";
 import {
   isValidRoomCodeForJoin,
   normalizeRoomCode,
@@ -25,25 +26,38 @@ export type GuestJoinLobbyState =
       roomCode: string;
       phase: "lobby";
       playerCount: number;
+      playerId: string;
+      displayName: string;
+      avatarPresetId: AvatarPresetId;
     }
-  | { status: "error"; message: string };
+  | {
+      /** Server `error.code` when the failure came from an `error` event; omit for generic failures. */
+      status: "error";
+      message: string;
+      protocolCode?: string;
+    };
 
 export type UseGuestJoinRoomArgs = {
-  /** Increments on manual submit / retry so a failed join can open a fresh socket. */
   connectionAttemptId: number;
-  /** When true after a deliberate join (valid format), dial the game WebSocket and send join. */
   activeJoinAttempt: boolean;
-  /** Raw or pasted room code; normalized before validate/send. */
   roomCodeInput: string;
+  displayName: string;
+  avatarPresetId?: AvatarPresetId;
 };
 
 /**
  * Opens one WebSocket, sends **`joinRoom`** via **`serializeJoinRoomCommand`**, demuxes with
  * **`safeParseServerEvent`**. Keeps the socket open after **`roomJoined`** for later lobby work
- * (Story 1.5+); closes on unmount or when join is deactivated.
+ * (Story 1.6+); closes on unmount or when join is deactivated.
  */
 export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): GuestJoinLobbyState {
-  const { connectionAttemptId, activeJoinAttempt, roomCodeInput } = args;
+  const {
+    connectionAttemptId,
+    activeJoinAttempt,
+    roomCodeInput,
+    displayName,
+    avatarPresetId,
+  } = args;
   const wsUrl = resolveGameWebSocketUrl();
   const normalized = normalizeRoomCode(roomCodeInput);
 
@@ -85,7 +99,9 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): GuestJoinLobbyStat
 
     ws.addEventListener("open", () => {
       try {
-        ws.send(serializeJoinRoomCommand(normalized));
+        ws.send(
+          serializeJoinRoomCommand(normalized, displayName, avatarPresetId),
+        );
       } catch {
         fail("Could not send join request. Try again.");
       }
@@ -115,6 +131,9 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): GuestJoinLobbyStat
             roomCode: parsed.data.roomCode,
             phase: parsed.data.phase,
             playerCount: parsed.data.playerCount,
+            playerId: parsed.data.playerId,
+            displayName: parsed.data.displayName,
+            avatarPresetId: parsed.data.avatarPresetId,
           });
           return;
         case "error":
@@ -122,6 +141,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): GuestJoinLobbyStat
           setState({
             status: "error",
             message: messageForProtocolErrorCode(parsed.data.code),
+            protocolCode: parsed.data.code,
           });
           return;
         case "pong":
@@ -148,7 +168,14 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): GuestJoinLobbyStat
       closedByCleanup = true;
       ws.close();
     };
-  }, [activeJoinAttempt, connectionAttemptId, normalized, wsUrl]);
+  }, [
+    activeJoinAttempt,
+    connectionAttemptId,
+    normalized,
+    wsUrl,
+    displayName,
+    avatarPresetId,
+  ]);
 
   if (!activeJoinAttempt) {
     return { status: "idle" };
@@ -156,6 +183,10 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): GuestJoinLobbyStat
 
   if (!wsUrl) {
     return { status: "error", message: missingWsUrlMessage };
+  }
+
+  if (state.status === "idle") {
+    return { status: "connecting" };
   }
 
   return state;

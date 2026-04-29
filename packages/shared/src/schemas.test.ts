@@ -20,10 +20,30 @@ describe("clientCommandSchema", () => {
     if (result.success) expect(result.data.type).toBe("ping");
   });
 
-  it("rejects joinRoom without roomCode", () => {
+  it("rejects joinRoom without roomCode or displayName", () => {
     expect(clientCommandSchema.safeParse({ type: "joinRoom" }).success).toBe(
       false,
     );
+    expect(
+      clientCommandSchema.safeParse({ type: "joinRoom", roomCode: "ABCD" })
+        .success,
+    ).toBe(false);
+  });
+
+  it("rejects createRoom without displayName", () => {
+    expect(clientCommandSchema.safeParse({ type: "createRoom" }).success).toBe(
+      false,
+    );
+  });
+
+  it("rejects invalid avatar preset on createRoom", () => {
+    expect(
+      clientCommandSchema.safeParse({
+        type: "createRoom",
+        displayName: "Pat",
+        avatarPresetId: "evil",
+      }).success,
+    ).toBe(false);
   });
 });
 
@@ -32,22 +52,34 @@ describe("serverEventSchema", () => {
     expect(safeParseServerEvent({ type: "roomJoined" }).success).toBe(false);
   });
 
-  it("accepts roomCreated", () => {
+  it("accepts roomCreated with identity", () => {
     const result = serverEventSchema.safeParse({
       type: "roomCreated",
       roomId: "550e8400-e29b-41d4-a716-446655440000",
       roomCode: "A2BCDE",
       phase: "lobby",
+      playerId: "660e8400-e29b-41d4-a716-446655440001",
+      displayName: "Pat",
+      avatarPresetId: "preset-1",
     });
     expect(result.success).toBe(true);
   });
 });
 
 describe("serializeClientCommand", () => {
-  it("round-trips createRoom through clientCommandSchema", () => {
-    const line = serializeClientCommand({ type: "createRoom" });
+  it("round-trips createRoom with identity through clientCommandSchema", () => {
+    const line = serializeClientCommand({
+      type: "createRoom",
+      displayName: "Alex",
+      avatarPresetId: "preset-2",
+    });
     const parsed = clientCommandSchema.safeParse(JSON.parse(line));
     expect(parsed.success).toBe(true);
-    if (parsed.success) expect(parsed.data).toEqual({ type: "createRoom" });
+    if (parsed.success)
+      expect(parsed.data).toEqual({
+        type: "createRoom",
+        displayName: "Alex",
+        avatarPresetId: "preset-2",
+      });
   });
 });

@@ -16,3 +16,14 @@ export {
   isValidRoomCodeForJoin,
   normalizeRoomCode,
 } from "./room-code.js";
+export {
+  NICKNAME_MAX_GRAPHEMES,
+  DEFAULT_AVATAR_PRESET_ID,
+  AVATAR_PRESET_IDS,
+  avatarPresetIdSchema,
+  avatarPresets,
+  isValidAvatarPresetId,
+  sanitizeDisplayName,
+  countGraphemes,
+  type AvatarPresetId,
+} from "./player-identity.js";

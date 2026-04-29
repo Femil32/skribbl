@@ -8,6 +8,7 @@
  */
 
 import { z } from "zod";
+import { avatarPresetIdSchema } from "./player-identity.js";
 
 /** Client → server commands (extend in Story 1.2+ with joinRoom, etc.). */
 export const clientCommandSchema = z.discriminatedUnion("type", [
@@ -25,11 +26,15 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   /** Create a new lobby room; server assigns a non-guessable room code. */
   z.object({
     type: z.literal("createRoom"),
+    displayName: z.string(),
+    avatarPresetId: avatarPresetIdSchema.optional(),
   }),
   /** Join an existing room by code (server normalizes casing / whitespace). */
   z.object({
     type: z.literal("joinRoom"),
     roomCode: z.string(),
+    displayName: z.string(),
+    avatarPresetId: avatarPresetIdSchema.optional(),
   }),
 ]);
 
@@ -50,6 +55,10 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     roomId: z.string(),
     roomCode: z.string(),
     phase: z.literal("lobby"),
+    playerId: z.string(),
+    /** Sanitized display name (plain text; never HTML). */
+    displayName: z.string(),
+    avatarPresetId: avatarPresetIdSchema,
   }),
   z.object({
     type: z.literal("roomJoined"),
@@ -57,6 +66,9 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     roomCode: z.string(),
     phase: z.literal("lobby"),
     playerCount: z.number().int().nonnegative(),
+    playerId: z.string(),
+    displayName: z.string(),
+    avatarPresetId: avatarPresetIdSchema,
   }),
 ]);
 

@@ -3,14 +3,53 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { FormEvent, useState } from "react";
+import type { AvatarPresetId } from "@skribbl/shared";
 import {
+  DEFAULT_AVATAR_PRESET_ID,
+  NICKNAME_MAX_GRAPHEMES,
+  avatarPresets,
+  countGraphemes,
   isValidRoomCodeForJoin,
   normalizeRoomCode,
+  sanitizeDisplayName,
 } from "@skribbl/shared";
 import { useGuestJoinRoom } from "@/features/lobby/hooks/use-guest-join-room";
 
 const formatHintId = "join-room-code-format-hint";
 const protocolErrId = "join-room-protocol-error";
+const nicknameHintId = "join-room-nickname-hint";
+const nicknameErrId = "join-room-nickname-error";
+
+function protocolErrorRelatesToRoomCode(code: string | undefined): boolean {
+  if (code === undefined) return false;
+  switch (code) {
+    case "BAD_CODE":
+    case "UNKNOWN_ROOM":
+    case "ROOM_FULL":
+    case "JOIN_NOT_ALLOWED":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function protocolErrorRelatesToNickname(code: string | undefined): boolean {
+  if (code === undefined) return true;
+  switch (code) {
+    case "BAD_CODE":
+    case "UNKNOWN_ROOM":
+    case "ROOM_FULL":
+    case "JOIN_NOT_ALLOWED":
+    case "INVALID_AVATAR":
+      return false;
+    default:
+      return true;
+  }
+}
+
+function protocolErrorRelatesToAvatar(code: string | undefined): boolean {
+  return code === "INVALID_AVATAR";
+}
 
 type JoinRoomClientProps = {
   /** Already display-normalized on the server (`normalizeRoomCodeForDisplay`). */
@@ -18,8 +57,8 @@ type JoinRoomClientProps = {
 };
 
 /**
- * Paste-friendly join: valid **`?code=`** deep links connect immediately; manual entry shares the
- * same **`joinRoom`** path as client navigation to **`/join?code=`** (same as `JoinCodeEntry`).
+ * Paste-friendly join: valid **`?code=`** deep links pre-fill the code field; **`joinRoom`** is only
+ * sent after display name + optional avatar preset are chosen (Story 1.5).
  */
 export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
   const searchParams = useSearchParams();
@@ -32,7 +71,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
   const urlNormalized =
     effectiveQueryRaw === "" ? null : normalizeRoomCode(effectiveQueryRaw);
 
-  const urlReadyToAutoJoin =
+  const urlCodeValid =
     urlNormalized !== null && isValidRoomCodeForJoin(urlNormalized);
 
   const [typedRaw, setTypedRaw] = useState(() => {
@@ -42,23 +81,40 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
     return urlNormalized;
   });
 
-  const raw = urlReadyToAutoJoin ? urlNormalized! : typedRaw;
+  const raw = urlCodeValid ? urlNormalized! : typedRaw;
 
   const [manualCommitted, setManualCommitted] = useState(false);
   const [joinGeneration, setJoinGeneration] = useState(0);
 
+  const [nicknameRaw, setNicknameRaw] = useState("");
+  const [avatarId, setAvatarId] = useState<AvatarPresetId>(
+    DEFAULT_AVATAR_PRESET_ID,
+  );
+
   const normalized = normalizeRoomCode(raw);
   const formatOk = isValidRoomCodeForJoin(normalized);
 
-  const urlAutoJoin = urlReadyToAutoJoin;
+  const nicknameTrimmed = nicknameRaw.trim();
+  const nicknameSanitized = sanitizeDisplayName(nicknameTrimmed);
+  const nicknameEmpty = manualCommitted && nicknameTrimmed.length === 0;
+  const nicknameTooLong =
+    manualCommitted &&
+    nicknameTrimmed.length > 0 &&
+    nicknameSanitized.length > 0 &&
+    countGraphemes(nicknameSanitized) > NICKNAME_MAX_GRAPHEMES;
+  const nicknameOk =
+    nicknameTrimmed.length > 0 &&
+    nicknameSanitized.length > 0 &&
+    countGraphemes(nicknameSanitized) <= NICKNAME_MAX_GRAPHEMES;
 
-  const activeJoinAttempt =
-    (urlAutoJoin || manualCommitted) && formatOk;
+  const activeJoinAttempt = manualCommitted && formatOk && nicknameOk;
 
   const guestState = useGuestJoinRoom({
     activeJoinAttempt,
     connectionAttemptId: joinGeneration,
     roomCodeInput: raw,
+    displayName: nicknameTrimmed,
+    avatarPresetId: avatarId,
   });
 
   const connecting = guestState.status === "connecting";
@@ -70,16 +126,55 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
   const protocolErrorMsg =
     guestState.status === "error" ? guestState.message : null;
 
-  const ariaDescribed =
+  const protocolCode =
+    guestState.status === "error" ? guestState.protocolCode : undefined;
+
+  const nickFieldError = nicknameEmpty
+    ? "Enter a display name."
+    : nicknameTooLong
+      ? `Use at most ${String(NICKNAME_MAX_GRAPHEMES)} characters.`
+      : null;
+
+  const ariaCode = [
+    helperFormat ? formatHintId : null,
+    protocolErrorMsg && protocolErrorRelatesToRoomCode(protocolCode)
+      ? protocolErrId
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" ") || undefined;
+
+  const ariaNickname =
     [
-      helperFormat ? formatHintId : null,
-      protocolErrorMsg ? protocolErrId : null,
-    ].filter(Boolean).join(" ") || undefined;
+      nicknameHintId,
+      nickFieldError ? nicknameErrId : null,
+      protocolErrorMsg && protocolErrorRelatesToNickname(protocolCode)
+        ? protocolErrId
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" ") || undefined;
+
+  const ariaAvatarPreset =
+    [
+      protocolErrorMsg && protocolErrorRelatesToAvatar(protocolCode)
+        ? protocolErrId
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" ") || undefined;
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!formatOk) return;
     setManualCommitted(true);
+    if (
+      !formatOk ||
+      nicknameTrimmed.length === 0 ||
+      nicknameSanitized.length === 0 ||
+      countGraphemes(nicknameSanitized) > NICKNAME_MAX_GRAPHEMES
+    ) {
+      return;
+    }
     setJoinGeneration((n) => n + 1);
   }
 
@@ -90,7 +185,8 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
           <div className="card-body gap-6 text-center">
             <h1 className="card-title text-2xl justify-center">You joined the room</h1>
             <p className="text-base-content/80">
-              You are in the lobby. Live roster and host controls arrive in a later update.
+              You are <span className="font-semibold">{guestState.displayName}</span> in the lobby.
+              Live roster and host controls arrive in a later update.
             </p>
             <div className="space-y-2">
               <span className="text-sm font-medium text-base-content/70">
@@ -101,7 +197,8 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
               </p>
             </div>
             <p className="text-sm text-base-content/70">
-              Players here: <span className="font-semibold tabular-nums">{guestState.playerCount}</span>
+              Players here:{" "}
+              <span className="font-semibold tabular-nums">{guestState.playerCount}</span>
             </p>
             <div className="card-actions flex-wrap justify-center gap-2">
               <Link href="/" className="btn btn-ghost">
@@ -123,7 +220,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
         <div className="card-body gap-4 text-center">
           <h1 className="card-title text-2xl justify-center">Join a room</h1>
           <p className="text-base-content/80">
-            Paste a code from an invite or type it. Full nickname and roster UI land in later stories.
+            Paste a code from an invite or type it, then choose how you appear.
           </p>
 
           {connecting ? (
@@ -149,13 +246,17 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                   className="input input-bordered w-full font-mono"
                   value={raw}
                   onChange={(e) => setTypedRaw(e.target.value)}
-                  readOnly={urlReadyToAutoJoin}
+                  readOnly={urlCodeValid}
                   placeholder="Paste or type the code"
                   autoComplete="off"
                   spellCheck={false}
                   disabled={connecting}
-                  aria-invalid={Boolean(helperFormat || protocolErrorMsg)}
-                  aria-describedby={ariaDescribed}
+                  aria-invalid={Boolean(
+                    helperFormat ||
+                      (protocolErrorMsg &&
+                        protocolErrorRelatesToRoomCode(protocolCode)),
+                  )}
+                  aria-describedby={ariaCode}
                 />
               </label>
 
@@ -164,6 +265,63 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                   {helperFormat}
                 </p>
               ) : null}
+
+              <label className="form-control w-full">
+                <span className="label-text font-medium">Display name</span>
+                <input
+                  type="text"
+                  name="nickname"
+                  id="join-room-nickname"
+                  className="input input-bordered w-full"
+                  value={nicknameRaw}
+                  onChange={(e) => setNicknameRaw(e.target.value)}
+                  autoComplete="username"
+                  maxLength={128}
+                  disabled={connecting}
+                  aria-invalid={Boolean(
+                    nickFieldError ||
+                      (protocolErrorMsg &&
+                        protocolErrorRelatesToNickname(protocolCode)),
+                  )}
+                  aria-describedby={ariaNickname}
+                />
+              </label>
+              <p id={nicknameHintId} className="text-sm text-base-content/70">
+                Plain text only — everyone in the lobby will see this.
+              </p>
+              {nickFieldError ? (
+                <p id={nicknameErrId} role="alert" className="text-sm text-warning">
+                  {nickFieldError}
+                </p>
+              ) : null}
+
+              <div className="form-control w-full">
+                <span className="label-text font-medium mb-2">Avatar</span>
+                <div
+                  className="flex flex-wrap gap-2 justify-center sm:justify-start"
+                  role="group"
+                  aria-label="Avatar preset"
+                  aria-describedby={ariaAvatarPreset || undefined}
+                >
+                  {avatarPresets.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className={`btn btn-sm gap-2 ${
+                        avatarId === p.id ? "btn-primary" : "btn-outline"
+                      }`}
+                      aria-pressed={avatarId === p.id}
+                      onClick={() => setAvatarId(p.id)}
+                    >
+                      <span
+                        className="inline-block size-6 rounded-full border border-base-300 bg-gradient-to-br from-primary/30 to-secondary/40"
+                        aria-hidden
+                      />
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               {protocolErrorMsg ? (
                 <div
@@ -185,15 +343,13 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                 </button>
               ) : null}
 
-              {urlAutoJoin ? null : (
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={!formatOk || connecting}
-                >
-                  Join room
-                </button>
-              )}
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={!formatOk || connecting}
+              >
+                Join room
+              </button>
             </form>
           )}
 

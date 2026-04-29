@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WebSocket } from "ws";
+import type { AvatarPresetId } from "@skribbl/shared";
 import {
   RoomManager,
   normalizeRoomCode,
@@ -25,12 +26,17 @@ describe("normalizeRoomCode + validation", () => {
 });
 
 describe("RoomManager", () => {
+  const player = (name: string, preset: AvatarPresetId = "preset-1") => ({
+    displayName: name,
+    avatarPresetId: preset,
+  });
+
   it("createRoom assigns unique codes", () => {
     const m = new RoomManager(8);
     const a = stubSocket();
     const b = stubSocket();
-    const r1 = m.createRoom(a);
-    const r2 = m.createRoom(b);
+    const r1 = m.createRoom(a, player("A"));
+    const r2 = m.createRoom(b, player("B"));
     expect(r1.code).not.toBe(r2.code);
     expect(r1.code.length).toBe(ROOM_CODE_LENGTH);
   });
@@ -39,9 +45,9 @@ describe("RoomManager", () => {
     const m = new RoomManager(8);
     const ws1 = stubSocket();
     const ws2 = stubSocket();
-    const roomA = m.createRoom(ws1);
-    const roomB = m.createRoom(ws2);
-    m.joinRoom(ws1, roomB.code);
+    const roomA = m.createRoom(ws1, player("1"));
+    const roomB = m.createRoom(ws2, player("2"));
+    m.joinRoom(ws1, roomB.code, player("1b"));
     expect(m.getRoomForSocket(ws1)?.id).toBe(roomB.id);
     expect(roomA.sockets.size).toBe(0);
     expect(roomB.sockets.size).toBe(2);
@@ -50,8 +56,8 @@ describe("RoomManager", () => {
   it("returns UNKNOWN_ROOM for missing code", () => {
     const m = new RoomManager(8);
     const ws = stubSocket();
-    m.createRoom(stubSocket());
-    expect(m.joinRoom(ws, "ZZZZZZ")).toEqual({
+    m.createRoom(stubSocket(), player("x"));
+    expect(m.joinRoom(ws, "ZZZZZZ", player("y"))).toEqual({
       ok: false,
       reason: "UNKNOWN_ROOM",
     });
@@ -62,9 +68,9 @@ describe("RoomManager", () => {
     const w1 = stubSocket();
     const w2 = stubSocket();
     const w3 = stubSocket();
-    const room = m.createRoom(w1);
-    expect(m.joinRoom(w2, room.code).ok).toBe(true);
-    expect(m.joinRoom(w3, room.code)).toEqual({
+    const room = m.createRoom(w1, player("h"));
+    expect(m.joinRoom(w2, room.code, player("g")).ok).toBe(true);
+    expect(m.joinRoom(w3, room.code, player("x", "preset-3"))).toEqual({
       ok: false,
       reason: "ROOM_FULL",
     });

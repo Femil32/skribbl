@@ -1,12 +1,45 @@
 import type { WebSocket } from "ws";
+import type { AvatarPresetId } from "@skribbl/shared";
 import {
+  DEFAULT_AVATAR_PRESET_ID,
+  NICKNAME_MAX_GRAPHEMES,
+  countGraphemes,
+  isValidAvatarPresetId,
   isValidRoomCodeForJoin,
   normalizeRoomCode,
+  sanitizeDisplayName,
   serializeServerEvent,
   type ClientCommand,
   type ServerEvent,
 } from "@skribbl/shared";
 import type { RoomManager } from "../../room/room-manager.js";
+
+function parseLobbyPlayer(cmd: {
+  displayName: string;
+  avatarPresetId?: string;
+}):
+  | { ok: true; displayName: string; avatarPresetId: AvatarPresetId }
+  | { ok: false; code: string } {
+  const trimmed = cmd.displayName.trim();
+  if (trimmed === "") return { ok: false, code: "BAD_NICKNAME" };
+
+  const sanitized = sanitizeDisplayName(trimmed);
+  if (sanitized === "") return { ok: false, code: "BAD_NICKNAME" };
+
+  if (countGraphemes(sanitized) > NICKNAME_MAX_GRAPHEMES) {
+    return { ok: false, code: "NICKNAME_TOO_LONG" };
+  }
+
+  const presetRaw = cmd.avatarPresetId ?? DEFAULT_AVATAR_PRESET_ID;
+  if (!isValidAvatarPresetId(presetRaw)) {
+    return { ok: false, code: "INVALID_AVATAR" };
+  }
+  return {
+    ok: true,
+    displayName: sanitized,
+    avatarPresetId: presetRaw,
+  };
+}
 
 function sendServerEvent(
   ws: WebSocket,
@@ -58,7 +91,26 @@ export function handleClientCommand(
     case "noop":
       return;
     case "createRoom": {
-      const room = roomManager.createRoom(ws);
+      const identity = parseLobbyPlayer(cmd);
+      if (!identity.ok) {
+        sendProtocolError(
+          ws,
+          identity.code,
+          identity.code === "BAD_NICKNAME"
+            ? "Pick a short display name."
+            : identity.code === "NICKNAME_TOO_LONG"
+              ? "That name is too long."
+              : "Pick one of the avatar options.",
+          roomManager,
+        );
+        return;
+      }
+      const room = roomManager.createRoom(ws, identity);
+      const session = roomManager.getLobbySession(ws);
+      if (!session) {
+        sendProtocolError(ws, "INTERNAL", "Could not create session", roomManager);
+        return;
+      }
       sendServerEvent(
         ws,
         {
@@ -66,6 +118,9 @@ export function handleClientCommand(
           roomId: room.id,
           roomCode: room.code,
           phase: "lobby",
+          playerId: session.playerId,
+          displayName: session.displayName,
+          avatarPresetId: session.avatarPresetId,
         },
         roomManager,
       );
@@ -77,7 +132,21 @@ export function handleClientCommand(
         sendProtocolError(ws, "BAD_CODE", "Invalid room code", roomManager);
         return;
       }
-      const outcome = roomManager.joinRoom(ws, normalized);
+      const identity = parseLobbyPlayer(cmd);
+      if (!identity.ok) {
+        sendProtocolError(
+          ws,
+          identity.code,
+          identity.code === "BAD_NICKNAME"
+            ? "Pick a short display name."
+            : identity.code === "NICKNAME_TOO_LONG"
+              ? "That name is too long."
+              : "Pick one of the avatar options.",
+          roomManager,
+        );
+        return;
+      }
+      const outcome = roomManager.joinRoom(ws, normalized, identity);
       if (!outcome.ok) {
         sendProtocolError(
           ws,
@@ -90,6 +159,11 @@ export function handleClientCommand(
         return;
       }
       const { room } = outcome;
+      const session = roomManager.getLobbySession(ws);
+      if (!session) {
+        sendProtocolError(ws, "INTERNAL", "Could not create session", roomManager);
+        return;
+      }
       sendServerEvent(
         ws,
         {
@@ -98,6 +172,9 @@ export function handleClientCommand(
           roomCode: room.code,
           phase: "lobby",
           playerCount: room.playerCount,
+          playerId: session.playerId,
+          displayName: session.displayName,
+          avatarPresetId: session.avatarPresetId,
         },
         roomManager,
       );

@@ -1,5 +1,8 @@
-import type { ClientCommand } from "@skribbl/shared";
-import { clientCommandSchema, serializeClientCommand } from "@skribbl/shared";
+import type { AvatarPresetId, ClientCommand } from "@skribbl/shared";
+import {
+  clientCommandSchema,
+  serializeClientCommand,
+} from "@skribbl/shared";
 import { resolveGameWebSocketUrl } from "@/lib/game-ws-url";
 
 /**
@@ -12,13 +15,29 @@ export function createPingCommand(ts = Date.now()): ClientCommand {
 }
 
 /** Validated JSON line for `createRoom` — send over the game WebSocket after `open`. */
-export function serializeCreateRoomCommand(): string {
-  return serializeClientCommand({ type: "createRoom" });
+export function serializeCreateRoomCommand(
+  displayName: string,
+  avatarPresetId?: AvatarPresetId,
+): string {
+  return serializeClientCommand({
+    type: "createRoom",
+    displayName,
+    ...(avatarPresetId !== undefined ? { avatarPresetId } : {}),
+  });
 }
 
 /** Validated JSON line for `joinRoom` — outbound shape matches `@skribbl/shared`. */
-export function serializeJoinRoomCommand(roomCode: string): string {
-  return serializeClientCommand({ type: "joinRoom", roomCode });
+export function serializeJoinRoomCommand(
+  roomCode: string,
+  displayName: string,
+  avatarPresetId?: AvatarPresetId,
+): string {
+  return serializeClientCommand({
+    type: "joinRoom",
+    roomCode,
+    displayName,
+    ...(avatarPresetId !== undefined ? { avatarPresetId } : {}),
+  });
 }
 
 /**
