@@ -1,5 +1,6 @@
 import type { ClientCommand } from "@skribbl/shared";
-import { clientCommandSchema } from "@skribbl/shared";
+import { clientCommandSchema, serializeClientCommand } from "@skribbl/shared";
+import { resolveGameWebSocketUrl } from "@/lib/game-ws-url";
 
 /**
  * Build a connectivity-check ping using only shared shapes (compile-time + runtime).
@@ -10,13 +11,18 @@ export function createPingCommand(ts = Date.now()): ClientCommand {
   return clientCommandSchema.parse(cmd);
 }
 
+/** Validated JSON line for `createRoom` — send over the game WebSocket after `open`. */
+export function serializeCreateRoomCommand(): string {
+  return serializeClientCommand({ type: "createRoom" });
+}
+
 /**
  * Optional dev helper: open a WebSocket and send one ping when NEXT_PUBLIC debug WS URL is set.
  * Gated so production bundles do not require a live game server.
  */
 export function maybeDemoPingWs(): void {
   if (process.env.NODE_ENV === "production") return;
-  const url = process.env.NEXT_PUBLIC_WS_URL;
+  const url = resolveGameWebSocketUrl();
   if (!url || process.env.NEXT_PUBLIC_ENABLE_WS_DEMO !== "1") return;
 
   try {

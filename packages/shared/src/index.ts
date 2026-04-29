@@ -5,6 +5,7 @@ export {
   safeParseServerEvent,
   parseClientCommand,
   parseServerEvent,
+  serializeClientCommand,
   serializeServerEvent,
   type ClientCommand,
   type ServerEvent,

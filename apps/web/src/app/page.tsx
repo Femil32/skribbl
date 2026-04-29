@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ComponentWsPingDemo } from "@/components/ComponentWsPingDemo";
 
 export default function Home() {
@@ -8,13 +9,16 @@ export default function Home() {
         <div className="card-body items-center text-center gap-4">
           <h1 className="card-title text-3xl font-semibold">Skribbl</h1>
           <p className="text-base-content/80">
-            Lobby and game UI ship in later stories. This shell confirms Next.js,
-            Tailwind, and DaisyUI build in the monorepo.
+            Create a room to get a shareable link and code. Game rounds ship in
+            later stories.
           </p>
           <div className="card-actions">
-            <span className="btn btn-primary btn-disabled" aria-disabled="true">
-              Create room (soon)
-            </span>
+            <Link href="/lobby" className="btn btn-primary">
+              Create room
+            </Link>
+            <Link href="/join" className="btn btn-ghost">
+              Join a room
+            </Link>
           </div>
         </div>
       </div>

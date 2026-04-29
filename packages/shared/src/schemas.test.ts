@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   clientCommandSchema,
   safeParseServerEvent,
+  serializeClientCommand,
   serverEventSchema,
 } from "./schemas.js";
 
@@ -39,5 +40,14 @@ describe("serverEventSchema", () => {
       phase: "lobby",
     });
     expect(result.success).toBe(true);
+  });
+});
+
+describe("serializeClientCommand", () => {
+  it("round-trips createRoom through clientCommandSchema", () => {
+    const line = serializeClientCommand({ type: "createRoom" });
+    const parsed = clientCommandSchema.safeParse(JSON.parse(line));
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data).toEqual({ type: "createRoom" });
   });
 });

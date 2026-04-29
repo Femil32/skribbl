@@ -83,3 +83,8 @@ export function parseServerEvent(data: unknown): ServerEvent {
 export function serializeServerEvent(event: ServerEvent): string {
   return JSON.stringify(serverEventSchema.parse(event));
 }
+
+/** Serialize a client command for WebSocket delivery (validates before send). */
+export function serializeClientCommand(cmd: ClientCommand): string {
+  return JSON.stringify(clientCommandSchema.parse(cmd));
+}
