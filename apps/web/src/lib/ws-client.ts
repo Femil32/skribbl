@@ -16,6 +16,11 @@ export function serializeCreateRoomCommand(): string {
   return serializeClientCommand({ type: "createRoom" });
 }
 
+/** Validated JSON line for `joinRoom` — outbound shape matches `@skribbl/shared`. */
+export function serializeJoinRoomCommand(roomCode: string): string {
+  return serializeClientCommand({ type: "joinRoom", roomCode });
+}
+
 /**
  * Optional dev helper: open a WebSocket and send one ping when NEXT_PUBLIC debug WS URL is set.
  * Gated so production bundles do not require a live game server.

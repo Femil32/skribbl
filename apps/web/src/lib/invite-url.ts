@@ -1,12 +1,14 @@
+import { normalizeRoomCode } from "@skribbl/shared";
+
 /**
  * Invite links for Story 1.3–1.4: stable path `/join?code=` for shareable URLs.
  * Optional `NEXT_PUBLIC_APP_URL` (no trailing slash) overrides `window.location.origin`
  * when the public web origin must differ from the current page (preview/staging).
  */
 
-/** Same normalization spirit as server `normalizeRoomCode` — display/join stub only. */
+/** Alias for `@skribbl/shared` `normalizeRoomCode` — identical rules for invites and join. */
 export function normalizeRoomCodeForDisplay(raw: string): string {
-  return raw.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  return normalizeRoomCode(raw);
 }
 
 export function resolvePublicWebOrigin(): string {

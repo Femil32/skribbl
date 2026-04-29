@@ -1,8 +1,25 @@
 import { describe, expect, it } from "vitest";
 import {
+  isValidRoomCodeForJoin,
+  normalizeRoomCode,
+} from "@skribbl/shared";
+import {
   buildRoomInviteUrl,
   normalizeRoomCodeForDisplay,
 } from "./invite-url";
+
+describe("invite URL vs shared room-code rules", () => {
+  it("display normalization matches shared normalizeRoomCode", () => {
+    const raw = " ab-12 \t";
+    expect(normalizeRoomCodeForDisplay(raw)).toBe(normalizeRoomCode(raw));
+  });
+
+  it("rejects invalid length for join parity with server", () => {
+    expect(isValidRoomCodeForJoin(normalizeRoomCodeForDisplay("SHORT"))).toBe(
+      false,
+    );
+  });
+});
 
 describe("normalizeRoomCodeForDisplay", () => {
   it("strips whitespace and non-alphanumeric, uppercases", () => {

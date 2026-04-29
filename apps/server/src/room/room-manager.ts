@@ -1,28 +1,20 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import {
+  ROOM_CODE_ALPHABET,
+  ROOM_CODE_LENGTH,
+  isValidRoomCodeForJoin,
+  normalizeRoomCode,
+} from "@skribbl/shared";
 import type { WebSocket } from "ws";
 import { resolveMaxPlayers } from "../config/game.js";
 import { Room } from "./room.js";
 
-/**
- * Canonical room codes after normalization: uppercase; length matches generated codes.
- * Alphabet excludes ambiguous 0/O, 1/I/L — generation uses only these chars so joins match server codes.
- */
-export const ROOM_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
-export const ROOM_CODE_LENGTH = 6;
-
-/** Strip whitespace and non-alphanumeric, uppercase (paste-friendly). */
-export function normalizeRoomCode(raw: string): string {
-  return raw.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
-}
-
-/** Join payloads must normalize to this shape (same charset/length as generated codes). */
-export function isValidRoomCodeForJoin(normalized: string): boolean {
-  if (normalized.length !== ROOM_CODE_LENGTH) return false;
-  for (const ch of normalized) {
-    if (!ROOM_CODE_ALPHABET.includes(ch)) return false;
-  }
-  return true;
-}
+export {
+  ROOM_CODE_ALPHABET,
+  ROOM_CODE_LENGTH,
+  isValidRoomCodeForJoin,
+  normalizeRoomCode,
+};
 
 export type JoinRoomFailureReason = "UNKNOWN_ROOM" | "ROOM_FULL";
 

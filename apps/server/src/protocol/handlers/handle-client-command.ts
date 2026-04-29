@@ -1,14 +1,12 @@
 import type { WebSocket } from "ws";
 import {
+  isValidRoomCodeForJoin,
+  normalizeRoomCode,
   serializeServerEvent,
   type ClientCommand,
   type ServerEvent,
 } from "@skribbl/shared";
-import {
-  isValidRoomCodeForJoin,
-  normalizeRoomCode,
-  type RoomManager,
-} from "../../room/room-manager.js";
+import type { RoomManager } from "../../room/room-manager.js";
 
 function sendServerEvent(
   ws: WebSocket,
