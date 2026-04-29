@@ -1,0 +1,14 @@
+{
+  "name": "skribbl",
+  "private": true,
+  "scripts": {
+    "dev:web": "pnpm --filter @skribbl/web dev",
+    "dev:server": "pnpm --filter @skribbl/server dev",
+    "build": "pnpm --filter @skribbl/shared build && pnpm --filter @skribbl/web build",
+    "typecheck": "pnpm --filter @skribbl/shared build && pnpm -r run typecheck",
+    "test": "pnpm --filter @skribbl/shared build && pnpm -r run test"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

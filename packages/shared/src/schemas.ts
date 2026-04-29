@@ -1,0 +1,63 @@
+/**
+ * Wire protocol (Skribbl) — single source of truth for JSON shapes.
+ *
+ * All client↔server commands and events accrete here as Zod schemas + inferred types.
+ * Do not duplicate command enums or message structs in apps/web or apps/server.
+ *
+ * Discriminant field on the wire: `type` (stable for demux in server handlers and client).
+ */
+
+import { z } from "zod";
+
+/** Client → server commands (extend in Story 1.2+ with joinRoom, etc.). */
+export const clientCommandSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("ping"),
+    ts: z.number().optional(),
+  }),
+  /**
+   * No-op placeholder — keeps the discriminated union pattern stable while
+   * handlers are added story-by-story.
+   */
+  z.object({
+    type: z.literal("noop"),
+  }),
+]);
+
+/** Server → client events pushed over WebSocket. */
+export const serverEventSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("pong"),
+    ts: z.number().optional(),
+  }),
+  z.object({
+    type: z.literal("error"),
+    code: z.string(),
+    message: z.string().optional(),
+    correlationId: z.string().optional(),
+  }),
+]);
+
+export type ClientCommand = z.infer<typeof clientCommandSchema>;
+export type ServerEvent = z.infer<typeof serverEventSchema>;
+
+export function safeParseClientCommand(data: unknown) {
+  return clientCommandSchema.safeParse(data);
+}
+
+export function safeParseServerEvent(data: unknown) {
+  return serverEventSchema.safeParse(data);
+}
+
+export function parseClientCommand(data: unknown): ClientCommand {
+  return clientCommandSchema.parse(data);
+}
+
+export function parseServerEvent(data: unknown): ServerEvent {
+  return serverEventSchema.parse(data);
+}
+
+/** Serialize a server event for WebSocket delivery (validates before send). */
+export function serializeServerEvent(event: ServerEvent): string {
+  return JSON.stringify(serverEventSchema.parse(event));
+}

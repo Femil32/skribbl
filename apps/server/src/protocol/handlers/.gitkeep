@@ -1,0 +1,2 @@
+// Command handlers (joinRoom, strokes, …) — Story 1.2+.
+export {};
