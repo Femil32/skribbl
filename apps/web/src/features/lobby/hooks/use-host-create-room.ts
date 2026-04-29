@@ -17,6 +17,7 @@ import {
   serializeCreateRoomCommand,
   serializeReconnectHostCommand,
   serializeStartMatchCommand,
+  serializeChooseWordCommand,
 } from "@/lib/ws-client";
 
 export type HostLobbyState =
@@ -35,6 +36,13 @@ export type HostLobbyState =
       /** Server match meta (Story 2.2+). */
       drawerPlayerId?: string;
       matchRoundIndex?: number;
+      /** Offer payload — drawer only; cleared when phase leaves `choosingWord`. */
+      wordChoiceOffer?: {
+        words: readonly [string, string, string];
+        phaseDeadlineMs: number;
+        matchRoundIndex: number;
+      } | null;
+      wordChoicePickError?: string | null;
     }
   | { status: "error"; message: string };
 
@@ -57,6 +65,8 @@ export type UseHostCreateRoomResult = {
   awaitingRoomHandshake: boolean;
   /** Authoritative host start — no-op unless lobby state is active. */
   startMatch: () => void;
+  /** Send drawer word pick (no-op unless lobby socket open). */
+  chooseWord: (choiceIndex: 0 | 1 | 2) => void;
 };
 
 const TERMINAL_PROTOCOL_CODES_AFTER_LOBBY = new Set([
@@ -189,6 +199,8 @@ export function useHostCreateRoom(
             phase: parsed.data.phase,
             players: [],
             isStartPending: false,
+            wordChoiceOffer: null,
+            wordChoicePickError: null,
           });
           setTransport("live");
           return;
@@ -209,6 +221,19 @@ export function useHostCreateRoom(
           setState((prev) => {
             if (prev.status !== "lobby") return prev;
             if (mp.roomId !== prev.roomId) return prev;
+            let wordChoiceOffer = prev.wordChoiceOffer;
+            let wordChoicePickError = prev.wordChoicePickError;
+            if (mp.phase !== "choosingWord") {
+              wordChoiceOffer = null;
+              wordChoicePickError = null;
+            } else if (
+              mp.matchRoundIndex !== undefined &&
+              prev.matchRoundIndex !== undefined &&
+              mp.matchRoundIndex !== prev.matchRoundIndex
+            ) {
+              wordChoiceOffer = null;
+              wordChoicePickError = null;
+            }
             return {
               ...prev,
               phase: mp.phase,
@@ -217,6 +242,33 @@ export function useHostCreateRoom(
                 mp.matchRoundIndex !== undefined
                   ? mp.matchRoundIndex
                   : prev.matchRoundIndex,
+              wordChoiceOffer,
+              wordChoicePickError,
+            };
+          });
+          return;
+        }
+        case "wordChoiceOffer": {
+          const o = parsed.data;
+          setState((prev) => {
+            if (prev.status !== "lobby") return prev;
+            if (o.roomId !== prev.roomId) return prev;
+            if (prev.phase !== "choosingWord") return prev;
+            if (prev.playerId !== prev.drawerPlayerId) return prev;
+            if (
+              prev.matchRoundIndex !== undefined &&
+              o.matchRoundIndex !== prev.matchRoundIndex
+            ) {
+              return prev;
+            }
+            return {
+              ...prev,
+              wordChoiceOffer: {
+                words: o.words,
+                phaseDeadlineMs: o.phaseDeadlineMs,
+                matchRoundIndex: o.matchRoundIndex,
+              },
+              wordChoicePickError: null,
             };
           });
           return;
@@ -264,6 +316,23 @@ export function useHostCreateRoom(
             setState({
               status: "error",
               message: messageForProtocolErrorCode(err.code),
+            });
+            return;
+          }
+          const wordPickRecoverable = new Set([
+            "NOT_DRAWER",
+            "BAD_CHOICE",
+            "ALREADY_CHOSE",
+            "NO_WORD_OFFER",
+            "WRONG_PHASE",
+          ]);
+          if (wordPickRecoverable.has(err.code)) {
+            setState((prev) => {
+              if (prev.status !== "lobby") return prev;
+              return {
+                ...prev,
+                wordChoicePickError: messageForProtocolErrorCode(err.code),
+              };
             });
             return;
           }
@@ -325,6 +394,23 @@ export function useHostCreateRoom(
     }
   }, []);
 
+  const chooseWord = useCallback((choiceIndex: 0 | 1 | 2) => {
+    const w = wsRef.current;
+    if (!w || w.readyState !== WebSocket.OPEN) return;
+    setState((prev) =>
+      prev.status === "lobby" ? { ...prev, wordChoicePickError: null } : prev,
+    );
+    try {
+      w.send(serializeChooseWordCommand(choiceIndex));
+    } catch {
+      setState((prev) =>
+        prev.status === "lobby"
+          ? { ...prev, wordChoicePickError: "Could not send choice. Try again." }
+          : prev,
+      );
+    }
+  }, []);
+
   if (!shouldConnect) {
     return {
       state: { status: "idle" },
@@ -333,6 +419,7 @@ export function useHostCreateRoom(
       transportErrorMessage: undefined,
       awaitingRoomHandshake: false,
       startMatch,
+      chooseWord,
     };
   }
 
@@ -344,6 +431,7 @@ export function useHostCreateRoom(
       transportErrorMessage: missingGameWebSocketUrlUserMessage(),
       awaitingRoomHandshake: false,
       startMatch,
+      chooseWord,
     };
   }
 
@@ -355,6 +443,7 @@ export function useHostCreateRoom(
       transportErrorMessage,
       awaitingRoomHandshake: false,
       startMatch,
+      chooseWord,
     };
   }
 
@@ -365,5 +454,6 @@ export function useHostCreateRoom(
     transportErrorMessage,
     awaitingRoomHandshake: awaitingHandshake,
     startMatch,
+    chooseWord,
   };
 }

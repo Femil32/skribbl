@@ -263,6 +263,28 @@ export function handleClientCommand(
       }
       return;
     }
+    case "chooseWord": {
+      const outcome = roomManager.chooseWord(ws, cmd.choiceIndex);
+      if (!outcome.ok) {
+        sendProtocolError(
+          ws,
+          outcome.code,
+          outcome.code === "WRONG_PHASE"
+            ? "Not choosing a word right now."
+            : outcome.code === "NOT_DRAWER"
+              ? "Only the drawer picks the word."
+              : outcome.code === "BAD_CHOICE"
+                ? "Pick one of the three words."
+                : outcome.code === "ALREADY_CHOSE"
+                  ? "Word already chosen for this round."
+                  : outcome.code === "NO_WORD_OFFER"
+                    ? "No word options available. Wait for the round to start."
+                    : "Could not choose word.",
+          roomManager,
+        );
+      }
+      return;
+    }
     default: {
       const _exhaustive: never = cmd;
       return _exhaustive;

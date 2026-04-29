@@ -47,10 +47,16 @@ describe("clientCommandSchema", () => {
     ).toBe(false);
   });
 
-  it("accepts startMatch with no extra fields", () => {
-    const result = clientCommandSchema.safeParse({ type: "startMatch" });
+  it("accepts chooseWord", () => {
+    const result = clientCommandSchema.safeParse({ type: "chooseWord", choiceIndex: 1 });
     expect(result.success).toBe(true);
-    if (result.success) expect(result.data).toEqual({ type: "startMatch" });
+    if (result.success) expect(result.data).toEqual({ type: "chooseWord", choiceIndex: 1 });
+  });
+
+  it("rejects chooseWord index out of range", () => {
+    expect(clientCommandSchema.safeParse({ type: "chooseWord", choiceIndex: 3 }).success).toBe(
+      false,
+    );
   });
 });
 
@@ -103,14 +109,13 @@ describe("serverEventSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("accepts matchPhase with deadline", () => {
+  it("accepts wordChoiceOffer", () => {
     const result = serverEventSchema.safeParse({
-      type: "matchPhase",
+      type: "wordChoiceOffer",
       roomId: "550e8400-e29b-41d4-a716-446655440000",
-      phase: "drawing",
+      words: ["apple", "banana", "citrus"],
+      matchRoundIndex: 0,
       phaseDeadlineMs: 1_700_000_000_000,
-      drawerPlayerId: "drawer-1",
-      matchRoundIndex: 1,
     });
     expect(result.success).toBe(true);
   });

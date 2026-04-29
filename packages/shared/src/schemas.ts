@@ -82,6 +82,11 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("startMatch"),
   }),
+  /** Drawer-only: pick one of three words during `choosingWord` (Story 2.3). */
+  z.object({
+    type: z.literal("chooseWord"),
+    choiceIndex: z.number().int().min(0).max(2),
+  }),
 ]);
 
 /** Server → client events pushed over WebSocket. */
@@ -137,6 +142,17 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     /** Authoritative drawer for the active round (Story 2.2). */
     drawerPlayerId: z.string().optional(),
     matchRoundIndex: z.number().int().nonnegative().optional(),
+  }),
+  /**
+   * Drawer-only: three distinct word options for the current round (Story 2.3).
+   * Guessers must never receive this event.
+   */
+  z.object({
+    type: z.literal("wordChoiceOffer"),
+    roomId: z.string(),
+    words: z.tuple([z.string().min(1), z.string().min(1), z.string().min(1)]),
+    matchRoundIndex: z.number().int().nonnegative(),
+    phaseDeadlineMs: z.number(),
   }),
 ]);
 

@@ -35,6 +35,14 @@ export function messageForProtocolErrorCode(code: string): string {
       return "You need at least two players before starting.";
     case "WRONG_PHASE":
       return "That action is not available for this room right now.";
+    case "NOT_DRAWER":
+      return "Only the drawer picks the secret word.";
+    case "BAD_CHOICE":
+      return "Pick one of the three words shown.";
+    case "ALREADY_CHOSE":
+      return "You already chose a word for this round.";
+    case "NO_WORD_OFFER":
+      return "Word choices are not ready yet. Wait a moment and try again.";
     default:
       return "Something went wrong. Try again.";
   }

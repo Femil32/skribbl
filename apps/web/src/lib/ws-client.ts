@@ -61,6 +61,11 @@ export function serializeStartMatchCommand(): string {
   return serializeClientCommand({ type: "startMatch" });
 }
 
+/** Drawer validated word pick (Story 2.3). */
+export function serializeChooseWordCommand(choiceIndex: 0 | 1 | 2): string {
+  return serializeClientCommand({ type: "chooseWord", choiceIndex });
+}
+
 /**
  * Optional dev helper: open a WebSocket and send one ping when NEXT_PUBLIC debug WS URL is set.
  * Gated so production bundles do not require a live game server.

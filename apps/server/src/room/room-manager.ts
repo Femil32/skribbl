@@ -17,6 +17,7 @@ import {
   resolveRoundsPerMatch,
   resolveWordChoiceMs,
 } from "../config/game.js";
+import type { WordBank } from "../words/word-bank.js";
 import type { LobbySessionIdentity } from "./lobby-session.js";
 import { Room } from "./room.js";
 
@@ -53,9 +54,11 @@ export class RoomManager {
   private readonly matchTimersByRoomId = new Map<string, ReturnType<typeof setTimeout>[]>();
 
   readonly maxPlayersPerRoom: number;
+  private readonly wordBank: WordBank;
 
-  constructor(maxPlayersPerRoom?: number) {
+  constructor(maxPlayersPerRoom: number | undefined, wordBank: WordBank) {
     this.maxPlayersPerRoom = maxPlayersPerRoom ?? resolveMaxPlayers();
+    this.wordBank = wordBank;
   }
 
   /** Sorted by `playerId` (deterministic roster order — Story 1.6). */
@@ -84,6 +87,11 @@ export class RoomManager {
   }
 
   private clearMatchTimers(roomId: string): void {
+    const room = this.roomsById.get(roomId);
+    if (room?.wordChoiceTimerHandle) {
+      clearTimeout(room.wordChoiceTimerHandle);
+      room.wordChoiceTimerHandle = null;
+    }
     const pending = this.matchTimersByRoomId.get(roomId);
     if (!pending) return;
     for (const t of pending) clearTimeout(t);
@@ -116,8 +124,103 @@ export class RoomManager {
     for (const sock of room.sockets) this.sendEvent(sock, payload);
   }
 
+  private emitWordChoiceOffer(
+    room: Room,
+    drawerPlayerId: string,
+    words: [string, string, string],
+    matchRoundIndex: number,
+    phaseDeadlineMs: number,
+  ): void {
+    for (const sock of room.sockets) {
+      const id = this.socketLobbyIdentity.get(sock);
+      if (id?.playerId !== drawerPlayerId) continue;
+      this.sendEvent(sock, {
+        type: "wordChoiceOffer",
+        roomId: room.id,
+        words,
+        matchRoundIndex,
+        phaseDeadlineMs,
+      });
+    }
+  }
+
+  private lockWordAndBeginDrawing(
+    room: Room,
+    timeouts: ReturnType<typeof setTimeout>[],
+    drawerId: string,
+    roundIndex: number,
+    word: string,
+  ): void {
+    room.roundSecretWord = word;
+    room.phase = "drawing";
+    this.broadcastMatchPhase(room, Date.now() + resolveRoundMs(), drawerId, roundIndex);
+    const drawingEnd = setTimeout(() => {
+      if (!this.roomsById.get(room.id) || room.phase !== "drawing") return;
+      room.phase = "roundResult";
+      this.broadcastMatchPhase(room, undefined, drawerId, roundIndex);
+      if (roundIndex + 1 < resolveRoundsPerMatch()) {
+        const next = setTimeout(
+          () => this.queueRoundStart(room, roundIndex + 1, 0, "roundResult", timeouts),
+          resolveInterRoundGapMs(),
+        );
+        timeouts.push(next);
+      }
+    }, resolveRoundMs());
+    timeouts.push(drawingEnd);
+  }
+
+  private onWordChoiceDeadline(
+    room: Room,
+    timeouts: ReturnType<typeof setTimeout>[],
+    drawerId: string,
+    roundIndex: number,
+  ): void {
+    room.wordChoiceTimerHandle = null;
+    if (!this.roomsById.get(room.id)) return;
+    if (room.phase !== "choosingWord") return;
+    const opts = room.roundWordOptions;
+    if (!opts) return;
+    if (room.roundSecretWord !== null) return;
+    this.lockWordAndBeginDrawing(room, timeouts, drawerId, roundIndex, opts[0]!);
+  }
+
+  /** Chain entry: first round after `matchStarting`, or later rounds after `roundResult` gap. */
+  private queueRoundStart(
+    room: Room,
+    roundIndex: number,
+    leadMs: number,
+    gatePhase: "matchStarting" | "roundResult",
+    timeouts: ReturnType<typeof setTimeout>[],
+  ): void {
+    const order = room.matchPlayerOrder;
+    if (!order || order.length === 0) return;
+
+    const t = setTimeout(() => {
+      if (!this.roomsById.get(room.id)) return;
+      if (room.phase !== gatePhase) return;
+
+      const drawerId = order[roundIndex % order.length]!;
+      room.currentDrawerPlayerId = drawerId;
+      room.matchRoundIndex = roundIndex;
+      room.roundWordOptions = this.wordBank.sampleThree();
+      room.roundSecretWord = null;
+      room.phase = "choosingWord";
+      const choiceDeadline = Date.now() + resolveWordChoiceMs();
+      this.broadcastMatchPhase(room, choiceDeadline, drawerId, roundIndex);
+      this.emitWordChoiceOffer(room, drawerId, room.roundWordOptions, roundIndex, choiceDeadline);
+
+      const wordChoiceTimer = setTimeout(
+        () => this.onWordChoiceDeadline(room, timeouts, drawerId, roundIndex),
+        resolveWordChoiceMs(),
+      );
+      room.wordChoiceTimerHandle = wordChoiceTimer;
+      timeouts.push(wordChoiceTimer);
+    }, leadMs);
+    timeouts.push(t);
+  }
+
   /**
-   * Epic 2.1+2.2: server timers, round-robin drawer (`matchPlayerOrder`) per round.
+   * Epic 2.1–2.3: server timers, round-robin drawer, word bank + drawer choice.
    */
   private scheduleMatchFlow(room: Room): void {
     this.clearMatchTimers(room.id);
@@ -128,53 +231,35 @@ export class RoomManager {
     room.matchPlayerOrder = roster.map((p) => p.playerId);
     room.matchRoundIndex = 0;
 
-    const schedule = (ms: number, fn: () => void) => {
-      timeouts.push(setTimeout(fn, ms));
-    };
+    this.queueRoundStart(room, 0, resolveMatchStartHandshakeMs(), "matchStarting", timeouts);
+  }
 
-    const runRound = (roundIndex: number, leadMs: number, gatePhase: "matchStarting" | "roundResult") => {
-      const order = room.matchPlayerOrder;
-      if (!order || order.length === 0) return;
+  /** Drawer-only: lock word and skip remaining word-choice wait (Story 2.3). */
+  chooseWord(
+    ws: WebSocket,
+    choiceIndex: number,
+  ): { ok: true } | { ok: false; code: string } {
+    const room = this.getRoomForSocket(ws);
+    const session = this.getLobbySession(ws);
+    if (!room || !session) return { ok: false, code: "INTERNAL" };
+    if (room.phase !== "choosingWord") return { ok: false, code: "WRONG_PHASE" };
+    if (session.playerId !== room.currentDrawerPlayerId) return { ok: false, code: "NOT_DRAWER" };
+    const opts = room.roundWordOptions;
+    if (!opts) return { ok: false, code: "NO_WORD_OFFER" };
+    const word = opts[choiceIndex];
+    if (word === undefined) return { ok: false, code: "BAD_CHOICE" };
+    if (room.roundSecretWord !== null) return { ok: false, code: "ALREADY_CHOSE" };
 
-      schedule(leadMs, () => {
-        if (!this.roomsById.get(room.id)) return;
-        if (room.phase !== gatePhase) return;
-
-        const drawerId = order[roundIndex % order.length]!;
-        room.currentDrawerPlayerId = drawerId;
-        room.matchRoundIndex = roundIndex;
-
-        room.phase = "choosingWord";
-        this.broadcastMatchPhase(
-          room,
-          Date.now() + resolveWordChoiceMs(),
-          drawerId,
-          roundIndex,
-        );
-        schedule(resolveWordChoiceMs(), () => {
-          if (!this.roomsById.get(room.id) || room.phase !== "choosingWord") return;
-          room.phase = "drawing";
-          this.broadcastMatchPhase(
-            room,
-            Date.now() + resolveRoundMs(),
-            drawerId,
-            roundIndex,
-          );
-          schedule(resolveRoundMs(), () => {
-            if (!this.roomsById.get(room.id) || room.phase !== "drawing") return;
-            room.phase = "roundResult";
-            this.broadcastMatchPhase(room, undefined, drawerId, roundIndex);
-            if (roundIndex + 1 < resolveRoundsPerMatch()) {
-              schedule(resolveInterRoundGapMs(), () =>
-                runRound(roundIndex + 1, 0, "roundResult"),
-              );
-            }
-          });
-        });
-      });
-    };
-
-    runRound(0, resolveMatchStartHandshakeMs(), "matchStarting");
+    if (room.wordChoiceTimerHandle) {
+      clearTimeout(room.wordChoiceTimerHandle);
+      room.wordChoiceTimerHandle = null;
+    }
+    const timeouts = this.matchTimersByRoomId.get(room.id);
+    if (!timeouts) return { ok: false, code: "INTERNAL" };
+    const drawerId = room.currentDrawerPlayerId;
+    if (!drawerId) return { ok: false, code: "INTERNAL" };
+    this.lockWordAndBeginDrawing(room, timeouts, drawerId, room.matchRoundIndex, word);
+    return { ok: true };
   }
 
   broadcastLobbyRoster(room: Room): void {

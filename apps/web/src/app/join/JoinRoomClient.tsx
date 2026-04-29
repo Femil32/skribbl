@@ -18,6 +18,7 @@ import { useGuestJoinRoom } from "@/features/lobby/hooks/use-guest-join-room";
 import { LobbyConnectionBanner } from "@/features/lobby/components/LobbyConnectionBanner";
 import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster";
 import { PhaseBar } from "@/features/match/components/PhaseBar";
+import { WordChoicePanel } from "@/features/match/components/WordChoicePanel";
 
 const formatHintId = "join-room-code-format-hint";
 const protocolErrId = "join-room-protocol-error";
@@ -119,6 +120,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
     connectionReason: guestConnectionReason,
     transportErrorMessage: guestTransportError,
     awaitingRoomHandshake: guestAwaitingHandshake,
+    chooseWord: guestChooseWord,
   } = useGuestJoinRoom({
     activeJoinAttempt,
     connectionAttemptId: joinGeneration,
@@ -233,6 +235,16 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                   players={guestState.players}
                   drawerPlayerId={guestState.drawerPlayerId}
                   matchRoundIndex={guestState.matchRoundIndex}
+                />
+              ) : null}
+              {guestState.phase === "choosingWord" &&
+              guestState.playerId === guestState.drawerPlayerId ? (
+                <WordChoicePanel
+                  words={guestState.wordChoiceOffer?.words ?? null}
+                  isLoading={guestState.wordChoiceOffer == null}
+                  errorMessage={guestState.wordChoicePickError ?? null}
+                  onPick={guestChooseWord}
+                  disabled={guestTransport !== "live"}
                 />
               ) : null}
               {isMatchFlowPhase(guestState.phase) ? (

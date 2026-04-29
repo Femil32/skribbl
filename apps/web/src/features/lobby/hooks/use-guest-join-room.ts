@@ -6,7 +6,7 @@ import {
   normalizeRoomCode,
   safeParseServerEvent,
 } from "@skribbl/shared";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   messageForProtocolErrorCode,
   protocolParseErrorMessage,
@@ -17,7 +17,7 @@ import {
 } from "@/features/lobby/lib/transport-user-messages";
 import type { LobbyConnectionReason, LobbyTransportPhase } from "@/features/lobby/lib/lobby-transport";
 import { missingGameWebSocketUrlUserMessage, resolveGameWebSocketUrl } from "@/lib/game-ws-url";
-import { serializeJoinRoomCommand } from "@/lib/ws-client";
+import { serializeChooseWordCommand, serializeJoinRoomCommand } from "@/lib/ws-client";
 
 export type GuestJoinLobbyState =
   | { status: "idle" }
@@ -34,6 +34,12 @@ export type GuestJoinLobbyState =
       players: LobbyRosterPlayer[];
       drawerPlayerId?: string;
       matchRoundIndex?: number;
+      wordChoiceOffer?: {
+        words: readonly [string, string, string];
+        phaseDeadlineMs: number;
+        matchRoundIndex: number;
+      } | null;
+      wordChoicePickError?: string | null;
     }
   | {
       /** Server `error.code` when the failure came from an `error` event; omit for generic failures. */
@@ -56,6 +62,7 @@ export type UseGuestJoinRoomResult = {
   connectionReason: LobbyConnectionReason;
   transportErrorMessage?: string;
   awaitingRoomHandshake: boolean;
+  chooseWord: (choiceIndex: 0 | 1 | 2) => void;
 };
 
 /**
@@ -92,6 +99,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
 
   const reachedJoinedRef = useRef(false);
   const closedWhileJoinedRef = useRef(false);
+  const wsRef = useRef<WebSocket | null>(null);
 
   useLayoutEffect(() => {
     if (!activeJoinAttempt || !wsUrl || !isValidRoomCodeForJoin(normalized)) {
@@ -128,6 +136,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
     setTransport(retryAfterJoinedDrop ? "reconnecting" : "connecting");
 
     const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
     let closedByCleanup = false;
 
     function fail(message: string) {
@@ -178,6 +187,8 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
             displayName: parsed.data.displayName,
             avatarPresetId: parsed.data.avatarPresetId,
             players: [],
+            wordChoiceOffer: null,
+            wordChoicePickError: null,
           });
           setTransport("live");
           return;
@@ -199,6 +210,19 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
           setState((prev) => {
             if (prev.status !== "joined") return prev;
             if (mp.roomId !== prev.roomId) return prev;
+            let wordChoiceOffer = prev.wordChoiceOffer;
+            let wordChoicePickError = prev.wordChoicePickError;
+            if (mp.phase !== "choosingWord") {
+              wordChoiceOffer = null;
+              wordChoicePickError = null;
+            } else if (
+              mp.matchRoundIndex !== undefined &&
+              prev.matchRoundIndex !== undefined &&
+              mp.matchRoundIndex !== prev.matchRoundIndex
+            ) {
+              wordChoiceOffer = null;
+              wordChoicePickError = null;
+            }
             return {
               ...prev,
               phase: mp.phase,
@@ -207,6 +231,33 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
                 mp.matchRoundIndex !== undefined
                   ? mp.matchRoundIndex
                   : prev.matchRoundIndex,
+              wordChoiceOffer,
+              wordChoicePickError,
+            };
+          });
+          return;
+        }
+        case "wordChoiceOffer": {
+          const o = parsed.data;
+          setState((prev) => {
+            if (prev.status !== "joined") return prev;
+            if (o.roomId !== prev.roomId) return prev;
+            if (prev.phase !== "choosingWord") return prev;
+            if (prev.playerId !== prev.drawerPlayerId) return prev;
+            if (
+              prev.matchRoundIndex !== undefined &&
+              o.matchRoundIndex !== prev.matchRoundIndex
+            ) {
+              return prev;
+            }
+            return {
+              ...prev,
+              wordChoiceOffer: {
+                words: o.words,
+                phaseDeadlineMs: o.phaseDeadlineMs,
+                matchRoundIndex: o.matchRoundIndex,
+              },
+              wordChoicePickError: null,
             };
           });
           return;
@@ -223,29 +274,50 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
           });
           return;
         }
-        case "error":
+        case "error": {
+          const errEv = parsed.data;
+          if (errEv.type !== "error") return;
+          const code = errEv.code;
           if (!reachedJoinedRef.current) {
             setTransport("fatal");
-            setTransportErrorMessage(messageForProtocolErrorCode(parsed.data.code));
+            setTransportErrorMessage(messageForProtocolErrorCode(code));
             setState({
               status: "error",
-              message: messageForProtocolErrorCode(parsed.data.code),
-              protocolCode: parsed.data.code,
+              message: messageForProtocolErrorCode(code),
+              protocolCode: code,
             });
             return;
           }
-          if (TERMINAL_PROTOCOL_CODES_AFTER_JOINED.has(parsed.data.code)) {
+          if (TERMINAL_PROTOCOL_CODES_AFTER_JOINED.has(code)) {
             reachedJoinedRef.current = false;
             setTransport("fatal");
-            setTransportErrorMessage(messageForProtocolErrorCode(parsed.data.code));
+            setTransportErrorMessage(messageForProtocolErrorCode(code));
             setState({
               status: "error",
-              message: messageForProtocolErrorCode(parsed.data.code),
-              protocolCode: parsed.data.code,
+              message: messageForProtocolErrorCode(code),
+              protocolCode: code,
+            });
+            return;
+          }
+          const wordPickRecoverable = new Set([
+            "NOT_DRAWER",
+            "BAD_CHOICE",
+            "ALREADY_CHOSE",
+            "NO_WORD_OFFER",
+            "WRONG_PHASE",
+          ]);
+          if (wordPickRecoverable.has(code)) {
+            setState((prev) => {
+              if (prev.status !== "joined") return prev;
+              return {
+                ...prev,
+                wordChoicePickError: messageForProtocolErrorCode(code),
+              };
             });
             return;
           }
           return;
+        }
         case "pong":
         case "roomCreated":
           return;
@@ -274,6 +346,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
 
     return () => {
       closedByCleanup = true;
+      wsRef.current = null;
       ws.close();
     };
   }, [
@@ -286,6 +359,23 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
   ]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  const chooseWord = useCallback((choiceIndex: 0 | 1 | 2) => {
+    const w = wsRef.current;
+    if (!w || w.readyState !== WebSocket.OPEN) return;
+    setState((prev) =>
+      prev.status === "joined" ? { ...prev, wordChoicePickError: null } : prev,
+    );
+    try {
+      w.send(serializeChooseWordCommand(choiceIndex));
+    } catch {
+      setState((prev) =>
+        prev.status === "joined"
+          ? { ...prev, wordChoicePickError: "Could not send choice. Try again." }
+          : prev,
+      );
+    }
+  }, []);
+
   if (!activeJoinAttempt) {
     return {
       state: { status: "idle" },
@@ -293,6 +383,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
       connectionReason: "first",
       transportErrorMessage: undefined,
       awaitingRoomHandshake: false,
+      chooseWord,
     };
   }
 
@@ -303,6 +394,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
       connectionReason: "first",
       transportErrorMessage: missingGameWebSocketUrlUserMessage(),
       awaitingRoomHandshake: false,
+      chooseWord,
     };
   }
 
@@ -315,6 +407,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
       connectionReason,
       transportErrorMessage,
       awaitingRoomHandshake: false,
+      chooseWord,
     };
   }
 
@@ -324,5 +417,6 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
     connectionReason,
     transportErrorMessage,
     awaitingRoomHandshake,
+    chooseWord,
   };
 }

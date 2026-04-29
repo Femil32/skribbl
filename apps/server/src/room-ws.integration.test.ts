@@ -6,6 +6,7 @@ import {
   parseServerEvent,
 } from "@skribbl/shared";
 import { RoomManager } from "./room/room-manager.js";
+import { createStaticWordBank } from "./words/word-bank.js";
 import {
   resolveInterRoundGapMs,
   resolveMatchStartHandshakeMs,
@@ -27,6 +28,8 @@ function captureWs(): { ws: WebSocket; sent: string[] } {
   return { ws: ws as unknown as WebSocket, sent };
 }
 
+const integrationWordBank = () =>
+  createStaticWordBank(["apple", "banana", "citrus", "dragon", "eagle"]);
 const hostIdentity = { displayName: "Hosty", avatarPresetId: "preset-1" as const };
 const guestIdentity = { displayName: "Guesty", avatarPresetId: "preset-2" as const };
 
@@ -40,7 +43,7 @@ function lastLobbyRoster(sent: string[]) {
 
 describe("handleClientCommand + RoomManager", () => {
   it("createRoom then joinRoom succeeds for second socket", () => {
-    const rm = new RoomManager(8);
+    const rm = new RoomManager(8, integrationWordBank());
     const a = captureWs();
     const b = captureWs();
 
@@ -67,7 +70,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("unknown room yields UNKNOWN_ROOM", () => {
-    const rm = new RoomManager(8);
+    const rm = new RoomManager(8, integrationWordBank());
     const { ws, sent } = captureWs();
     handleClientCommand(
       ws,
@@ -81,7 +84,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("malformed room code yields BAD_CODE", () => {
-    const rm = new RoomManager(8);
+    const rm = new RoomManager(8, integrationWordBank());
     const { ws, sent } = captureWs();
     handleClientCommand(
       ws,
@@ -95,7 +98,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("empty display name yields BAD_NICKNAME", () => {
-    const rm = new RoomManager(8);
+    const rm = new RoomManager(8, integrationWordBank());
     const { ws, sent } = captureWs();
     handleClientCommand(
       ws,
@@ -109,7 +112,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("ROOM_FULL yields stable error.code through handleClientCommand", () => {
-    const rm = new RoomManager(2);
+    const rm = new RoomManager(2, integrationWordBank());
     const a = captureWs();
     const b = captureWs();
     const c = captureWs();
@@ -143,7 +146,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("INVALID_AVATAR when handler bypasses schema (unsupported preset string)", () => {
-    const rm = new RoomManager(8);
+    const rm = new RoomManager(8, integrationWordBank());
     const a = captureWs();
     handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
     const created = parseServerEvent(JSON.parse(a.sent[0]!));
@@ -168,7 +171,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("NICKNAME_TOO_LONG on createRoom", () => {
-    const rm = new RoomManager(8);
+    const rm = new RoomManager(8, integrationWordBank());
     const { ws, sent } = captureWs();
     const tooLong = "z".repeat(NICKNAME_MAX_GRAPHEMES + 1);
     handleClientCommand(
@@ -198,7 +201,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("lobby roster after create and join: host flagged, deterministic order by playerId", () => {
-    const rm = new RoomManager(8);
+    const rm = new RoomManager(8, integrationWordBank());
     const a = captureWs();
     const b = captureWs();
 
@@ -225,7 +228,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("startMatch: two players succeeds; emits matchStarting to both", () => {
-    const rm = new RoomManager(8);
+    const rm = new RoomManager(8, integrationWordBank());
     const a = captureWs();
     const b = captureWs();
 
@@ -258,7 +261,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
-      const rm = new RoomManager(8);
+      const rm = new RoomManager(8, integrationWordBank());
       const a = captureWs();
       const b = captureWs();
 
@@ -301,7 +304,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "2");
     vi.useFakeTimers();
     try {
-      const rm = new RoomManager(8);
+      const rm = new RoomManager(8, integrationWordBank());
       const a = captureWs();
       const b = captureWs();
 
@@ -340,7 +343,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("startMatch: non-host rejected with NOT_HOST", () => {
-    const rm = new RoomManager(8);
+    const rm = new RoomManager(8, integrationWordBank());
     const a = captureWs();
     const b = captureWs();
 
@@ -361,7 +364,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("startMatch: one player yields NOT_ENOUGH_PLAYERS", () => {
-    const rm = new RoomManager(8);
+    const rm = new RoomManager(8, integrationWordBank());
     const a = captureWs();
     handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
     handleClientCommand(a.ws, { type: "startMatch" }, rm);
@@ -371,7 +374,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("join after start yields JOIN_NOT_ALLOWED", () => {
-    const rm = new RoomManager(8);
+    const rm = new RoomManager(8, integrationWordBank());
     const a = captureWs();
     const b = captureWs();
     const c = captureWs();
@@ -404,7 +407,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("leaveSocketRoom broadcasts updated roster", () => {
-    const rm = new RoomManager(8);
+    const rm = new RoomManager(8, integrationWordBank());
     const a = captureWs();
     const b = captureWs();
 
@@ -425,7 +428,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("reconnectHost reclaims lobby when the room still exists", () => {
-    const rm = new RoomManager(8);
+    const rm = new RoomManager(8, integrationWordBank());
     const host = captureWs();
     const guest = captureWs();
 
@@ -465,7 +468,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("reconnectHost after room dissolved yields HOST_SESSION_LOST", () => {
-    const rm = new RoomManager(8);
+    const rm = new RoomManager(8, integrationWordBank());
     const host = captureWs();
     handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
     const created = parseServerEvent(JSON.parse(host.sent[0]!));
@@ -487,5 +490,66 @@ describe("handleClientCommand + RoomManager", () => {
     const ev = parseServerEvent(JSON.parse(host2.sent[0]!));
     expect(ev.type).toBe("error");
     if (ev.type === "error") expect(ev.code).toBe("HOST_SESSION_LOST");
+  });
+
+  it("choosingWord: drawer receives wordChoiceOffer only; chooseWord enters drawing early", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.useFakeTimers();
+    try {
+      const rm = new RoomManager(8, integrationWordBank());
+      const host = captureWs();
+      const guest = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        guest.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+
+      function choosingDrawerId(sent: string[]): string | undefined {
+        const ev = sent
+          .map((line) => parseServerEvent(JSON.parse(line)))
+          .find((e) => e.type === "matchPhase" && e.phase === "choosingWord");
+        return ev?.type === "matchPhase" ? ev.drawerPlayerId : undefined;
+      }
+
+      const drawerId = choosingDrawerId(host.sent) ?? choosingDrawerId(guest.sent);
+      expect(drawerId).toBeTruthy();
+
+      const drawerIsHost = drawerId === created.playerId;
+      const drawerCapt = drawerIsHost ? host : guest;
+      const guesserCapt = drawerIsHost ? guest : host;
+
+      const offersDrawer = drawerCapt.sent
+        .map((line) => parseServerEvent(JSON.parse(line)))
+        .filter((e) => e.type === "wordChoiceOffer");
+      expect(offersDrawer.length).toBeGreaterThanOrEqual(1);
+      if (offersDrawer[0]?.type === "wordChoiceOffer") {
+        expect(offersDrawer[0].words.length).toBe(3);
+      }
+
+      expect(
+        guesserCapt.sent
+          .map((line) => parseServerEvent(JSON.parse(line)))
+          .some((e) => e.type === "wordChoiceOffer"),
+      ).toBe(false);
+
+      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex: 2 }, rm);
+
+      const allPhases = [...host.sent, ...guest.sent]
+        .map((line) => parseServerEvent(JSON.parse(line)))
+        .filter((e): e is Extract<typeof e, { type: "matchPhase" }> => e.type === "matchPhase");
+      expect(allPhases.some((p) => p.phase === "drawing")).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
   });
 });

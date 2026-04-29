@@ -7,6 +7,11 @@ import {
   isValidRoomCodeForJoin,
   ROOM_CODE_LENGTH,
 } from "./room-manager.js";
+import { createStaticWordBank } from "../words/word-bank.js";
+
+function testWordBank() {
+  return createStaticWordBank(["alpha", "beta", "gamma", "delta"]);
+}
 
 function stubSocket(): WebSocket {
   return { send: () => {} } as unknown as WebSocket;
@@ -32,7 +37,7 @@ describe("RoomManager", () => {
   });
 
   it("createRoom assigns unique codes", () => {
-    const m = new RoomManager(8);
+    const m = new RoomManager(8, testWordBank());
     const a = stubSocket();
     const b = stubSocket();
     const r1 = m.createRoom(a, player("A"));
@@ -42,7 +47,7 @@ describe("RoomManager", () => {
   });
 
   it("joinRoom adds second socket and leaves prior room when switching", () => {
-    const m = new RoomManager(8);
+    const m = new RoomManager(8, testWordBank());
     const ws1 = stubSocket();
     const ws2 = stubSocket();
     const roomA = m.createRoom(ws1, player("1"));
@@ -54,7 +59,7 @@ describe("RoomManager", () => {
   });
 
   it("returns UNKNOWN_ROOM for missing code", () => {
-    const m = new RoomManager(8);
+    const m = new RoomManager(8, testWordBank());
     const ws = stubSocket();
     m.createRoom(stubSocket(), player("x"));
     expect(m.joinRoom(ws, "ZZZZZZ", player("y"))).toEqual({
@@ -64,7 +69,7 @@ describe("RoomManager", () => {
   });
 
   it("returns ROOM_FULL at capacity", () => {
-    const m = new RoomManager(2);
+    const m = new RoomManager(2, testWordBank());
     const w1 = stubSocket();
     const w2 = stubSocket();
     const w3 = stubSocket();
@@ -77,7 +82,7 @@ describe("RoomManager", () => {
   });
 
   it("reconnectHost restores canonical host when socket was dropped", () => {
-    const m = new RoomManager(8);
+    const m = new RoomManager(8, testWordBank());
     const h = stubSocket();
     const g = stubSocket();
     const room = m.createRoom(h, player("Hosta"));

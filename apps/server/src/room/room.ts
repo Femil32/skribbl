@@ -15,6 +15,13 @@ export class Room {
   /** Zero-based round counter while in match. */
   matchRoundIndex = 0;
   currentDrawerPlayerId: string | null = null;
+  /** Non-null only while phase is choosingWord and before drawing. */
+  roundWordOptions: [string, string, string] | null = null;
+  /** Locked word for adjudication / hints in later stories; set when leaving word choice. */
+  roundSecretWord: string | null = null;
+  /** Cleared when choice resolves or on room teardown (Story 2.3). */
+  wordChoiceTimerHandle: ReturnType<typeof setTimeout> | null = null;
+
   readonly sockets = new Set<WebSocket>();
   hostSocket: WebSocket | null = null;
   readonly maxPlayers: number;

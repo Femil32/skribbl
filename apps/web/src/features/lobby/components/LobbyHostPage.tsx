@@ -15,6 +15,7 @@ import { useHostCreateRoom } from "@/features/lobby/hooks/use-host-create-room";
 import { LobbyConnectionBanner } from "@/features/lobby/components/LobbyConnectionBanner";
 import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster";
 import { PhaseBar } from "@/features/match/components/PhaseBar";
+import { WordChoicePanel } from "@/features/match/components/WordChoicePanel";
 import {
   buildRoomInviteUrl,
   resolvePublicWebOrigin,
@@ -80,6 +81,7 @@ export function LobbyHostPage() {
     transportErrorMessage,
     awaitingRoomHandshake,
     startMatch,
+    chooseWord,
   } = useHostCreateRoom({
     shouldConnect,
     attemptId,
@@ -379,6 +381,16 @@ export function LobbyHostPage() {
                 players={state.players}
                 drawerPlayerId={state.drawerPlayerId}
                 matchRoundIndex={state.matchRoundIndex}
+              />
+            ) : null}
+            {state.phase === "choosingWord" &&
+            state.playerId === state.drawerPlayerId ? (
+              <WordChoicePanel
+                words={state.wordChoiceOffer?.words ?? null}
+                isLoading={state.wordChoiceOffer == null}
+                errorMessage={state.wordChoicePickError ?? null}
+                onPick={chooseWord}
+                disabled={transport !== "live"}
               />
             ) : null}
             {isMatchFlowPhase(state.phase) ? (
