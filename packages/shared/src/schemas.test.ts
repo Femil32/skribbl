@@ -109,6 +109,8 @@ describe("serverEventSchema", () => {
       roomId: "550e8400-e29b-41d4-a716-446655440000",
       phase: "drawing",
       phaseDeadlineMs: 1_700_000_000_000,
+      drawerPlayerId: "drawer-1",
+      matchRoundIndex: 1,
     });
     expect(result.success).toBe(true);
   });

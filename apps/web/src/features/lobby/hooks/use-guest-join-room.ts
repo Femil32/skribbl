@@ -32,6 +32,8 @@ export type GuestJoinLobbyState =
       displayName: string;
       avatarPresetId: AvatarPresetId;
       players: LobbyRosterPlayer[];
+      drawerPlayerId?: string;
+      matchRoundIndex?: number;
     }
   | {
       /** Server `error.code` when the failure came from an `error` event; omit for generic failures. */
@@ -197,7 +199,15 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
           setState((prev) => {
             if (prev.status !== "joined") return prev;
             if (mp.roomId !== prev.roomId) return prev;
-            return { ...prev, phase: mp.phase };
+            return {
+              ...prev,
+              phase: mp.phase,
+              drawerPlayerId: mp.drawerPlayerId ?? prev.drawerPlayerId,
+              matchRoundIndex:
+                mp.matchRoundIndex !== undefined
+                  ? mp.matchRoundIndex
+                  : prev.matchRoundIndex,
+            };
           });
           return;
         }

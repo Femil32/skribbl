@@ -134,6 +134,9 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     roomId: z.string(),
     phase: roomPhaseSchema,
     phaseDeadlineMs: z.number().optional(),
+    /** Authoritative drawer for the active round (Story 2.2). */
+    drawerPlayerId: z.string().optional(),
+    matchRoundIndex: z.number().int().nonnegative().optional(),
   }),
 ]);
 

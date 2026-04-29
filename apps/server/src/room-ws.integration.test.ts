@@ -7,6 +7,7 @@ import {
 } from "@skribbl/shared";
 import { RoomManager } from "./room/room-manager.js";
 import {
+  resolveInterRoundGapMs,
   resolveMatchStartHandshakeMs,
   resolveRoundMs,
   resolveWordChoiceMs,
@@ -254,6 +255,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("startMatch: server timers emit matchPhase sequence", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
       const rm = new RoomManager(8);
@@ -290,6 +292,49 @@ describe("handleClientCommand + RoomManager", () => {
       expect(typeof drawing?.phaseDeadlineMs).toBe("number");
       expect(choosing!.phaseDeadlineMs!).toBeLessThan(drawing!.phaseDeadlineMs!);
     } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
+
+  it("startMatch: round-robin advances drawer on next round", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "2");
+    vi.useFakeTimers();
+    try {
+      const rm = new RoomManager(8);
+      const a = captureWs();
+      const b = captureWs();
+
+      handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(a.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        b.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+      handleClientCommand(a.ws, { type: "startMatch" }, rm);
+
+      function matchPhases(sent: string[]) {
+        return sent
+          .map((line) => parseServerEvent(JSON.parse(line)))
+          .filter((e): e is Extract<typeof e, { type: "matchPhase" }> => e.type === "matchPhase");
+      }
+
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+      vi.advanceTimersByTime(resolveWordChoiceMs());
+      vi.advanceTimersByTime(resolveRoundMs());
+      vi.advanceTimersByTime(resolveInterRoundGapMs());
+      vi.advanceTimersByTime(resolveWordChoiceMs());
+
+      const choosing = matchPhases(a.sent).filter((e) => e.phase === "choosingWord");
+      expect(choosing.length).toBeGreaterThanOrEqual(2);
+      expect(choosing[0]!.drawerPlayerId).toBeTruthy();
+      expect(choosing[1]!.drawerPlayerId).toBeTruthy();
+      expect(choosing[0]!.drawerPlayerId).not.toBe(choosing[1]!.drawerPlayerId);
+    } finally {
+      vi.unstubAllEnvs();
       vi.useRealTimers();
     }
   });

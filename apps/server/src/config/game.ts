@@ -92,6 +92,43 @@ export function resolveMatchStartHandshakeMs(): number {
   return DEFAULT_MATCH_START_HANDSHAKE_MS;
 }
 
+/** Scheduled rounds per match (Epic 2.2+). Override: `ROUNDS_PER_MATCH`. */
+export const DEFAULT_ROUNDS_PER_MATCH = 3;
+
+/** Pause after `roundResult` before the next `choosingWord`. Override: `INTER_ROUND_GAP_MS`. */
+export const DEFAULT_INTER_ROUND_GAP_MS = 1_500;
+
+let didWarnInvalidRounds = false;
+let didWarnInvalidGap = false;
+
+export function resolveRoundsPerMatch(): number {
+  const raw = process.env.ROUNDS_PER_MATCH;
+  if (!raw) return DEFAULT_ROUNDS_PER_MATCH;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isFinite(n) && n >= 1 && n <= 50) return n;
+  if (!didWarnInvalidRounds) {
+    didWarnInvalidRounds = true;
+    console.warn(
+      `[game] ROUNDS_PER_MATCH env invalid (${JSON.stringify(raw)}); using ${DEFAULT_ROUNDS_PER_MATCH} (allowed 1–50)`,
+    );
+  }
+  return DEFAULT_ROUNDS_PER_MATCH;
+}
+
+export function resolveInterRoundGapMs(): number {
+  const raw = process.env.INTER_ROUND_GAP_MS;
+  if (!raw) return DEFAULT_INTER_ROUND_GAP_MS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isFinite(n) && n >= 0 && n <= 60_000) return n;
+  if (!didWarnInvalidGap) {
+    didWarnInvalidGap = true;
+    console.warn(
+      `[game] INTER_ROUND_GAP_MS env invalid (${JSON.stringify(raw)}); using ${DEFAULT_INTER_ROUND_GAP_MS} (allowed 0–60000)`,
+    );
+  }
+  return DEFAULT_INTER_ROUND_GAP_MS;
+}
+
 /** Byte length of an inbound WS message (ws `RawData`) before JSON parse. */
 export function inboundWsMessageByteLength(raw: RawData): number {
   if (Buffer.isBuffer(raw)) return raw.length;

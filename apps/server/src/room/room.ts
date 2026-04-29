@@ -10,6 +10,11 @@ export class Room {
   /** Canonical host player id from the first `roomCreated` (Story 1.7 reconnect). */
   readonly hostPlayerId: string;
   phase: RoomPhase = "lobby";
+  /** Deterministic player ids for round-robin (Story 2.2); set when the match flow starts. */
+  matchPlayerOrder: string[] | null = null;
+  /** Zero-based round counter while in match. */
+  matchRoundIndex = 0;
+  currentDrawerPlayerId: string | null = null;
   readonly sockets = new Set<WebSocket>();
   hostSocket: WebSocket | null = null;
   readonly maxPlayers: number;

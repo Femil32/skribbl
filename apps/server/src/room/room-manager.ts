@@ -10,9 +10,11 @@ import {
 } from "@skribbl/shared";
 import type { WebSocket } from "ws";
 import {
+  resolveInterRoundGapMs,
   resolveMaxPlayers,
   resolveMatchStartHandshakeMs,
   resolveRoundMs,
+  resolveRoundsPerMatch,
   resolveWordChoiceMs,
 } from "../config/game.js";
 import type { LobbySessionIdentity } from "./lobby-session.js";
@@ -88,50 +90,91 @@ export class RoomManager {
     this.matchTimersByRoomId.delete(roomId);
   }
 
-  private broadcastMatchPhase(room: Room, phaseDeadlineMs?: number): void {
+  private broadcastMatchPhase(
+    room: Room,
+    phaseDeadlineMs: number | undefined,
+    drawerPlayerId: string,
+    matchRoundIndex: number,
+  ): void {
     const payload: ServerEvent =
       phaseDeadlineMs === undefined
         ? {
             type: "matchPhase",
             roomId: room.id,
             phase: room.phase,
+            drawerPlayerId,
+            matchRoundIndex,
           }
         : {
             type: "matchPhase",
             roomId: room.id,
             phase: room.phase,
             phaseDeadlineMs,
+            drawerPlayerId,
+            matchRoundIndex,
           };
     for (const sock of room.sockets) this.sendEvent(sock, payload);
   }
 
   /**
-   * Epic 2.1 skeleton: deterministic server timers after `matchStarting` (no client-driven advances).
+   * Epic 2.1+2.2: server timers, round-robin drawer (`matchPlayerOrder`) per round.
    */
   private scheduleMatchFlow(room: Room): void {
     this.clearMatchTimers(room.id);
     const timeouts: ReturnType<typeof setTimeout>[] = [];
     this.matchTimersByRoomId.set(room.id, timeouts);
 
+    const roster = this.buildLobbyRosterPlayers(room);
+    room.matchPlayerOrder = roster.map((p) => p.playerId);
+    room.matchRoundIndex = 0;
+
     const schedule = (ms: number, fn: () => void) => {
       timeouts.push(setTimeout(fn, ms));
     };
 
-    schedule(resolveMatchStartHandshakeMs(), () => {
-      if (!this.roomsById.get(room.id) || room.phase !== "matchStarting") return;
-      room.phase = "choosingWord";
-      this.broadcastMatchPhase(room, Date.now() + resolveWordChoiceMs());
-      schedule(resolveWordChoiceMs(), () => {
-        if (!this.roomsById.get(room.id) || room.phase !== "choosingWord") return;
-        room.phase = "drawing";
-        this.broadcastMatchPhase(room, Date.now() + resolveRoundMs());
-        schedule(resolveRoundMs(), () => {
-          if (!this.roomsById.get(room.id) || room.phase !== "drawing") return;
-          room.phase = "roundResult";
-          this.broadcastMatchPhase(room, undefined);
+    const runRound = (roundIndex: number, leadMs: number, gatePhase: "matchStarting" | "roundResult") => {
+      const order = room.matchPlayerOrder;
+      if (!order || order.length === 0) return;
+
+      schedule(leadMs, () => {
+        if (!this.roomsById.get(room.id)) return;
+        if (room.phase !== gatePhase) return;
+
+        const drawerId = order[roundIndex % order.length]!;
+        room.currentDrawerPlayerId = drawerId;
+        room.matchRoundIndex = roundIndex;
+
+        room.phase = "choosingWord";
+        this.broadcastMatchPhase(
+          room,
+          Date.now() + resolveWordChoiceMs(),
+          drawerId,
+          roundIndex,
+        );
+        schedule(resolveWordChoiceMs(), () => {
+          if (!this.roomsById.get(room.id) || room.phase !== "choosingWord") return;
+          room.phase = "drawing";
+          this.broadcastMatchPhase(
+            room,
+            Date.now() + resolveRoundMs(),
+            drawerId,
+            roundIndex,
+          );
+          schedule(resolveRoundMs(), () => {
+            if (!this.roomsById.get(room.id) || room.phase !== "drawing") return;
+            room.phase = "roundResult";
+            this.broadcastMatchPhase(room, undefined, drawerId, roundIndex);
+            if (roundIndex + 1 < resolveRoundsPerMatch()) {
+              schedule(resolveInterRoundGapMs(), () =>
+                runRound(roundIndex + 1, 0, "roundResult"),
+              );
+            }
+          });
         });
       });
-    });
+    };
+
+    runRound(0, resolveMatchStartHandshakeMs(), "matchStarting");
   }
 
   broadcastLobbyRoster(room: Room): void {

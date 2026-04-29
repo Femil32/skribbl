@@ -17,6 +17,7 @@ import {
 import { useGuestJoinRoom } from "@/features/lobby/hooks/use-guest-join-room";
 import { LobbyConnectionBanner } from "@/features/lobby/components/LobbyConnectionBanner";
 import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster";
+import { PhaseBar } from "@/features/match/components/PhaseBar";
 
 const formatHintId = "join-room-code-format-hint";
 const protocolErrId = "join-room-protocol-error";
@@ -227,6 +228,13 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                 You are <span className="font-semibold">{guestState.displayName}</span>{" "}
                 in the lobby as a guest — the host starts the match.
               </p>
+              {isMatchFlowPhase(guestState.phase) ? (
+                <PhaseBar
+                  players={guestState.players}
+                  drawerPlayerId={guestState.drawerPlayerId}
+                  matchRoundIndex={guestState.matchRoundIndex}
+                />
+              ) : null}
               {isMatchFlowPhase(guestState.phase) ? (
                 <div className="alert alert-info shadow-sm">
                   Match in progress. Full gameplay shell arrives in Epic 3.

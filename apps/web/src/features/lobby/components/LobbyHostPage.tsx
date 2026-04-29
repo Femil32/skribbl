@@ -14,6 +14,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useHostCreateRoom } from "@/features/lobby/hooks/use-host-create-room";
 import { LobbyConnectionBanner } from "@/features/lobby/components/LobbyConnectionBanner";
 import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster";
+import { PhaseBar } from "@/features/match/components/PhaseBar";
 import {
   buildRoomInviteUrl,
   resolvePublicWebOrigin,
@@ -372,6 +373,13 @@ export function LobbyHostPage() {
               >
                 Need at least two players in the room to start.
               </p>
+            ) : null}
+            {isMatchFlowPhase(state.phase) ? (
+              <PhaseBar
+                players={state.players}
+                drawerPlayerId={state.drawerPlayerId}
+                matchRoundIndex={state.matchRoundIndex}
+              />
             ) : null}
             {isMatchFlowPhase(state.phase) ? (
               <div className="alert alert-info shadow-sm">

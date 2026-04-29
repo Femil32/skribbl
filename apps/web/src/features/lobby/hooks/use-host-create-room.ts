@@ -32,6 +32,9 @@ export type HostLobbyState =
       phase: RoomPhase;
       players: LobbyRosterPlayer[];
       isStartPending: boolean;
+      /** Server match meta (Story 2.2+). */
+      drawerPlayerId?: string;
+      matchRoundIndex?: number;
     }
   | { status: "error"; message: string };
 
@@ -206,7 +209,15 @@ export function useHostCreateRoom(
           setState((prev) => {
             if (prev.status !== "lobby") return prev;
             if (mp.roomId !== prev.roomId) return prev;
-            return { ...prev, phase: mp.phase };
+            return {
+              ...prev,
+              phase: mp.phase,
+              drawerPlayerId: mp.drawerPlayerId ?? prev.drawerPlayerId,
+              matchRoundIndex:
+                mp.matchRoundIndex !== undefined
+                  ? mp.matchRoundIndex
+                  : prev.matchRoundIndex,
+            };
           });
           return;
         }
