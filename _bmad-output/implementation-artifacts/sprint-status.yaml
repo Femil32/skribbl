@@ -1,5 +1,5 @@
 # generated: 2026-04-29T12:00:00Z
-# last_updated: 2026-04-29
+# last_updated: 2026-04-29 (1-3 → done after review + fixes)
 # project: skribbl
 # project_key: NOKEY
 # tracking_system: file-system
@@ -45,7 +45,7 @@ development_status:
   epic-1: in-progress
   1-1-scaffold-monorepo-shared-protocol-package: done
   1-2-authoritative-rooms-secure-codes-on-the-server: done
-  1-3-create-flow-ux-shareable-link-copy-feedback: review
+  1-3-create-flow-ux-shareable-link-copy-feedback: done
   1-4-join-flow-ux-paste-friendly-code-entry: backlog
   1-5-lobby-identity-nickname-avatar-presets: backlog
   1-6-live-roster-host-badge-start-gate: backlog
