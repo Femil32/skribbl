@@ -17,6 +17,7 @@ import {
 import { useGuestJoinRoom } from "@/features/lobby/hooks/use-guest-join-room";
 import { LobbyConnectionBanner } from "@/features/lobby/components/LobbyConnectionBanner";
 import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster";
+import { LetterHintFeed } from "@/features/match/components/LetterHintFeed";
 import { PhaseBar } from "@/features/match/components/PhaseBar";
 import { WordChoicePanel } from "@/features/match/components/WordChoicePanel";
 
@@ -231,13 +232,22 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                 in the lobby as a guest — the host starts the match.
               </p>
               {isMatchFlowPhase(guestState.phase) ? (
-                <PhaseBar
-                  phase={guestState.phase}
-                  players={guestState.players}
-                  drawerPlayerId={guestState.drawerPlayerId}
-                  matchRoundIndex={guestState.matchRoundIndex}
-                  phaseDeadlineMs={guestState.phaseDeadlineMs}
-                />
+                <div className="flex flex-col gap-3 w-full max-w-xl mx-auto">
+                  <PhaseBar
+                    phase={guestState.phase}
+                    players={guestState.players}
+                    drawerPlayerId={guestState.drawerPlayerId}
+                    matchRoundIndex={guestState.matchRoundIndex}
+                    phaseDeadlineMs={guestState.phaseDeadlineMs}
+                  />
+                  {guestState.phase === "drawing" ? (
+                    <LetterHintFeed
+                      hints={guestState.letterHints}
+                      showGuessersOnly
+                      isCurrentDrawer={guestState.playerId === guestState.drawerPlayerId}
+                    />
+                  ) : null}
+                </div>
               ) : null}
               {guestState.phase === "choosingWord" &&
               guestState.playerId === guestState.drawerPlayerId ? (

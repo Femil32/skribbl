@@ -14,6 +14,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useHostCreateRoom } from "@/features/lobby/hooks/use-host-create-room";
 import { LobbyConnectionBanner } from "@/features/lobby/components/LobbyConnectionBanner";
 import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster";
+import { LetterHintFeed } from "@/features/match/components/LetterHintFeed";
 import { PhaseBar } from "@/features/match/components/PhaseBar";
 import { WordChoicePanel } from "@/features/match/components/WordChoicePanel";
 import {
@@ -377,13 +378,22 @@ export function LobbyHostPage() {
               </p>
             ) : null}
             {isMatchFlowPhase(state.phase) ? (
-              <PhaseBar
-                phase={state.phase}
-                players={state.players}
-                drawerPlayerId={state.drawerPlayerId}
-                matchRoundIndex={state.matchRoundIndex}
-                phaseDeadlineMs={state.phaseDeadlineMs}
-              />
+              <div className="flex flex-col gap-3 w-full max-w-xl mx-auto">
+                <PhaseBar
+                  phase={state.phase}
+                  players={state.players}
+                  drawerPlayerId={state.drawerPlayerId}
+                  matchRoundIndex={state.matchRoundIndex}
+                  phaseDeadlineMs={state.phaseDeadlineMs}
+                />
+                {state.phase === "drawing" ? (
+                  <LetterHintFeed
+                    hints={state.letterHints}
+                    showGuessersOnly
+                    isCurrentDrawer={state.playerId === state.drawerPlayerId}
+                  />
+                ) : null}
+              </div>
             ) : null}
             {state.phase === "choosingWord" &&
             state.playerId === state.drawerPlayerId ? (

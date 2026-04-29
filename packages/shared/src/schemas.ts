@@ -154,6 +154,15 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     matchRoundIndex: z.number().int().nonnegative(),
     phaseDeadlineMs: z.number(),
   }),
+  /** Progressive letter-mask snapshot — guessers consume; drawer hides in UI (Story 2.5). */
+  z.object({
+    type: z.literal("letterHint"),
+    roomId: z.string(),
+    matchRoundIndex: z.number().int().nonnegative(),
+    hintIndex: z.number().int().nonnegative(),
+    maskedWord: z.string(),
+    occurredAtMs: z.number().optional(),
+  }),
 ]);
 
 export type ClientCommand = z.infer<typeof clientCommandSchema>;

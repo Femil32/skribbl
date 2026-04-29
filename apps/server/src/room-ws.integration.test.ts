@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { WebSocket } from "ws";
 import {
   type ClientCommand,
+  maskedWordAtLetterHintIndex,
   NICKNAME_MAX_GRAPHEMES,
   parseServerEvent,
 } from "@skribbl/shared";
@@ -12,6 +13,7 @@ import {
   resolveMatchStartHandshakeMs,
   resolveRoundMs,
   resolveWordChoiceMs,
+  resolveHintTickMs,
 } from "./config/game.js";
 import {
   handleClientCommand,
@@ -555,6 +557,82 @@ describe("handleClientCommand + RoomManager", () => {
         .map((line) => parseServerEvent(JSON.parse(line)))
         .filter((e): e is Extract<typeof e, { type: "matchPhase" }> => e.type === "matchPhase");
       expect(allPhases.some((p) => p.phase === "drawing")).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
+
+  it("drawing: letterHint events match across clients; no hints after drawing ends", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.stubEnv("ROUND_MS", "25000");
+    vi.stubEnv("HINT_TICK_MS", "3000");
+    vi.useFakeTimers();
+    try {
+      const rm = new RoomManager(8, integrationWordBank());
+      const host = captureWs();
+      const guest = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        guest.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+
+      function choosingDrawerId(sent: string[]): string | undefined {
+        const ev = sent
+          .map((line) => parseServerEvent(JSON.parse(line)))
+          .find((e) => e.type === "matchPhase" && e.phase === "choosingWord");
+        return ev?.type === "matchPhase" ? ev.drawerPlayerId : undefined;
+      }
+
+      const drawerId = choosingDrawerId(host.sent) ?? choosingDrawerId(guest.sent);
+      expect(drawerId).toBeTruthy();
+
+      const drawerIsHost = drawerId === created.playerId;
+      const drawerCapt = drawerIsHost ? host : guest;
+
+      const offer = drawerCapt.sent
+        .map((line) => parseServerEvent(JSON.parse(line)))
+        .find((e) => e.type === "wordChoiceOffer");
+      if (offer?.type !== "wordChoiceOffer") throw new Error("expected wordChoiceOffer");
+
+      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
+
+      const secret = offer.words[0]!;
+
+      function letterHints(sent: string[]) {
+        return sent
+          .map((line) => parseServerEvent(JSON.parse(line)))
+          .filter(
+            (e): e is Extract<typeof e, { type: "letterHint" }> => e.type === "letterHint",
+          );
+      }
+
+      const hh0 = letterHints(host.sent);
+      const hg0 = letterHints(guest.sent);
+      expect(hh0.length).toBeGreaterThanOrEqual(1);
+      expect(hg0.map((x) => x.maskedWord)).toEqual(hh0.map((x) => x.maskedWord));
+
+      vi.advanceTimersByTime(resolveHintTickMs());
+      const hh = letterHints(host.sent);
+      expect(hh.length).toBeGreaterThan(hh0.length);
+      const hg = letterHints(guest.sent);
+      expect(hg.map((x) => x.maskedWord)).toEqual(hh.map((x) => x.maskedWord));
+      const last = hh[hh.length - 1]!;
+      expect(last.maskedWord).toBe(maskedWordAtLetterHintIndex(last.hintIndex, secret));
+
+      vi.advanceTimersByTime(resolveRoundMs());
+      const atRoundBoundary = letterHints(host.sent).length;
+      vi.advanceTimersByTime(resolveHintTickMs() * 6);
+      expect(letterHints(host.sent).length).toBe(atRoundBoundary);
     } finally {
       vi.unstubAllEnvs();
       vi.useRealTimers();

@@ -16,6 +16,15 @@ export {
   type LobbyRosterPlayer,
 } from "./schemas.js";
 export {
+  isAlphabeticHintChar,
+  hintLetterIndices,
+  countLetterSlots,
+  totalLetterHintEmissions,
+  lettersRevealedAfterHint,
+  buildMaskedWord,
+  maskedWordAtLetterHintIndex,
+} from "./letter-hint-progression.js";
+export {
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,
   isValidRoomCodeForJoin,

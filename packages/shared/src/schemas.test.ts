@@ -4,7 +4,9 @@ import {
   isMatchFlowPhase,
   safeParseServerEvent,
   serializeClientCommand,
+  serializeServerEvent,
   serverEventSchema,
+  type ServerEvent,
 } from "./schemas.js";
 
 describe("clientCommandSchema", () => {
@@ -118,6 +120,33 @@ describe("serverEventSchema", () => {
       phaseDeadlineMs: 1_700_000_000_000,
     });
     expect(result.success).toBe(true);
+  });
+
+  it("accepts letterHint", () => {
+    const result = serverEventSchema.safeParse({
+      type: "letterHint",
+      roomId: "550e8400-e29b-41d4-a716-446655440000",
+      matchRoundIndex: 0,
+      hintIndex: 0,
+      maskedWord: "_a_",
+      occurredAtMs: 1_704_000_000_000,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("round-trips letterHint through serializeServerEvent", () => {
+    const event: ServerEvent = {
+      type: "letterHint",
+      roomId: "550e8400-e29b-41d4-a716-446655440000",
+      matchRoundIndex: 0,
+      hintIndex: 1,
+      maskedWord: "_a_",
+      occurredAtMs: 1_704_000_000_000,
+    };
+    const line = serializeServerEvent(event);
+    const parsed = safeParseServerEvent(JSON.parse(line));
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data).toEqual(event);
   });
 });
 

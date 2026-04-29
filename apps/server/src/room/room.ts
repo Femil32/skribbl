@@ -21,6 +21,8 @@ export class Room {
   roundSecretWord: string | null = null;
   /** Cleared when choice resolves or on room teardown (Story 2.3). */
   wordChoiceTimerHandle: ReturnType<typeof setTimeout> | null = null;
+  /** Story 2.5: chained hint ticks during `drawing` — cleared on phase exit / match reschedule. */
+  letterHintTimerHandles: ReturnType<typeof setTimeout>[] = [];
 
   readonly sockets = new Set<WebSocket>();
   hostSocket: WebSocket | null = null;

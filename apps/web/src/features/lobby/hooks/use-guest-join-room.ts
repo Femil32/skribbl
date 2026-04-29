@@ -15,6 +15,8 @@ import {
   transportCloseBeforeHandshakeMessage,
   transportOpenFailedMessage,
 } from "@/features/lobby/lib/transport-user-messages";
+import type { LetterHintLine } from "@/features/match/components/LetterHintFeed";
+import { appendLetterHintDeduped } from "@/features/match/lib/append-letter-hint-deduped";
 import type { LobbyConnectionReason, LobbyTransportPhase } from "@/features/lobby/lib/lobby-transport";
 import { missingGameWebSocketUrlUserMessage, resolveGameWebSocketUrl } from "@/lib/game-ws-url";
 import { serializeChooseWordCommand, serializeJoinRoomCommand } from "@/lib/ws-client";
@@ -42,6 +44,7 @@ export type GuestJoinLobbyState =
         matchRoundIndex: number;
       } | null;
       wordChoicePickError?: string | null;
+      letterHints: LetterHintLine[];
     }
   | {
       /** Server `error.code` when the failure came from an `error` event; omit for generic failures. */
@@ -191,6 +194,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
             players: [],
             wordChoiceOffer: null,
             wordChoicePickError: null,
+            letterHints: [],
           });
           setTransport("live");
           return;
@@ -237,6 +241,37 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
                 mp.phaseDeadlineMs !== undefined ? mp.phaseDeadlineMs : undefined,
               wordChoiceOffer,
               wordChoicePickError,
+              letterHints:
+                mp.phase !== "drawing"
+                  ? []
+                  : mp.matchRoundIndex !== undefined &&
+                      prev.matchRoundIndex !== undefined &&
+                      mp.matchRoundIndex !== prev.matchRoundIndex
+                    ? []
+                    : prev.letterHints,
+            };
+          });
+          return;
+        }
+        case "letterHint": {
+          const hint = parsed.data;
+          setState((prev) => {
+            if (prev.status !== "joined") return prev;
+            if (hint.roomId !== prev.roomId) return prev;
+            if (prev.phase !== "drawing") return prev;
+            if (
+              prev.matchRoundIndex !== undefined &&
+              hint.matchRoundIndex !== prev.matchRoundIndex
+            ) {
+              return prev;
+            }
+            return {
+              ...prev,
+              letterHints: appendLetterHintDeduped(prev.letterHints, {
+                hintIndex: hint.hintIndex,
+                maskedWord: hint.maskedWord,
+                matchRoundIndex: hint.matchRoundIndex,
+              }),
             };
           });
           return;

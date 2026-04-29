@@ -115,6 +115,26 @@ export function resolveRoundsPerMatch(): number {
   return DEFAULT_ROUNDS_PER_MATCH;
 }
 
+/** Default interval between **`letterHint`** emissions (Story 2.5). Override: `HINT_TICK_MS`. */
+export const DEFAULT_HINT_TICK_MS = 10_000;
+
+let didWarnInvalidHintTickMs = false;
+
+/** Wall-clock ms between progressive letter hints (`drawing` phase). Clamp: **3000–60000**. */
+export function resolveHintTickMs(): number {
+  const raw = process.env.HINT_TICK_MS;
+  if (!raw) return DEFAULT_HINT_TICK_MS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isFinite(n) && n >= 3_000 && n <= 60_000) return n;
+  if (!didWarnInvalidHintTickMs) {
+    didWarnInvalidHintTickMs = true;
+    console.warn(
+      `[game] HINT_TICK_MS env invalid (${JSON.stringify(raw)}); using ${DEFAULT_HINT_TICK_MS} (allowed 3000–60000)`,
+    );
+  }
+  return DEFAULT_HINT_TICK_MS;
+}
+
 export function resolveInterRoundGapMs(): number {
   const raw = process.env.INTER_ROUND_GAP_MS;
   if (!raw) return DEFAULT_INTER_ROUND_GAP_MS;

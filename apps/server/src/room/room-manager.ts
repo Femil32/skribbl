@@ -3,13 +3,16 @@ import {
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,
   isValidRoomCodeForJoin,
+  maskedWordAtLetterHintIndex,
   normalizeRoomCode,
   serializeServerEvent,
+  totalLetterHintEmissions,
   type LobbyRosterPlayer,
   type ServerEvent,
 } from "@skribbl/shared";
 import type { WebSocket } from "ws";
 import {
+  resolveHintTickMs,
   resolveInterRoundGapMs,
   resolveMaxPlayers,
   resolveMatchStartHandshakeMs,
@@ -86,12 +89,19 @@ export class RoomManager {
     }
   }
 
+  /** Story 2.5: clears chained letter-hint timeouts (no orphaned ticks after `drawing`). */
+  private clearLetterHintTimers(room: Room): void {
+    for (const t of room.letterHintTimerHandles) clearTimeout(t);
+    room.letterHintTimerHandles = [];
+  }
+
   private clearMatchTimers(roomId: string): void {
     const room = this.roomsById.get(roomId);
     if (room?.wordChoiceTimerHandle) {
       clearTimeout(room.wordChoiceTimerHandle);
       room.wordChoiceTimerHandle = null;
     }
+    if (room) this.clearLetterHintTimers(room);
     const pending = this.matchTimersByRoomId.get(roomId);
     if (!pending) return;
     for (const t of pending) clearTimeout(t);
@@ -144,6 +154,56 @@ export class RoomManager {
     }
   }
 
+  /**
+   * Story 2.5: progressive `letterHint` fan-out — first snapshot at drawing start, then every `tickMs` until exhausted.
+   * Timers cleared when leaving `drawing`.
+   */
+  private scheduleLetterHints(
+    room: Room,
+    timeouts: ReturnType<typeof setTimeout>[],
+    roundIndex: number,
+    secret: string,
+  ): void {
+    const tickMs = resolveHintTickMs();
+    const totalEmissions = totalLetterHintEmissions(secret);
+
+    const stillDrawingThisRound = (): boolean => {
+      if (!this.roomsById.get(room.id)) return false;
+      if (room.phase !== "drawing") return false;
+      if (room.matchRoundIndex !== roundIndex) return false;
+      if (room.roundSecretWord !== secret) return false;
+      return true;
+    };
+
+    const broadcastHint = (hintSeq: number): void => {
+      const hintEvent: ServerEvent = {
+        type: "letterHint",
+        roomId: room.id,
+        matchRoundIndex: roundIndex,
+        hintIndex: hintSeq,
+        maskedWord: maskedWordAtLetterHintIndex(hintSeq, secret),
+        occurredAtMs: Date.now(),
+      };
+      for (const sock of room.sockets) this.sendEvent(sock, hintEvent);
+    };
+
+    if (!stillDrawingThisRound()) return;
+    broadcastHint(0);
+
+    const scheduleNext = (nextSeq: number): void => {
+      if (nextSeq >= totalEmissions) return;
+      const handle = setTimeout(() => {
+        if (!stillDrawingThisRound()) return;
+        broadcastHint(nextSeq);
+        scheduleNext(nextSeq + 1);
+      }, tickMs);
+      room.letterHintTimerHandles.push(handle);
+      timeouts.push(handle);
+    };
+
+    scheduleNext(1);
+  }
+
   private lockWordAndBeginDrawing(
     room: Room,
     timeouts: ReturnType<typeof setTimeout>[],
@@ -151,14 +211,17 @@ export class RoomManager {
     roundIndex: number,
     word: string,
   ): void {
+    this.clearLetterHintTimers(room);
     room.roundSecretWord = word;
     room.phase = "drawing";
     const roundMs = resolveRoundMs();
     const drawingEndsAt = Date.now() + roundMs;
     this.broadcastMatchPhase(room, drawingEndsAt, drawerId, roundIndex);
+    this.scheduleLetterHints(room, timeouts, roundIndex, word);
     /** Story 2.4: timer expiry → `roundResult`. Epic 4: clear this timeout on correct guess and transition early (see `clearMatchTimers` / guess adjudication). */
     const drawingEnd = setTimeout(() => {
       if (!this.roomsById.get(room.id) || room.phase !== "drawing") return;
+      this.clearLetterHintTimers(room);
       room.phase = "roundResult";
       this.broadcastMatchPhase(room, undefined, drawerId, roundIndex);
       if (roundIndex + 1 < resolveRoundsPerMatch()) {
