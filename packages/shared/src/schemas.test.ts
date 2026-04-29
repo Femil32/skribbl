@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clientCommandSchema,
+  isMatchFlowPhase,
   safeParseServerEvent,
   serializeClientCommand,
   serverEventSchema,
@@ -100,6 +101,27 @@ describe("serverEventSchema", () => {
       phase: "matchStarting",
     });
     expect(result.success).toBe(true);
+  });
+
+  it("accepts matchPhase with deadline", () => {
+    const result = serverEventSchema.safeParse({
+      type: "matchPhase",
+      roomId: "550e8400-e29b-41d4-a716-446655440000",
+      phase: "drawing",
+      phaseDeadlineMs: 1_700_000_000_000,
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+describe("isMatchFlowPhase", () => {
+  it("is false for lobby", () => {
+    expect(isMatchFlowPhase("lobby")).toBe(false);
+  });
+
+  it("is true for match phases", () => {
+    expect(isMatchFlowPhase("choosingWord")).toBe(true);
+    expect(isMatchFlowPhase("drawing")).toBe(true);
   });
 });
 

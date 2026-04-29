@@ -10,9 +10,27 @@
 import { z } from "zod";
 import { avatarPresetIdSchema } from "./player-identity.js";
 
-/** Shared room phase literals — server is authoritative; Epic 2.1 extends from `matchStarting`. */
-export const roomPhaseSchema = z.enum(["lobby", "matchStarting"]);
+/** Shared room phase literals — server is authoritative (Epic 2.1+ match flow). */
+export const roomPhaseSchema = z.enum([
+  "lobby",
+  "matchStarting",
+  "choosingWord",
+  "drawing",
+  "roundResult",
+]);
 export type RoomPhase = z.infer<typeof roomPhaseSchema>;
+
+const MATCH_FLOW_PHASES = new Set<RoomPhase>([
+  "matchStarting",
+  "choosingWord",
+  "drawing",
+  "roundResult",
+]);
+
+/** True when the room has left pre-match lobby (UI placeholder for in-match surfaces). */
+export function isMatchFlowPhase(phase: RoomPhase): boolean {
+  return MATCH_FLOW_PHASES.has(phase);
+}
 
 export const lobbyRosterPlayerSchema = z.object({
   playerId: z.string(),
@@ -107,6 +125,15 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     type: z.literal("matchStarting"),
     roomId: z.string(),
     phase: z.literal("matchStarting"),
+  }),
+  /**
+   * Authoritative match phase transition (Epic 2.1+). `phaseDeadlineMs` is Unix ms when the current phase ends (optional if open-ended).
+   */
+  z.object({
+    type: z.literal("matchPhase"),
+    roomId: z.string(),
+    phase: roomPhaseSchema,
+    phaseDeadlineMs: z.number().optional(),
   }),
 ]);
 

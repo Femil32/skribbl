@@ -9,7 +9,12 @@ import {
   type ServerEvent,
 } from "@skribbl/shared";
 import type { WebSocket } from "ws";
-import { resolveMaxPlayers } from "../config/game.js";
+import {
+  resolveMaxPlayers,
+  resolveMatchStartHandshakeMs,
+  resolveRoundMs,
+  resolveWordChoiceMs,
+} from "../config/game.js";
 import type { LobbySessionIdentity } from "./lobby-session.js";
 import { Room } from "./room.js";
 
@@ -42,6 +47,8 @@ export class RoomManager {
   private readonly roomsById = new Map<string, Room>();
   private readonly socketToRoomId = new Map<WebSocket, string>();
   private readonly socketLobbyIdentity = new Map<WebSocket, LobbySessionIdentity>();
+  /** Cleared when a room is destroyed or match chain reschedules. */
+  private readonly matchTimersByRoomId = new Map<string, ReturnType<typeof setTimeout>[]>();
 
   readonly maxPlayersPerRoom: number;
 
@@ -74,6 +81,59 @@ export class RoomManager {
     }
   }
 
+  private clearMatchTimers(roomId: string): void {
+    const pending = this.matchTimersByRoomId.get(roomId);
+    if (!pending) return;
+    for (const t of pending) clearTimeout(t);
+    this.matchTimersByRoomId.delete(roomId);
+  }
+
+  private broadcastMatchPhase(room: Room, phaseDeadlineMs?: number): void {
+    const payload: ServerEvent =
+      phaseDeadlineMs === undefined
+        ? {
+            type: "matchPhase",
+            roomId: room.id,
+            phase: room.phase,
+          }
+        : {
+            type: "matchPhase",
+            roomId: room.id,
+            phase: room.phase,
+            phaseDeadlineMs,
+          };
+    for (const sock of room.sockets) this.sendEvent(sock, payload);
+  }
+
+  /**
+   * Epic 2.1 skeleton: deterministic server timers after `matchStarting` (no client-driven advances).
+   */
+  private scheduleMatchFlow(room: Room): void {
+    this.clearMatchTimers(room.id);
+    const timeouts: ReturnType<typeof setTimeout>[] = [];
+    this.matchTimersByRoomId.set(room.id, timeouts);
+
+    const schedule = (ms: number, fn: () => void) => {
+      timeouts.push(setTimeout(fn, ms));
+    };
+
+    schedule(resolveMatchStartHandshakeMs(), () => {
+      if (!this.roomsById.get(room.id) || room.phase !== "matchStarting") return;
+      room.phase = "choosingWord";
+      this.broadcastMatchPhase(room, Date.now() + resolveWordChoiceMs());
+      schedule(resolveWordChoiceMs(), () => {
+        if (!this.roomsById.get(room.id) || room.phase !== "choosingWord") return;
+        room.phase = "drawing";
+        this.broadcastMatchPhase(room, Date.now() + resolveRoundMs());
+        schedule(resolveRoundMs(), () => {
+          if (!this.roomsById.get(room.id) || room.phase !== "drawing") return;
+          room.phase = "roundResult";
+          this.broadcastMatchPhase(room, undefined);
+        });
+      });
+    });
+  }
+
   broadcastLobbyRoster(room: Room): void {
     const payload: ServerEvent = {
       type: "lobbyRoster",
@@ -98,6 +158,7 @@ export class RoomManager {
       phase: "matchStarting",
     };
     for (const sock of room.sockets) this.sendEvent(sock, payload);
+    this.scheduleMatchFlow(room);
     return { ok: true };
   }
 
@@ -132,6 +193,7 @@ export class RoomManager {
       }
       const survivors = room.sockets.size;
       if (survivors === 0) {
+        this.clearMatchTimers(room.id);
         this.roomsByCode.delete(room.code);
         this.roomsById.delete(room.id);
       } else {

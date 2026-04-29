@@ -37,6 +37,61 @@ export function resolveMaxPlayers(): number {
   return DEFAULT_MAX_PLAYERS;
 }
 
+/** Authoritative drawing phase length (FR7 / architecture). Override: `ROUND_MS`. */
+export const DEFAULT_ROUND_MS = 80_000;
+
+/** Word-pick window before drawing (Epic 2.3+ refines UX). Override: `WORD_CHOICE_MS`. */
+export const DEFAULT_WORD_CHOICE_MS = 15_000;
+
+/** Brief pause after `matchStarting` before `choosingWord`. Override: `MATCH_START_HANDSHAKE_MS`. */
+export const DEFAULT_MATCH_START_HANDSHAKE_MS = 750;
+
+let didWarnInvalidRoundMs = false;
+let didWarnInvalidWordChoiceMs = false;
+let didWarnInvalidHandshakeMs = false;
+
+export function resolveRoundMs(): number {
+  const raw = process.env.ROUND_MS;
+  if (!raw) return DEFAULT_ROUND_MS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isFinite(n) && n >= 5_000 && n <= 600_000) return n;
+  if (!didWarnInvalidRoundMs) {
+    didWarnInvalidRoundMs = true;
+    console.warn(
+      `[game] ROUND_MS env invalid (${JSON.stringify(raw)}); using ${DEFAULT_ROUND_MS} (allowed 5000–600000)`,
+    );
+  }
+  return DEFAULT_ROUND_MS;
+}
+
+export function resolveWordChoiceMs(): number {
+  const raw = process.env.WORD_CHOICE_MS;
+  if (!raw) return DEFAULT_WORD_CHOICE_MS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isFinite(n) && n >= 3_000 && n <= 120_000) return n;
+  if (!didWarnInvalidWordChoiceMs) {
+    didWarnInvalidWordChoiceMs = true;
+    console.warn(
+      `[game] WORD_CHOICE_MS env invalid (${JSON.stringify(raw)}); using ${DEFAULT_WORD_CHOICE_MS} (allowed 3000–120000)`,
+    );
+  }
+  return DEFAULT_WORD_CHOICE_MS;
+}
+
+export function resolveMatchStartHandshakeMs(): number {
+  const raw = process.env.MATCH_START_HANDSHAKE_MS;
+  if (!raw) return DEFAULT_MATCH_START_HANDSHAKE_MS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isFinite(n) && n >= 0 && n <= 30_000) return n;
+  if (!didWarnInvalidHandshakeMs) {
+    didWarnInvalidHandshakeMs = true;
+    console.warn(
+      `[game] MATCH_START_HANDSHAKE_MS env invalid (${JSON.stringify(raw)}); using ${DEFAULT_MATCH_START_HANDSHAKE_MS} (allowed 0–30000)`,
+    );
+  }
+  return DEFAULT_MATCH_START_HANDSHAKE_MS;
+}
+
 /** Byte length of an inbound WS message (ws `RawData`) before JSON parse. */
 export function inboundWsMessageByteLength(raw: RawData): number {
   if (Buffer.isBuffer(raw)) return raw.length;

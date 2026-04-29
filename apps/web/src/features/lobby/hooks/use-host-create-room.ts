@@ -201,6 +201,15 @@ export function useHostCreateRoom(
           });
           return;
         }
+        case "matchPhase": {
+          const mp = parsed.data;
+          setState((prev) => {
+            if (prev.status !== "lobby") return prev;
+            if (mp.roomId !== prev.roomId) return prev;
+            return { ...prev, phase: mp.phase };
+          });
+          return;
+        }
         case "matchStarting": {
           const start = parsed.data;
           setState((prev) => {

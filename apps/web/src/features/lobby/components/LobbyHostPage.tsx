@@ -6,6 +6,7 @@ import {
   NICKNAME_MAX_GRAPHEMES,
   avatarPresets,
   countGraphemes,
+  isMatchFlowPhase,
   sanitizeDisplayName,
 } from "@skribbl/shared";
 import Link from "next/link";
@@ -372,9 +373,9 @@ export function LobbyHostPage() {
                 Need at least two players in the room to start.
               </p>
             ) : null}
-            {state.phase === "matchStarting" ? (
+            {isMatchFlowPhase(state.phase) ? (
               <div className="alert alert-info shadow-sm">
-                Match is starting. Gameplay arrives in the next milestone.
+                Match in progress. Full gameplay shell arrives in Epic 3.
               </div>
             ) : null}
           </div>

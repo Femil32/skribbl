@@ -36,7 +36,7 @@
 
 generated: '2026-04-29T00:00:00Z'
 last_updated: '2026-04-29'
-# story 1-7 done (reconnectHost + review fixes)
+# Epic 2 story 2-1 in progress
 project: skribbl
 project_key: NOKEY
 tracking_system: file-system
@@ -53,8 +53,8 @@ development_status:
   1-7-connection-trust-banner-during-lobby-states: done
   epic-1-retrospective: optional
 
-  epic-2: backlog
-  2-1-match-state-machine-skeleton-server-timers: backlog
+  epic-2: in-progress
+  2-1-match-state-machine-skeleton-server-timers: done
   2-2-round-robin-drawer-rotation: backlog
   2-3-word-bank-loading-drawer-wordchoicepanel: backlog
   2-4-drawing-phase-countdown-timer-driven-round-end: backlog

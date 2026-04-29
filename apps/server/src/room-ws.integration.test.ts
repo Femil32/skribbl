@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { WebSocket } from "ws";
 import {
   type ClientCommand,
@@ -6,6 +6,11 @@ import {
   parseServerEvent,
 } from "@skribbl/shared";
 import { RoomManager } from "./room/room-manager.js";
+import {
+  resolveMatchStartHandshakeMs,
+  resolveRoundMs,
+  resolveWordChoiceMs,
+} from "./config/game.js";
 import {
   handleClientCommand,
   sendProtocolError,
@@ -246,6 +251,47 @@ describe("handleClientCommand + RoomManager", () => {
         phase: "matchStarting",
       }),
     );
+  });
+
+  it("startMatch: server timers emit matchPhase sequence", () => {
+    vi.useFakeTimers();
+    try {
+      const rm = new RoomManager(8);
+      const a = captureWs();
+      const b = captureWs();
+
+      handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(a.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        b.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+      handleClientCommand(a.ws, { type: "startMatch" }, rm);
+
+      function matchPhases(sent: string[]) {
+        return sent
+          .map((line) => parseServerEvent(JSON.parse(line)))
+          .filter((e): e is Extract<typeof e, { type: "matchPhase" }> => e.type === "matchPhase");
+      }
+
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+      expect(matchPhases(a.sent).some((p) => p.phase === "choosingWord")).toBe(true);
+      vi.advanceTimersByTime(resolveWordChoiceMs());
+      expect(matchPhases(a.sent).some((p) => p.phase === "drawing")).toBe(true);
+      vi.advanceTimersByTime(resolveRoundMs());
+      expect(matchPhases(a.sent).some((p) => p.phase === "roundResult")).toBe(true);
+
+      const choosing = matchPhases(a.sent).find((p) => p.phase === "choosingWord");
+      const drawing = matchPhases(a.sent).find((p) => p.phase === "drawing");
+      expect(typeof choosing?.phaseDeadlineMs).toBe("number");
+      expect(typeof drawing?.phaseDeadlineMs).toBe("number");
+      expect(choosing!.phaseDeadlineMs!).toBeLessThan(drawing!.phaseDeadlineMs!);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("startMatch: non-host rejected with NOT_HOST", () => {

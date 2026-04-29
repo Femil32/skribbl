@@ -9,6 +9,7 @@ import {
   NICKNAME_MAX_GRAPHEMES,
   avatarPresets,
   countGraphemes,
+  isMatchFlowPhase,
   isValidRoomCodeForJoin,
   normalizeRoomCode,
   sanitizeDisplayName,
@@ -226,9 +227,9 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                 You are <span className="font-semibold">{guestState.displayName}</span>{" "}
                 in the lobby as a guest — the host starts the match.
               </p>
-              {guestState.phase === "matchStarting" ? (
+              {isMatchFlowPhase(guestState.phase) ? (
                 <div className="alert alert-info shadow-sm">
-                  Match is starting. Gameplay arrives in the next milestone.
+                  Match in progress. Full gameplay shell arrives in Epic 3.
                 </div>
               ) : (
                 <p className="text-sm text-base-content/70">

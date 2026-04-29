@@ -192,6 +192,15 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
           });
           return;
         }
+        case "matchPhase": {
+          const mp = parsed.data;
+          setState((prev) => {
+            if (prev.status !== "joined") return prev;
+            if (mp.roomId !== prev.roomId) return prev;
+            return { ...prev, phase: mp.phase };
+          });
+          return;
+        }
         case "matchStarting": {
           const match = parsed.data;
           setState((prev) => {
