@@ -1,0 +1,97 @@
+# generated: 2026-04-29T12:00:00Z
+# last_updated: 2026-04-29T12:00:00Z
+# project: skribbl
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: _bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+
+generated: '2026-04-29T12:00:00Z'
+last_updated: '2026-04-29T12:00:00Z'
+project: skribbl
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+
+development_status:
+  epic-1: backlog
+  1-1-scaffold-monorepo-shared-protocol-package: backlog
+  1-2-authoritative-rooms-secure-codes-on-the-server: backlog
+  1-3-create-flow-ux-shareable-link-copy-feedback: backlog
+  1-4-join-flow-ux-paste-friendly-code-entry: backlog
+  1-5-lobby-identity-nickname-avatar-presets: backlog
+  1-6-live-roster-host-badge-start-gate: backlog
+  1-7-connection-trust-banner-during-lobby-states: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-match-state-machine-skeleton-server-timers: backlog
+  2-2-round-robin-drawer-rotation: backlog
+  2-3-word-bank-loading-drawer-wordchoicepanel: backlog
+  2-4-drawing-phase-countdown-timer-driven-round-end: backlog
+  2-5-progressive-letter-hints-cadence: backlog
+  2-6-score-rules-running-totals: backlog
+  2-7-match-end-scoreboardsummary: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-direction-1-match-shell-canvas-column-chat-column-scaffold: backlog
+  3-2-drawingcanvas-controller-mapping-sizing: backlog
+  3-3-local-stroke-capture-batched-upstream-payloads: backlog
+  3-4-server-sequencing-fan-out-stroke-batches-live: backlog
+  3-5-palette-brush-sizing-toolbar: backlog
+  3-6-eraser-fill-clear-semantics-via-op-log: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-chatpanel-composer-realtime-history: backlog
+  4-2-guess-adjudication-exact-match-spoiler-safe-broadcasts: backlog
+  4-3-score-awards-drawer-bonuses-wiring: backlog
+  4-4-correct-guess-fan-out-messaging-ux-beats: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-session-tokens-reconnect-handshake: backlog
+  5-2-snapshot-op-replay-hydration: backlog
+  5-3-presence-decay-ui-muted-roster-rows: backlog
+  epic-5-retrospective: optional
+
+  epic-6: backlog
+  6-1-daisyui-theme-tokens-cyan-accent-semantics: backlog
+  6-2-react-error-boundary-ws-down-ux: backlog
+  6-3-landing-footer-portfolio-cues-healthz-pairing: backlog
+  6-4-accessibility-sweep-landmarks-keyboard-loops-contrast: backlog
+  6-5-reduced-motion-variants-testids-responsive-qa: backlog
+  epic-6-retrospective: optional
+
+  epic-7: backlog
+  7-1-close-guess-proximity-feedback-growth: backlog
+  epic-7-retrospective: optional

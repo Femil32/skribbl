@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Skribbl — UX Design Directions</title>
+    <style>
+      :root {
+        --bg: #0f1419;
+        --panel: #1a2332;
+        --muted: #8b9aaf;
+        --accent: #38bdf8;
+        --accent2: #a78bfa;
+        --canvas: #f8fafc;
+        --success: #34d399;
+        --warning: #fbbf24;
+        --danger: #f87171;
+        --border: rgba(148, 163, 184, 0.2);
+        font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: #e2e8f0;
+        line-height: 1.5;
+      }
+      header {
+        padding: 2rem 1.5rem;
+        border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        background: rgba(15, 20, 25, 0.92);
+        backdrop-filter: blur(8px);
+        z-index: 10;
+      }
+      header h1 {
+        margin: 0 0 0.35rem;
+        font-size: 1.35rem;
+      }
+      header p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.9rem;
+        max-width: 72ch;
+      }
+      nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 1rem;
+      }
+      nav a {
+        color: var(--accent);
+        font-size: 0.85rem;
+        text-decoration: none;
+        padding: 0.35rem 0.65rem;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+      }
+      nav a:hover {
+        background: var(--panel);
+      }
+      main {
+        padding: 1.5rem;
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+      section {
+        margin-bottom: 3rem;
+      }
+      section h2 {
+        margin: 0 0 0.25rem;
+        font-size: 1.1rem;
+      }
+      section .tagline {
+        margin: 0 0 1rem;
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+      .mock {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        overflow: hidden;
+        background: var(--panel);
+        min-height: 280px;
+      }
+      .bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.5rem 0.75rem;
+        background: rgba(0, 0, 0, 0.25);
+        font-size: 0.75rem;
+        gap: 0.5rem;
+      }
+      .phase {
+        font-weight: 600;
+      }
+      .timer {
+        font-variant-numeric: tabular-nums;
+        padding: 0.15rem 0.5rem;
+        border-radius: 6px;
+        background: rgba(251, 191, 36, 0.15);
+        color: var(--warning);
+      }
+      .split {
+        display: grid;
+        grid-template-columns: 1fr 220px;
+        min-height: 220px;
+      }
+      .split.rev {
+        grid-template-columns: 220px 1fr;
+      }
+      .split.stack {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr auto;
+      }
+      .split.tri {
+        grid-template-columns: 160px 1fr 200px;
+      }
+      .canvas {
+        background: var(--canvas);
+        margin: 0.5rem;
+        border-radius: 8px;
+        position: relative;
+        box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+      }
+      .canvas::after {
+        content: "";
+        position: absolute;
+        inset: 30% 35%;
+        border: 2px dashed #cbd5e1;
+        border-radius: 50%;
+        opacity: 0.7;
+      }
+      .tools {
+        display: flex;
+        gap: 0.35rem;
+        padding: 0.35rem;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .swatch {
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        border: 2px solid #fff;
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+      }
+      .chat {
+        padding: 0.5rem;
+        font-size: 0.72rem;
+        color: #cbd5e1;
+        border-left: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+      .chat .msg {
+        opacity: 0.9;
+      }
+      .chat .sys {
+        color: var(--muted);
+        font-size: 0.68rem;
+      }
+      .roster {
+        padding: 0.5rem;
+        font-size: 0.72rem;
+        border-right: 1px solid var(--border);
+      }
+      .roster div {
+        padding: 0.25rem 0;
+        display: flex;
+        justify-content: space-between;
+      }
+      .accent-cyan .timer {
+        background: rgba(56, 189, 248, 0.15);
+        color: var(--accent);
+      }
+      .accent-violet {
+        --accent: #a78bfa;
+      }
+      .accent-violet .timer {
+        background: rgba(167, 139, 250, 0.15);
+        color: var(--accent2);
+      }
+      .minimal .mock {
+        border-radius: 4px;
+      }
+      .minimal .canvas {
+        border-radius: 4px;
+      }
+      .rounded .mock {
+        border-radius: 20px;
+      }
+      .rounded .canvas {
+        border-radius: 16px;
+      }
+      .bottom-chat .split.stack .chat {
+        border-left: none;
+        border-top: 1px solid var(--border);
+        flex-direction: row;
+        overflow-x: auto;
+      }
+      footer.page {
+        padding: 2rem 1.5rem;
+        border-top: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 0.85rem;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Skribbl — design direction explorations</h1>
+      <p>
+        Eight compact layout / chrome variations for the <strong>match</strong> screen (draw phase). Same content metaphor: phase bar → canvas +
+        tools → chat/roster. Open each anchor to compare; pick hierarchy that matches phase-first clarity + portfolio polish.
+      </p>
+      <nav aria-label="Jump to direction">
+        <a href="#d1">1 Split</a>
+        <a href="#d2">2 Bottom chat</a>
+        <a href="#d3">3 Roster rail</a>
+        <a href="#d4">4 Triple</a>
+        <a href="#d5">5 Cyan accent</a>
+        <a href="#d6">6 Violet accent</a>
+        <a href="#d7">7 Minimal</a>
+        <a href="#d8">8 Soft rounded</a>
+      </nav>
+    </header>
+    <main>
+      <section id="d1">
+        <h2>Direction 1 — Classic desktop split</h2>
+        <p class="tagline">Canvas left (majority), chat column right. Genre-default; maximizes drawing width.</p>
+        <div class="mock">
+          <div class="bar">
+            <span class="phase">Drawing · Alex</span>
+            <span class="timer">1:04</span>
+          </div>
+          <div class="split">
+            <div>
+              <div class="canvas" style="min-height: 160px"></div>
+              <div class="tools">
+                <span class="swatch" style="background:#ef4444"></span>
+                <span class="swatch" style="background:#3b82f6"></span>
+                <span class="swatch" style="background:#22c55e"></span>
+                <span style="color:var(--muted);font-size:0.65rem">brush · eraser · fill · clear</span>
+              </div>
+            </div>
+            <div class="chat">
+              <span class="sys">Hints: _ _ _ · · ·</span>
+              <span class="msg"><strong>Jamie:</strong> apple?</span>
+              <span class="msg"><strong>Ryu:</strong> planet</span>
+              <span style="margin-top: auto; opacity: 0.5">Type a guess…</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="d2">
+        <h2>Direction 2 — Canvas hero + chat dock</h2>
+        <p class="tagline">Large canvas; chat as wide strip below (Discord-mobile-ish). Strong focus on drawing.</p>
+        <div class="mock bottom-chat">
+          <div class="bar">
+            <span class="phase">Drawing · Alex</span>
+            <span class="timer">0:42</span>
+          </div>
+          <div class="split stack">
+            <div>
+              <div class="canvas" style="min-height: 140px"></div>
+              <div class="tools">
+                <span class="swatch" style="background:#eab308"></span>
+                <span class="swatch" style="background:#000"></span>
+              </div>
+            </div>
+            <div class="chat" style="min-height: 52px">
+              <span class="msg"><strong>Jamie:</strong> bridge</span>
+              <span class="msg"><strong>Ryu:</strong> tower</span>
+              <span class="msg"><strong>Sam:</strong> skyline</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="d3">
+        <h2>Direction 3 — Left roster rail</h2>
+        <p class="tagline">Scores + presence pinned left; canvas center; chat right. Scannable competition.</p>
+        <div class="mock">
+          <div class="bar">
+            <span class="phase">Drawing · Alex</span>
+            <span class="timer">0:28</span>
+          </div>
+          <div class="split tri">
+            <div class="roster">
+              <div><span>Alex ★</span><span>420</span></div>
+              <div><span>Jamie</span><span>380</span></div>
+              <div><span>Ryu</span><span>310</span></div>
+            </div>
+            <div>
+              <div class="canvas" style="min-height: 150px"></div>
+              <div class="tools"><span style="font-size:0.65rem;color:var(--muted)">tools…</span></div>
+            </div>
+            <div class="chat">
+              <span class="msg"><strong>Ryu:</strong> guess</span>
+              <span class="sys">Round 2 / 3</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="d4">
+        <h2>Direction 4 — Triple band (toolbar top)</h2>
+        <p class="tagline">Explicit tool strip above canvas; chat far right — separates “tooling” from “social.”</p>
+        <div class="mock">
+          <div class="bar">
+            <span class="phase">Choose word · Alex</span>
+            <span class="timer">—</span>
+          </div>
+          <div style="padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--border); font-size: 0.7rem">
+            ○ ● ▭ ✕ palette sizes…
+          </div>
+          <div class="split">
+            <div class="canvas" style="min-height: 150px; margin: 0.5rem"></div>
+            <div class="chat"><span class="sys">Waiting…</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="d5">
+        <h2>Direction 5 — Cyan accent system</h2>
+        <p class="tagline">Cool cyan primary accent on chrome + timer chip — tech-forward portfolio tone.</p>
+        <div class="mock accent-cyan">
+          <div class="bar">
+            <span class="phase">Drawing · Alex</span>
+            <span class="timer">0:59</span>
+          </div>
+          <div class="split">
+            <div>
+              <div class="canvas" style="min-height: 150px"></div>
+              <div class="tools"><span style="color: var(--accent); font-size: 0.7rem">● selected</span></div>
+            </div>
+            <div class="chat"><span class="msg"><strong>Jamie:</strong> ocean</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="d6">
+        <h2>Direction 6 — Violet accent system</h2>
+        <p class="tagline">Softer party vibe; distinct from “default tech blue.”</p>
+        <div class="mock accent-violet">
+          <div class="bar">
+            <span class="phase">Drawing · Alex</span>
+            <span class="timer">0:33</span>
+          </div>
+          <div class="split">
+            <div class="canvas" style="min-height: 150px"></div>
+            <div class="chat"><span class="sys">Room · sketch-night</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="d7">
+        <h2>Direction 7 — Minimal chrome</h2>
+        <p class="tagline">Sharp corners, thin borders — maximum canvas signal; less “friendly,” more product-demo.</p>
+        <div class="mock minimal">
+          <div class="bar" style="border-bottom: 1px solid var(--border)">
+            <span class="phase">DRAW · Alex</span>
+            <span class="timer">0:51</span>
+          </div>
+          <div class="split">
+            <div class="canvas" style="min-height: 155px"></div>
+            <div class="chat"><span class="msg">chat…</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="d8">
+        <h2>Direction 8 — Soft rounded “party”</h2>
+        <p class="tagline">Generous radius + padded chrome — approachable Jackbox-adjacent warmth.</p>
+        <div class="mock rounded">
+          <div class="bar">
+            <span class="phase">Drawing ✎ Alex</span>
+            <span class="timer">1:12</span>
+          </div>
+          <div class="split">
+            <div class="canvas" style="min-height: 145px"></div>
+            <div class="chat"><span class="msg"><strong>Sam:</strong> lol</span></div>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="page">
+      Static wireframes for UX workflow · align implementation with chosen direction + tokens in
+      <code>ux-design-specification.md</code>
+    </footer>
+  </body>
+</html>
