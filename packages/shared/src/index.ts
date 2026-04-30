@@ -36,3 +36,9 @@ export {
   type AvatarPresetId,
 } from "./player-identity.js";
 export { computeGuesserPoints } from "./scoring.js";
+export {
+  DEFAULT_CLIENT_LINE_WIDTH_PX,
+  DEFAULT_CLIENT_STROKE_COLOR,
+  clampClientLineWidthPx,
+  normalizeClientStrokeColor,
+} from "./drawing-stroke-style.js";

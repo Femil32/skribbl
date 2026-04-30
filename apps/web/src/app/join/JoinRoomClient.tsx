@@ -18,6 +18,7 @@ import {
 import { useGuestJoinRoom } from "@/features/lobby/hooks/use-guest-join-room";
 import { LobbyConnectionBanner } from "@/features/lobby/components/LobbyConnectionBanner";
 import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster";
+import { MatchDrawingColumn } from "@/features/game/components/MatchDrawingColumn";
 import { PhaseBar } from "@/features/match/components/PhaseBar";
 import { ScoreboardSummary } from "@/features/match/components/ScoreboardSummary";
 import { WordChoicePanel } from "@/features/match/components/WordChoicePanel";
@@ -97,6 +98,8 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
   const [avatarId, setAvatarId] = useState<AvatarPresetId>(
     DEFAULT_AVATAR_PRESET_ID,
   );
+  const [brushColor, setBrushColor] = useState("#0f172a");
+  const [brushWidthPx, setBrushWidthPx] = useState(4);
 
   const normalized = normalizeRoomCode(raw);
   const formatOk = isValidRoomCodeForJoin(normalized);
@@ -123,6 +126,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
     transportErrorMessage: guestTransportError,
     awaitingRoomHandshake: guestAwaitingHandshake,
     chooseWord: guestChooseWord,
+    sendGameJsonLine: guestSendGameJsonLine,
   } = useGuestJoinRoom({
     activeJoinAttempt,
     connectionAttemptId: joinGeneration,
@@ -220,7 +224,9 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
         />
         <div className="flex flex-1 flex-col items-center justify-center p-8">
           <div
-            className={`card bg-base-100 shadow-xl w-full max-w-lg ${
+            className={`card bg-base-100 shadow-xl w-full ${
+              isMatchFlowPhase(guestState.phase) ? "max-w-4xl" : "max-w-lg"
+            } ${
               guestTransport === "disconnected"
                 ? "opacity-60 pointer-events-none"
                 : ""
@@ -286,9 +292,20 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                 />
               ) : null}
               {isMatchFlowPhase(guestState.phase) ? (
-                <div className="alert alert-info shadow-sm">
-                  Match in progress. Full gameplay shell arrives in Epic 3.
-                </div>
+                <MatchDrawingColumn
+                  phase={guestState.phase}
+                  localPlayerId={guestState.playerId}
+                  drawerPlayerId={guestState.drawerPlayerId}
+                  roomId={guestState.roomId}
+                  matchRoundIndex={guestState.matchRoundIndex}
+                  brushColor={brushColor}
+                  brushWidthPx={brushWidthPx}
+                  onBrushColorChange={setBrushColor}
+                  onBrushWidthChange={setBrushWidthPx}
+                  sendJsonLine={guestSendGameJsonLine}
+                  remoteCommitted={guestState.remoteStrokeCommits}
+                  wsLive={guestTransport === "live"}
+                />
               ) : guestState.phase === "matchEnded" ? (
                 <p className="text-sm text-base-content/70">
                   Match finished — scores are above. Wait for the host to play again.

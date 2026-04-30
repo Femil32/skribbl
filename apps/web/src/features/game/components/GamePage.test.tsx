@@ -38,6 +38,7 @@ describe("GamePage", () => {
     const main = screen.getByTestId("canvas-region");
     const aside = screen.getByTestId("chat-region");
     expect(within(main).getByRole("img", { name: /drawing surface/i })).toBeTruthy();
+    expect(within(main).getByTestId("drawing-toolbar")).toBeTruthy();
     expect(within(aside).getByText("Chat area")).toBeTruthy();
   });
 

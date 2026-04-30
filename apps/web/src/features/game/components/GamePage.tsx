@@ -1,13 +1,28 @@
-import type { ReactNode } from "react";
+"use client";
 
-import { DrawingCanvas } from "../canvas/DrawingCanvas";
+import type { ReactNode } from "react";
+import type { RoomPhase } from "@skribbl/shared";
+import { useCallback, useState } from "react";
+
+import { MatchDrawingColumn } from "@/features/game/components/MatchDrawingColumn";
+
+const DEV_MATCH_PHASE: RoomPhase = "drawing";
 
 export type GamePageProps = {
   /** Extra chat content (e.g. long lists); keeps default shell minimal on `/game`. */
   chatSlot?: ReactNode;
 };
 
+/**
+ * Dev scaffold: Direction-1 shell with the same toolbar + canvas wiring as lobby match UI (Story 3.5).
+ */
 export function GamePage({ chatSlot }: GamePageProps = {}) {
+  const [brushColor, setBrushColor] = useState("#0f172a");
+  const [brushWidthPx, setBrushWidthPx] = useState(4);
+  const sendJsonLineDev = useCallback(() => {
+    /* dev scaffold — no WebSocket transport */
+  }, []);
+
   return (
     <div className="flex h-screen flex-col">
       <header
@@ -23,7 +38,20 @@ export function GamePage({ chatSlot }: GamePageProps = {}) {
           data-testid="canvas-region"
         >
           <div className="flex min-h-0 min-w-0 flex-1 flex-col p-3">
-            <DrawingCanvas mode="drawing" />
+            <MatchDrawingColumn
+              phase={DEV_MATCH_PHASE}
+              localPlayerId="dev-local-drawer"
+              drawerPlayerId="dev-local-drawer"
+              roomId="dev-room"
+              matchRoundIndex={0}
+              brushColor={brushColor}
+              brushWidthPx={brushWidthPx}
+              onBrushColorChange={setBrushColor}
+              onBrushWidthChange={setBrushWidthPx}
+              sendJsonLine={sendJsonLineDev}
+              remoteCommitted={[]}
+              wsLive
+            />
           </div>
         </main>
 

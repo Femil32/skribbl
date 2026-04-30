@@ -1,12 +1,17 @@
 "use client";
 
 import type { DrawingStrokeCommitted, DrawingStrokePoint, RoomPhase } from "@skribbl/shared";
-import { serializeClientCommand } from "@skribbl/shared";
+import {
+  clampClientLineWidthPx,
+  normalizeClientStrokeColor,
+  serializeClientCommand,
+} from "@skribbl/shared";
 import {
   forwardRef,
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
 } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
@@ -78,6 +83,15 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
     const remoteWatermarkRef = useRef(0);
     const isPointerDrawingRef = useRef(false);
 
+    const resolvedColor = useMemo(
+      () => normalizeClientStrokeColor(brushColor),
+      [brushColor],
+    );
+    const resolvedWidth = useMemo(
+      () => clampClientLineWidthPx(brushWidthPx),
+      [brushWidthPx],
+    );
+
     const applyCanvasSizeAndTransform = useCallback(() => {
       const wrapper = wrapperRef.current;
       const canvasEl = canvasRef.current;
@@ -146,13 +160,13 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
           strokeId: pid,
           chunkId,
           points,
-          color: brushColor,
-          lineWidthPx: brushWidthPx,
+          color: resolvedColor,
+          lineWidthPx: resolvedWidth,
         });
 
         strokeTransport.sendJsonLine(raw);
       },
-      [brushColor, brushWidthPx, cancelFlushTimer, strokeTransport],
+      [resolvedColor, resolvedWidth, cancelFlushTimer, strokeTransport],
     );
 
     const scheduleFlush = useCallback(() => {
@@ -326,16 +340,16 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
 
         if (strokeTransport) {
           if (prev) {
-            drawStrokePolylineOnContext(ctx, [prev, next], brushColor, brushWidthPx);
+            drawStrokePolylineOnContext(ctx, [prev, next], resolvedColor, resolvedWidth);
           }
           enqueueBatchPointForTransport(next);
         } else if (prev) {
-          drawStrokePolylineOnContext(ctx, [prev, next], brushColor, brushWidthPx);
+          drawStrokePolylineOnContext(ctx, [prev, next], resolvedColor, resolvedWidth);
         }
       },
       [
-        brushColor,
-        brushWidthPx,
+        resolvedColor,
+        resolvedWidth,
         enqueueBatchPointForTransport,
         pointerDrawingEnabled,
         strokeTransport,

@@ -1,6 +1,11 @@
 "use client";
 
-import type { AvatarPresetId, LobbyRosterPlayer, RoomPhase } from "@skribbl/shared";
+import type {
+  AvatarPresetId,
+  DrawingStrokeCommitted,
+  LobbyRosterPlayer,
+  RoomPhase,
+} from "@skribbl/shared";
 import { safeParseServerEvent } from "@skribbl/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -46,6 +51,8 @@ export type HostLobbyState =
         matchRoundIndex: number;
       } | null;
       wordChoicePickError?: string | null;
+      /** Replay buffer for peers (Story 3.5) — cleared on lobby or new match round. */
+      remoteStrokeCommits: DrawingStrokeCommitted[];
     }
   | { status: "error"; message: string };
 
@@ -72,7 +79,12 @@ export type UseHostCreateRoomResult = {
   chooseWord: (choiceIndex: 0 | 1 | 2) => void;
   /** Host-only: return from `matchEnded` to lobby (Story 2.7). */
   returnToLobby: () => void;
+  /** Raw JSON line for drawing commands (open socket only). */
+  sendGameJsonLine: (raw: string) => void;
 };
+
+/** Avoid unbounded `remoteStrokeCommits` growth during long drawing phases. */
+const MAX_REMOTE_STROKE_COMMITS_BUFFER = 8192;
 
 const TERMINAL_PROTOCOL_CODES_AFTER_LOBBY = new Set([
   "BAD_PAYLOAD",
@@ -105,6 +117,16 @@ export function useHostCreateRoom(
 
   const reachedLobbyRef = useRef(false);
   const wsRef = useRef<WebSocket | null>(null);
+
+  const sendGameJsonLine = useCallback((raw: string) => {
+    const w = wsRef.current;
+    if (!w || w.readyState !== WebSocket.OPEN) return;
+    try {
+      w.send(raw);
+    } catch {
+      /* ignore */
+    }
+  }, []);
   /** Set when the socket closes after the host reached the lobby; drives “reconnecting” copy on retry. */
   const closedWhileInLobbyRef = useRef(false);
   /** Latest successful `roomCreated` — used for `reconnectHost` after a transport drop. */
@@ -206,6 +228,7 @@ export function useHostCreateRoom(
             isStartPending: false,
             wordChoiceOffer: null,
             wordChoicePickError: null,
+            remoteStrokeCommits: [],
           });
           setTransport("live");
           return;
@@ -253,6 +276,17 @@ export function useHostCreateRoom(
                   : prev.matchRoundIndex;
             const phaseDeadlineMs =
               mp.phaseDeadlineMs !== undefined ? mp.phaseDeadlineMs : undefined;
+
+            let nextCommits = prev.remoteStrokeCommits;
+            if (mp.phase === "lobby") nextCommits = [];
+            else if (
+              prev.matchRoundIndex !== undefined &&
+              mp.matchRoundIndex !== undefined &&
+              mp.matchRoundIndex !== prev.matchRoundIndex
+            ) {
+              nextCommits = [];
+            }
+
             return {
               ...prev,
               phase: mp.phase,
@@ -261,6 +295,7 @@ export function useHostCreateRoom(
               phaseDeadlineMs,
               wordChoiceOffer,
               wordChoicePickError,
+              remoteStrokeCommits: nextCommits,
               ...(mp.phase === "lobby" ? { isStartPending: false } : {}),
             };
           });
@@ -363,8 +398,21 @@ export function useHostCreateRoom(
         case "pong":
         case "roomJoined":
           return;
-        case "drawingStrokeCommitted":
+        case "drawingStrokeCommitted": {
+          const strokeEv = parsed.data;
+          setState((prev) => {
+            if (prev.status !== "lobby") return prev;
+            if (strokeEv.roomId !== prev.roomId) return prev;
+            return {
+              ...prev,
+              remoteStrokeCommits: [
+                ...prev.remoteStrokeCommits,
+                strokeEv,
+              ].slice(-MAX_REMOTE_STROKE_COMMITS_BUFFER),
+            };
+          });
           return;
+        }
         default: {
           const _exhaustive: never = parsed.data;
           return _exhaustive;
@@ -451,6 +499,7 @@ export function useHostCreateRoom(
       startMatch,
       chooseWord,
       returnToLobby,
+      sendGameJsonLine,
     };
   }
 
@@ -464,6 +513,7 @@ export function useHostCreateRoom(
       startMatch,
       chooseWord,
       returnToLobby,
+      sendGameJsonLine,
     };
   }
 
@@ -477,6 +527,7 @@ export function useHostCreateRoom(
       startMatch,
       chooseWord,
       returnToLobby,
+      sendGameJsonLine,
     };
   }
 
@@ -489,5 +540,6 @@ export function useHostCreateRoom(
     startMatch,
     chooseWord,
     returnToLobby,
+    sendGameJsonLine,
   };
 }

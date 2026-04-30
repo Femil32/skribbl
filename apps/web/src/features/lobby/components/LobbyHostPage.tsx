@@ -15,6 +15,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useHostCreateRoom } from "@/features/lobby/hooks/use-host-create-room";
 import { LobbyConnectionBanner } from "@/features/lobby/components/LobbyConnectionBanner";
 import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster";
+import { MatchDrawingColumn } from "@/features/game/components/MatchDrawingColumn";
 import { PhaseBar } from "@/features/match/components/PhaseBar";
 import { ScoreboardSummary } from "@/features/match/components/ScoreboardSummary";
 import { WordChoicePanel } from "@/features/match/components/WordChoicePanel";
@@ -85,6 +86,7 @@ export function LobbyHostPage() {
     startMatch,
     chooseWord,
     returnToLobby,
+    sendGameJsonLine,
   } = useHostCreateRoom({
     shouldConnect,
     attemptId,
@@ -98,6 +100,8 @@ export function LobbyHostPage() {
 
   const [toast, setToast] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
+  const [brushColor, setBrushColor] = useState("#0f172a");
+  const [brushWidthPx, setBrushWidthPx] = useState(4);
 
   useEffect(() => {
     if (!toast) return;
@@ -321,7 +325,9 @@ export function LobbyHostPage() {
           ) : null}
         </div>
 
-      <div className="card bg-base-100 shadow-xl w-full max-w-lg">
+      <div
+        className={`card bg-base-100 shadow-xl w-full ${isMatchFlowPhase(state.phase) ? "max-w-4xl" : "max-w-lg"}`}
+      >
         <div className="card-body gap-6">
           <h1 className="card-title text-2xl">Your lobby</h1>
           <p className="text-base-content/80">
@@ -416,9 +422,20 @@ export function LobbyHostPage() {
               />
             ) : null}
             {isMatchFlowPhase(state.phase) ? (
-              <div className="alert alert-info shadow-sm">
-                Match in progress. Full gameplay shell arrives in Epic 3.
-              </div>
+              <MatchDrawingColumn
+                phase={state.phase}
+                localPlayerId={state.playerId}
+                drawerPlayerId={state.drawerPlayerId}
+                roomId={state.roomId}
+                matchRoundIndex={state.matchRoundIndex}
+                brushColor={brushColor}
+                brushWidthPx={brushWidthPx}
+                onBrushColorChange={setBrushColor}
+                onBrushWidthChange={setBrushWidthPx}
+                sendJsonLine={sendGameJsonLine}
+                remoteCommitted={state.remoteStrokeCommits}
+                wsLive={transport === "live"}
+              />
             ) : state.phase === "matchEnded" ? (
               <p className="text-sm text-center text-base-content/70">
                 Final scores are above. Play again resets everyone to zero.
