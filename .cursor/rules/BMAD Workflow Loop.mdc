@@ -1,0 +1,263 @@
+---
+alwaysApply: false
+---
+# BMAD / GDS Epic Loop Agent
+
+You are a **sequential orchestrator**. When the user says **"Work on Epic [N]"** or **"Start BMAD loop"**, execute the epic story-by-story using **Cursor CLI** (`agent -p`) — one blocking call per step, wait for completion, then proceed to the next.
+
+**Use Context7 MCP** (`resolve-library-id` → `query-docs`) before any step that involves a library, framework, or CLI flag.
+
+---
+
+## 0. Bootstrap
+
+Read in order before doing anything:
+
+1. `_bmad/bmm/config.yaml` → resolve `{implementation_artifacts}`, `{planning_artifacts}`
+2. `{implementation_artifacts}/sprint-status.yaml` → source of truth (read + write; preserve all comments)
+3. `{planning_artifacts}/epics.md` → single file containing all epics and stories
+4. `{planning_artifacts}/prd.md`
+5. `_bmad-output/game-architecture.md`
+6. `_bmad-output/project-context.md` (if present)
+
+> Missing `sprint-status.yaml` → **STOP**. Tell user to run `bmad-sprint-planning` first.
+
+---
+
+## 1. Paths
+
+| Artifact | Path |
+|----------|------|
+| Sprint file | `_bmad-output/implementation-artifacts/sprint-status.yaml` |
+| Story files | `_bmad-output/implementation-artifacts/{story-id}.md` |
+| Epics | `_bmad-output/planning-artifacts/epics.md` |
+| PRD | `_bmad-output/planning-artifacts/prd.md` |
+| UX | `_bmad-output/planning-artifacts/*ux*.md` |
+| GDD | `_bmad-output/planning-artifacts/gdd.md` |
+| Create story skill | `.cursor/skills/gds-create-story/SKILL.md` |
+| Dev story skill | `.cursor/skills/gds-dev-story/SKILL.md` |
+| Code review skill | `.cursor/skills/gds-code-review/SKILL.md` |
+
+---
+
+## 2. Status flow
+
+```
+backlog → ready-for-dev → in-progress → review → done
+```
+
+| Status | Meaning |
+|--------|---------|
+| `backlog` | No story file yet |
+| `ready-for-dev` | Story file created, not yet started |
+| `in-progress` | Dev agent executing |
+| `review` | Dev done, review pending |
+| `done` | Review fixes applied, verified, committed |
+
+Epic statuses: `backlog` | `in-progress` | `done`
+
+---
+
+## 3. Branch naming (strict)
+
+**Pattern:** `dev/epic-{E}-story-{E}-{S}`
+
+- `{E}` = epic number (first segment of story key)
+- `{S}` = story number (second segment of story key)
+
+| Story key | Branch |
+|-----------|--------|
+| `3-1-match-shell-...` | `dev/epic-3-story-3-1` |
+| `2-7-match-end-...` | `dev/epic-2-story-2-7` |
+
+---
+
+## 4. Cursor CLI — command pattern (always use this)
+
+Every step is a **blocking** Cursor CLI call. **Wait for exit before starting the next.**
+
+```bash
+agent -p --workspace "/Users/mac/Desktop/femil/skribbl" --output-format json \
+  "<single-responsibility prompt for this step>"
+```
+
+Use Context7 for current CLI flags if unsure:
+- `resolve-library-id` with `libraryName: "Cursor IDE"` → pick `/websites/cursor_cli`
+- `query-docs` with the flag/feature question
+
+---
+
+## 5. Epic target and story ordering
+
+Parse epic number `N` from user command (e.g. "Work on Epic 3" → `N=3`).
+
+From `sprint-status.yaml` `development_status`:
+- Collect keys matching pattern `N-\d+-*` (exclude `epic-*` and `epic-*-retrospective`)
+- Filter to status not `done`
+- Sort numerically by story number
+
+If `epic-{N}: done` and no incomplete stories → report and stop.
+
+---
+
+## 6. Story loop
+
+Repeat for each story in order. Each phase is a **separate** `agent -p` call. Do not combine phases.
+
+---
+
+### Step 1 — Git branch
+
+```bash
+agent -p --workspace "/Users/mac/Desktop/femil/skribbl" --output-format json \
+  "Run these git commands and report the resulting branch name and short SHA:
+   BRANCH='dev/epic-{E}-story-{E}-{S}'
+   git checkout main && git pull origin main
+   git checkout -b \"\${BRANCH}\" 2>/dev/null || git checkout \"\${BRANCH}\""
+```
+
+Wait for exit. Confirm branch is `dev/epic-{E}-story-{E}-{S}`.
+
+---
+
+### Step 2 — Create story (only if status is `backlog`)
+
+```bash
+agent -p --workspace "/Users/mac/Desktop/femil/skribbl" --output-format json \
+  "Read and execute the full workflow in .cursor/skills/gds-create-story/SKILL.md for story {story-id}.
+   Sprint file: _bmad-output/implementation-artifacts/sprint-status.yaml.
+   Preserve all YAML comments. Update status backlog → ready-for-dev when done."
+```
+
+Wait for exit. Verify `{story-id}.md` exists and sprint row is `ready-for-dev`.
+
+> Skip this step if status is already `ready-for-dev` or `in-progress`.
+
+---
+
+### Step 3 — Implement story (status `ready-for-dev` or `in-progress`)
+
+```bash
+agent -p --workspace "/Users/mac/Desktop/femil/skribbl" --output-format json \
+  "Read and execute the full workflow in .cursor/skills/gds-dev-story/SKILL.md.
+   Story file: _bmad-output/implementation-artifacts/{story-id}.md.
+   Follow all tasks, run all tests, satisfy Definition of Done.
+   Update sprint status to review when complete."
+```
+
+Wait for exit. Verify sprint row is `review` and story Status is `review`.
+
+> Skip this step if status is already `review`.
+
+---
+
+### Step 4 — Code review
+
+```bash
+agent -p --workspace "/Users/mac/Desktop/femil/skribbl" --output-format json \
+  "Read and execute the full workflow in .cursor/skills/gds-code-review/SKILL.md for story {story-id}.
+   Output a triaged findings list (BLOCKER / MAJOR / MINOR)."
+```
+
+Wait for exit. Capture all findings.
+
+---
+
+### Step 5 — Fix all review findings (production grade)
+
+```bash
+agent -p --workspace "/Users/mac/Desktop/femil/skribbl" --output-format json \
+  "Fix every finding from the code review of story {story-id} with production-quality code.
+   No stubs, no TODO comments, no deferred fixes unless the story file explicitly defers with a tracked item.
+   Re-run .cursor/skills/gds-dev-story/SKILL.md tasks/subtasks for any structural fix sets."
+```
+
+Wait for exit. All findings must be resolved.
+
+---
+
+### Step 6 — Verify (lint / typecheck / tests / build)
+
+```bash
+agent -p --workspace "/Users/mac/Desktop/femil/skribbl" --output-format json \
+  "Run the full verification suite for the skribbl project:
+   pnpm -r lint && pnpm -r exec tsc --noEmit && pnpm -r test && pnpm -r build
+   Fix any failures. Report exit status and any errors."
+```
+
+Wait for exit. Must be zero failures before proceeding.
+
+---
+
+### Step 7 — Update status to `done`
+
+```bash
+agent -p --workspace "/Users/mac/Desktop/femil/skribbl" --output-format json \
+  "Update _bmad-output/implementation-artifacts/sprint-status.yaml:
+   Set {story-id} to done. Update last_updated to today. Preserve all YAML comments.
+   Also update the Status field in _bmad-output/implementation-artifacts/{story-id}.md to done."
+```
+
+Wait for exit. Verify both files reflect `done`.
+
+---
+
+### Step 8 — Local commit
+
+```bash
+agent -p --workspace "/Users/mac/Desktop/femil/skribbl" --output-format json \
+  "On branch dev/epic-{E}-story-{E}-{S}, stage and commit all changes:
+   git add -A
+   git commit -m 'feat({story-id}): <one-line outcome>'
+   Do NOT run git push. Report the commit SHA."
+```
+
+Wait for exit. Confirm local commit SHA. Do not push.
+
+---
+
+### Step 9 — Next story
+
+If more stories remain (status not `done`) for epic `N`:
+- Parse `{E_next}` and `{S_next}` from the next story key
+- Go to **Step 1** with the next story's values
+
+If no more stories remain → proceed to **§7 Epic completion**.
+
+---
+
+## 7. Epic completion
+
+Run as one blocking `agent -p` call:
+
+```bash
+agent -p --workspace "/Users/mac/Desktop/femil/skribbl" --output-format json \
+  "Epic {N} is complete. Do the following in order:
+   1. Set epic-{N} to done in _bmad-output/implementation-artifacts/sprint-status.yaml. Preserve all comments.
+   2. Write _bmad-output/implementation-artifacts/epic-{N}-complete.md with:
+      - Story table (story-id, branch, status)
+      - Epic AC coverage mapped from _bmad-output/planning-artifacts/epics.md
+      - Deferred items
+      - Next backlog epic from sprint file
+   3. git add -A && git commit -m 'docs(epic-{N}): epic complete summary and sprint closure'
+   4. Do NOT git push.
+   5. Print list of all dev/epic-{N}-story-* branches and their HEAD SHAs."
+```
+
+Wait for exit. Then **STOP** — do not start the next epic. Tell the user:
+- All branches and SHAs for this epic
+- "Local history ready for manual review. Run 'Work on Epic {N+1}' when ready."
+
+---
+
+## 8. Rules
+
+- **Cursor CLI always**: every step uses `agent -p --workspace ... --output-format json`. No exceptions.
+- **One step at a time**: wait for each `agent -p` process to exit before the next.
+- **BLOCKED**: if any step fails or is ambiguous, state `BLOCKED: {reason}` and stop.
+- **Status order**: `backlog → ready-for-dev → in-progress → review → done`. Never skip or reverse.
+- **`done` only after Step 6 is green**: status update (Step 7) is always last before commit.
+- **Branch**: always `dev/epic-{E}-story-{E}-{S}`. Never `feature/`.
+- **No push**: local commits only until human approves.
+- **No scope creep**: implement only what story ACs require.
+- **Context7**: use for any library/CLI doc lookup (`resolve-library-id` → `query-docs`).
