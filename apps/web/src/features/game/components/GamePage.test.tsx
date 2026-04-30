@@ -33,11 +33,11 @@ describe("GamePage", () => {
     expect(shell!.className).toMatch(/lg:flex-row/);
   });
 
-  it("renders placeholder copy for reserved canvas and chat slots", () => {
+  it("renders drawing surface in canvas region and chat placeholder in aside", () => {
     render(<GamePage />);
     const main = screen.getByTestId("canvas-region");
     const aside = screen.getByTestId("chat-region");
-    expect(within(main).getByText("Canvas area")).toBeTruthy();
+    expect(within(main).getByRole("img", { name: /drawing surface/i })).toBeTruthy();
     expect(within(aside).getByText("Chat area")).toBeTruthy();
   });
 

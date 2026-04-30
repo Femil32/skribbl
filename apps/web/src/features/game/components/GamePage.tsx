@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { DrawingCanvas } from "../canvas/DrawingCanvas";
+
 export type GamePageProps = {
   /** Extra chat content (e.g. long lists); keeps default shell minimal on `/game`. */
   chatSlot?: ReactNode;
@@ -20,8 +22,8 @@ export function GamePage({ chatSlot }: GamePageProps = {}) {
           className="flex min-h-0 min-w-[320px] flex-1 flex-col overflow-hidden bg-base-100"
           data-testid="canvas-region"
         >
-          <div className="min-w-0 flex-1 p-3 text-sm opacity-80">
-            Canvas area
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col p-3">
+            <DrawingCanvas mode="drawing" />
           </div>
         </main>
 
