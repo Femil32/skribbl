@@ -1,6 +1,10 @@
 "use client";
 
-import type { DrawingStrokeCommitted, DrawingStrokePoint, RoomPhase } from "@skribbl/shared";
+import type {
+  CanvasReplayEvent,
+  DrawingStrokePoint,
+  RoomPhase,
+} from "@skribbl/shared";
 import {
   clampClientLineWidthPx,
   normalizeClientStrokeColor,
@@ -12,13 +16,20 @@ import {
   useEffect,
   useImperativeHandle,
   useMemo,
+  useReducer,
   useRef,
 } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
+import { applyFloodFillAtCssPoint } from "./flood-fill";
 import { pointerClientToCanvasCss } from "./pointer-mapping";
-import { drawStrokePolylineOnContext } from "./stroke-draw";
+import {
+  drawEraserPolylineOnContext,
+  drawStrokePolylineOnContext,
+} from "./stroke-draw";
 
 export type DrawingCanvasMode = "drawing" | "read-only" | "syncing";
+
+export type DrawingActiveTool = "brush" | "eraser" | "fill";
 
 export type DrawingStrokeTransport = {
   roomId: string;
@@ -36,13 +47,15 @@ export type DrawingCanvasProps = {
   className?: string;
   brushColor?: string;
   brushWidthPx?: number;
+  /** Drawer painting mode (Story 3.6). */
+  activeTool?: DrawingActiveTool;
   /** Wired from match sockets (Epic 3). When omitted, freehand doodles locally only (no outbound batches). */
   strokeTransport?: DrawingStrokeTransport | null;
   /**
-   * Server-fan-out segments in commit order (`seq` ascending). Drawer entries still arrive but are skipped visually
-   * because ink is rendered locally during capture (Story 3.3–3.4).
+   * Server-fan-out strokes + canvas ops — replay sorts by authoritative `seq`. Drawer skips echoed strokes/fill/eraser
+   * when optimistic ink already applied; **clear** is always applied from the server fact (Story 3.4–3.6).
    */
-  remoteCommitted?: DrawingStrokeCommitted[];
+  remoteCanvasCommits?: CanvasReplayEvent[];
 };
 
 const MAX_DEVICE_PIXEL_RATIO = 2;
@@ -56,6 +69,8 @@ function resolveDevicePixelRatio(): number {
 
 export type DrawingCanvasHandle = {
   getDevicePixelRatio: () => number;
+  /** Clears the logical canvas (CSS pixel space); programmatic resets — multiplayer clear uses server replay. */
+  clearCanvas: () => void;
 };
 
 export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
@@ -66,8 +81,9 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
       className = "",
       brushColor = "#0f172a",
       brushWidthPx = 4,
+      activeTool = "brush",
       strokeTransport = null,
-      remoteCommitted = [],
+      remoteCanvasCommits = [],
     }: DrawingCanvasProps,
     ref,
   ) {
@@ -82,6 +98,13 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
     const lastRenderedRef = useRef<DrawingStrokePoint | null>(null);
     const remoteWatermarkRef = useRef(0);
     const isPointerDrawingRef = useRef(false);
+    /** Tracks whether current pointer gesture is eraser (for batch payload shape). */
+    const activePointerIsEraserRef = useRef(false);
+
+    const [canvasLayoutGeneration, bumpCanvasLayoutGeneration] = useReducer(
+      (n: number) => n + 1,
+      0,
+    );
 
     const resolvedColor = useMemo(
       () => normalizeClientStrokeColor(brushColor),
@@ -91,6 +114,12 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
       () => clampClientLineWidthPx(brushWidthPx),
       [brushWidthPx],
     );
+
+    const sortedRemoteCanvasCommits = useMemo(() => {
+      const copy = [...remoteCanvasCommits];
+      copy.sort((a, b) => a.seq - b.seq);
+      return copy;
+    }, [remoteCanvasCommits]);
 
     const applyCanvasSizeAndTransform = useCallback(() => {
       const wrapper = wrapperRef.current;
@@ -105,6 +134,10 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
       const nextW = Math.round(cssW * dpr);
       const nextH = Math.round(cssH * dpr);
 
+      const prevW = canvasEl.width;
+      const prevH = canvasEl.height;
+      const dimChanged = prevW !== nextW || prevH !== nextH;
+
       canvasEl.style.width = "100%";
       canvasEl.style.height = "100%";
       canvasEl.style.display = "block";
@@ -116,9 +149,13 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
       if (!ctx) return;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.scale(dpr, dpr);
-      remoteWatermarkRef.current = 0;
-      lastRenderedRef.current = null;
-      batchBufferRef.current = [];
+
+      if (dimChanged) {
+        remoteWatermarkRef.current = 0;
+        lastRenderedRef.current = null;
+        batchBufferRef.current = [];
+        bumpCanvasLayoutGeneration();
+      }
     }, []);
 
     const cancelFlushTimer = useCallback(() => {
@@ -154,15 +191,25 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
             ? crypto.randomUUID()
             : `chunk-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-        const raw = serializeClientCommand({
-          type: "drawingStrokeChunk",
-          roomId: strokeTransport.roomId,
-          strokeId: pid,
-          chunkId,
-          points,
-          color: resolvedColor,
-          lineWidthPx: resolvedWidth,
-        });
+        const isEraser = activePointerIsEraserRef.current;
+        const raw = isEraser
+          ? serializeClientCommand({
+              type: "drawingEraserChunk",
+              roomId: strokeTransport.roomId,
+              strokeId: pid,
+              chunkId,
+              points,
+              lineWidthPx: resolvedWidth,
+            })
+          : serializeClientCommand({
+              type: "drawingStrokeChunk",
+              roomId: strokeTransport.roomId,
+              strokeId: pid,
+              chunkId,
+              points,
+              color: resolvedColor,
+              lineWidthPx: resolvedWidth,
+            });
 
         strokeTransport.sendJsonLine(raw);
       },
@@ -195,8 +242,19 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
       });
     }, [applyCanvasSizeAndTransform]);
 
+    const clearCanvasPixels = useCallback(() => {
+      const wrapper = wrapperRef.current;
+      const canvasEl = canvasRef.current;
+      const ctx = canvasEl?.getContext("2d");
+      if (!wrapper || !canvasEl || !ctx) return;
+      const cssW = Math.max(1, wrapper.clientWidth);
+      const cssH = Math.max(1, wrapper.clientHeight);
+      ctx.clearRect(0, 0, cssW, cssH);
+    }, []);
+
     useImperativeHandle(ref, () => ({
       getDevicePixelRatio: () => appliedDprRef.current,
+      clearCanvas: clearCanvasPixels,
     }));
 
     useEffect(() => {
@@ -227,32 +285,51 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
         : strokeTransport.phase === "drawing" &&
           strokeTransport.currentDrawerPlayerId === strokeTransport.localPlayerId);
 
-    useEffect(() => {
-      remoteWatermarkRef.current = 0;
-    }, []);
-
-    /** Apply server-fan-out segments for non-local players. */
+    /** Apply server-fan-out strokes and canvas ops (`seq`-ordered replay). */
     useEffect(() => {
       const canvasEl = canvasRef.current;
       const ctx = canvasEl?.getContext("2d");
+      const wrapper = wrapperRef.current;
       const localId = strokeTransport?.localPlayerId ?? "";
 
-      if (remoteCommitted.length === 0) {
+      if (sortedRemoteCanvasCommits.length === 0) {
         remoteWatermarkRef.current = 0;
       }
 
-      if (!canvasEl || !ctx) return;
+      if (!canvasEl || !ctx || !wrapper) return;
 
-      while (remoteWatermarkRef.current < remoteCommitted.length) {
-        const evt = remoteCommitted[remoteWatermarkRef.current];
+      const cssW = Math.max(1, wrapper.clientWidth);
+      const cssH = Math.max(1, wrapper.clientHeight);
+      const dpr = appliedDprRef.current;
+
+      while (remoteWatermarkRef.current < sortedRemoteCanvasCommits.length) {
+        const evt = sortedRemoteCanvasCommits[remoteWatermarkRef.current];
         remoteWatermarkRef.current += 1;
         if (!evt) continue;
 
-        if (evt.senderPlayerId === localId) continue;
+        if (evt.type === "drawingStrokeCommitted") {
+          if (evt.senderPlayerId === localId) continue;
+          drawStrokePolylineOnContext(ctx, evt.points, evt.color, evt.lineWidthPx);
+          continue;
+        }
 
-        drawStrokePolylineOnContext(ctx, evt.points, evt.color, evt.lineWidthPx);
+        const skipSelfExceptClear =
+          evt.senderPlayerId === localId && evt.op.op !== "clear";
+        if (skipSelfExceptClear) continue;
+
+        switch (evt.op.op) {
+          case "clear":
+            ctx.clearRect(0, 0, cssW, cssH);
+            break;
+          case "fill":
+            applyFloodFillAtCssPoint(canvasEl, ctx, evt.op.x, evt.op.y, evt.op.color, dpr);
+            break;
+          case "eraserChunk":
+            drawEraserPolylineOnContext(ctx, evt.op.points, evt.op.lineWidthPx);
+            break;
+        }
       }
-    }, [remoteCommitted, strokeTransport?.localPlayerId]);
+    }, [sortedRemoteCanvasCommits, strokeTransport?.localPlayerId, canvasLayoutGeneration]);
 
     /** Flush pending outbound batches when the tab hides mid-stroke (NFR batched payloads). */
     useEffect(() => {
@@ -301,7 +378,41 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
           /* noop — pointer capture is best-effort in tests */
         }
 
+        const p = pointerClientToCanvasCss(canvasEl, e.clientX, e.clientY, {
+          devicePixelRatio: appliedDprRef.current,
+        });
+
+        if (activeTool === "fill" && strokeTransport) {
+          const ctx = canvasEl.getContext("2d");
+          if (!ctx) return;
+          applyFloodFillAtCssPoint(
+            canvasEl,
+            ctx,
+            p.x,
+            p.y,
+            resolvedColor,
+            appliedDprRef.current,
+          );
+          const raw = serializeClientCommand({
+            type: "drawingCanvasFill",
+            roomId: strokeTransport.roomId,
+            x: p.x,
+            y: p.y,
+            color: resolvedColor,
+          });
+          strokeTransport.sendJsonLine(raw);
+          return;
+        }
+
+        if (activeTool === "fill" && !strokeTransport) {
+          const ctx = canvasEl.getContext("2d");
+          if (ctx)
+            applyFloodFillAtCssPoint(canvasEl, ctx, p.x, p.y, resolvedColor, appliedDprRef.current);
+          return;
+        }
+
         isPointerDrawingRef.current = true;
+        activePointerIsEraserRef.current = activeTool === "eraser";
         strokeIdRef.current =
           typeof crypto !== "undefined" && "randomUUID" in crypto
             ? crypto.randomUUID()
@@ -309,16 +420,20 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
         cancelFlushTimer();
         batchBufferRef.current = [];
 
-        const p = pointerClientToCanvasCss(canvasEl, e.clientX, e.clientY, {
-          devicePixelRatio: appliedDprRef.current,
-        });
         lastRenderedRef.current = { x: p.x, y: p.y };
 
         if (strokeTransport) {
           enqueueBatchPointForTransport({ x: p.x, y: p.y });
         }
       },
-      [cancelFlushTimer, enqueueBatchPointForTransport, pointerDrawingEnabled, strokeTransport],
+      [
+        activeTool,
+        cancelFlushTimer,
+        enqueueBatchPointForTransport,
+        pointerDrawingEnabled,
+        resolvedColor,
+        strokeTransport,
+      ],
     );
 
     const onPointerMove = useCallback(
@@ -331,6 +446,8 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
         const ctx = canvasEl.getContext("2d");
         if (!ctx) return;
 
+        if (activeTool === "fill") return;
+
         const p = pointerClientToCanvasCss(canvasEl, e.clientX, e.clientY, {
           devicePixelRatio: appliedDprRef.current,
         });
@@ -338,16 +455,27 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
         const prev = lastRenderedRef.current;
         lastRenderedRef.current = next;
 
+        const isEraser = activeTool === "eraser";
+
         if (strokeTransport) {
           if (prev) {
-            drawStrokePolylineOnContext(ctx, [prev, next], resolvedColor, resolvedWidth);
+            if (isEraser) {
+              drawEraserPolylineOnContext(ctx, [prev, next], resolvedWidth);
+            } else {
+              drawStrokePolylineOnContext(ctx, [prev, next], resolvedColor, resolvedWidth);
+            }
           }
           enqueueBatchPointForTransport(next);
         } else if (prev) {
-          drawStrokePolylineOnContext(ctx, [prev, next], resolvedColor, resolvedWidth);
+          if (isEraser) {
+            drawEraserPolylineOnContext(ctx, [prev, next], resolvedWidth);
+          } else {
+            drawStrokePolylineOnContext(ctx, [prev, next], resolvedColor, resolvedWidth);
+          }
         }
       },
       [
+        activeTool,
         resolvedColor,
         resolvedWidth,
         enqueueBatchPointForTransport,

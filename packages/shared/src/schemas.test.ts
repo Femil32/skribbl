@@ -94,6 +94,37 @@ describe("clientCommandSchema", () => {
     ).toBe(false);
   });
 
+  it("serializeClientCommand validates drawingCanvasClear", () => {
+    const json = serializeClientCommand({
+      type: "drawingCanvasClear",
+      roomId: "r1",
+    });
+    expect(JSON.parse(json)).toEqual({ type: "drawingCanvasClear", roomId: "r1" });
+  });
+
+  it("accepts drawingCanvasFill", () => {
+    const result = clientCommandSchema.safeParse({
+      type: "drawingCanvasFill",
+      roomId: "r1",
+      x: 10,
+      y: 20,
+      color: "#00ff00",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts drawingEraserChunk", () => {
+    const result = clientCommandSchema.safeParse({
+      type: "drawingEraserChunk",
+      roomId: "r1",
+      strokeId: "s1",
+      chunkId: "c1",
+      points: [{ x: 0, y: 0 }],
+      lineWidthPx: 8,
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("serializeClientCommand validates drawingStrokeChunk", () => {
     const json = serializeClientCommand({
       type: "drawingStrokeChunk",
@@ -201,6 +232,28 @@ describe("serverEventSchema", () => {
       points: [{ x: 0, y: 0 }],
       color: "#000000",
       lineWidthPx: 4,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts drawingCanvasOpCommitted", () => {
+    const result = serverEventSchema.safeParse({
+      type: "drawingCanvasOpCommitted",
+      roomId: "r",
+      seq: 2,
+      senderPlayerId: "p1",
+      op: { op: "clear" },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts drawingCanvasOpCommitted fill", () => {
+    const result = serverEventSchema.safeParse({
+      type: "drawingCanvasOpCommitted",
+      roomId: "r",
+      seq: 3,
+      senderPlayerId: "p1",
+      op: { op: "fill", x: 1, y: 2, color: "#010203" },
     });
     expect(result.success).toBe(true);
   });

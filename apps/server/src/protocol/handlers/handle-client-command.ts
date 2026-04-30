@@ -319,6 +319,26 @@ export function handleClientCommand(
       }
       return;
     }
+    case "drawingCanvasClear":
+    case "drawingCanvasFill":
+    case "drawingEraserChunk": {
+      const outcome = roomManager.applyDrawingCanvasCommand(ws, cmd);
+      if (!outcome.ok) {
+        sendProtocolError(
+          ws,
+          outcome.code,
+          outcome.code === "NOT_DRAWER"
+            ? "Only the drawer can use drawing tools right now."
+            : outcome.code === "WRONG_PHASE"
+              ? "Drawing tools only while the round is in the drawing phase."
+              : outcome.code === "BAD_ROOM"
+                ? "That room doesn't match your connection."
+                : "Canvas command could not be applied.",
+          roomManager,
+        );
+      }
+      return;
+    }
     default: {
       const _exhaustive: never = cmd;
       return _exhaustive;

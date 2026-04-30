@@ -2,7 +2,7 @@
 
 import type {
   AvatarPresetId,
-  DrawingStrokeCommitted,
+  CanvasReplayEvent,
   LobbyRosterPlayer,
   RoomPhase,
 } from "@skribbl/shared";
@@ -51,8 +51,8 @@ export type HostLobbyState =
         matchRoundIndex: number;
       } | null;
       wordChoicePickError?: string | null;
-      /** Replay buffer for peers (Story 3.5) — cleared on lobby or new match round. */
-      remoteStrokeCommits: DrawingStrokeCommitted[];
+      /** Replay buffer for peers (Story 3.5–3.6) — strokes + canvas ops; cleared on lobby or new match round. */
+      remoteCanvasCommits: CanvasReplayEvent[];
     }
   | { status: "error"; message: string };
 
@@ -83,8 +83,8 @@ export type UseHostCreateRoomResult = {
   sendGameJsonLine: (raw: string) => void;
 };
 
-/** Avoid unbounded `remoteStrokeCommits` growth during long drawing phases. */
-const MAX_REMOTE_STROKE_COMMITS_BUFFER = 8192;
+/** Avoid unbounded `remoteCanvasCommits` growth during long drawing phases. */
+const MAX_REMOTE_CANVAS_COMMITS_BUFFER = 8192;
 
 const TERMINAL_PROTOCOL_CODES_AFTER_LOBBY = new Set([
   "BAD_PAYLOAD",
@@ -228,7 +228,7 @@ export function useHostCreateRoom(
             isStartPending: false,
             wordChoiceOffer: null,
             wordChoicePickError: null,
-            remoteStrokeCommits: [],
+            remoteCanvasCommits: [],
           });
           setTransport("live");
           return;
@@ -277,7 +277,7 @@ export function useHostCreateRoom(
             const phaseDeadlineMs =
               mp.phaseDeadlineMs !== undefined ? mp.phaseDeadlineMs : undefined;
 
-            let nextCommits = prev.remoteStrokeCommits;
+            let nextCommits = prev.remoteCanvasCommits;
             if (mp.phase === "lobby") nextCommits = [];
             else if (
               prev.matchRoundIndex !== undefined &&
@@ -295,7 +295,7 @@ export function useHostCreateRoom(
               phaseDeadlineMs,
               wordChoiceOffer,
               wordChoicePickError,
-              remoteStrokeCommits: nextCommits,
+              remoteCanvasCommits: nextCommits,
               ...(mp.phase === "lobby" ? { isStartPending: false } : {}),
             };
           });
@@ -398,17 +398,18 @@ export function useHostCreateRoom(
         case "pong":
         case "roomJoined":
           return;
-        case "drawingStrokeCommitted": {
-          const strokeEv = parsed.data;
+        case "drawingStrokeCommitted":
+        case "drawingCanvasOpCommitted": {
+          const canvasEv = parsed.data;
           setState((prev) => {
             if (prev.status !== "lobby") return prev;
-            if (strokeEv.roomId !== prev.roomId) return prev;
+            if (canvasEv.roomId !== prev.roomId) return prev;
             return {
               ...prev,
-              remoteStrokeCommits: [
-                ...prev.remoteStrokeCommits,
-                strokeEv,
-              ].slice(-MAX_REMOTE_STROKE_COMMITS_BUFFER),
+              remoteCanvasCommits: [
+                ...prev.remoteCanvasCommits,
+                canvasEv,
+              ].slice(-MAX_REMOTE_CANVAS_COMMITS_BUFFER),
             };
           });
           return;

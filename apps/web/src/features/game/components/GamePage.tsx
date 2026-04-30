@@ -49,7 +49,7 @@ export function GamePage({ chatSlot }: GamePageProps = {}) {
               onBrushColorChange={setBrushColor}
               onBrushWidthChange={setBrushWidthPx}
               sendJsonLine={sendJsonLineDev}
-              remoteCommitted={[]}
+              remoteCanvasCommits={[]}
               wsLive
             />
           </div>

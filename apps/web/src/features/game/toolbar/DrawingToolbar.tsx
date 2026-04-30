@@ -1,7 +1,9 @@
 "use client";
 
 import type { RoomPhase } from "@skribbl/shared";
-import { normalizeClientStrokeColor } from "@skribbl/shared";
+import { normalizeClientStrokeColor, serializeClientCommand } from "@skribbl/shared";
+import { useState } from "react";
+import type { DrawingActiveTool } from "@/features/game/canvas/DrawingCanvas";
 
 export const DRAWING_COLOR_PRESETS = [
   { hex: "#0f172a", label: "Slate" },
@@ -20,23 +22,34 @@ export type DrawingToolbarProps = {
   phase: RoomPhase;
   /** True when local player may paint (authority matches server drawer id). */
   isDrawer: boolean;
+  roomId: string;
+  /** Sends validated JSON lines (clear / strokes / fill upstream). */
+  sendJsonLine: (raw: string) => void;
   brushColor: string;
   brushWidthPx: number;
+  activeTool: DrawingActiveTool;
+  onActiveToolChange: (tool: DrawingActiveTool) => void;
   onBrushColorChange: (hexNormalized: `#${string}`) => void;
   onBrushWidthChange: (px: number) => void;
 };
 
 /**
- * Drawer-only during `drawing` — color / brush size presets (Story 3.5).
+ * Drawer-only during `drawing` — color / brush size / eraser / fill / clear (Story 3.5 + 3.6).
  */
 export function DrawingToolbar({
   phase,
   isDrawer,
+  roomId,
+  sendJsonLine,
   brushColor,
   brushWidthPx,
+  activeTool,
+  onActiveToolChange,
   onBrushColorChange,
   onBrushWidthChange,
 }: DrawingToolbarProps) {
+  const [clearModalOpen, setClearModalOpen] = useState(false);
+
   if (phase !== "drawing" || !isDrawer) return null;
 
   const currentColor = normalizeClientStrokeColor(brushColor);
@@ -48,6 +61,94 @@ export function DrawingToolbar({
       data-testid="drawing-toolbar"
       className="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 p-3 shadow-sm"
     >
+      <div className="flex flex-wrap items-center gap-2">
+        <span id="drawing-toolbar-tools" className="text-sm font-medium text-base-content/80">
+          Tools
+        </span>
+        <div
+          className="join join-horizontal flex flex-wrap gap-1"
+          role="group"
+          aria-labelledby="drawing-toolbar-tools"
+        >
+          {(
+            [
+              { id: "brush" as const, label: "Brush" },
+              { id: "eraser" as const, label: "Eraser" },
+              { id: "fill" as const, label: "Fill" },
+            ] as const
+          ).map(({ id, label }) => {
+            const pressed = activeTool === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                data-testid={`drawing-tool-${id}`}
+                className={`btn join-item btn-sm ${pressed ? "btn-primary" : "btn-outline"}`}
+                aria-pressed={pressed}
+                aria-label={label}
+                onClick={() => onActiveToolChange(id)}
+              >
+                {label}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            data-testid="drawing-tool-clear"
+            className="btn join-item btn-sm btn-outline btn-error"
+            aria-label="Clear canvas"
+            onClick={() => setClearModalOpen(true)}
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+
+      {clearModalOpen ? (
+        <div
+          className="modal modal-open"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="clear-canvas-title"
+        >
+          <div className="modal-box">
+            <h3 id="clear-canvas-title" className="text-lg font-bold">
+              Clear the canvas?
+            </h3>
+            <p className="py-3 text-sm opacity-80">
+              This removes the whole drawing for everyone in the room.
+            </p>
+            <div className="modal-action">
+              <button type="button" className="btn btn-ghost" onClick={() => setClearModalOpen(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-error"
+                data-testid="drawing-clear-confirm"
+                onClick={() => {
+                  sendJsonLine(
+                    serializeClientCommand({
+                      type: "drawingCanvasClear",
+                      roomId,
+                    }),
+                  );
+                  setClearModalOpen(false);
+                }}
+              >
+                Clear for everyone
+              </button>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="modal-backdrop bg-transparent"
+            aria-label="Dismiss clear dialog"
+            onClick={() => setClearModalOpen(false)}
+          />
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center gap-2">
         <span id="drawing-toolbar-colors" className="sr-only">
           Stroke color

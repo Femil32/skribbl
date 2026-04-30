@@ -303,7 +303,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                   onBrushColorChange={setBrushColor}
                   onBrushWidthChange={setBrushWidthPx}
                   sendJsonLine={guestSendGameJsonLine}
-                  remoteCommitted={guestState.remoteStrokeCommits}
+                  remoteCanvasCommits={guestState.remoteCanvasCommits}
                   wsLive={guestTransport === "live"}
                 />
               ) : guestState.phase === "matchEnded" ? (

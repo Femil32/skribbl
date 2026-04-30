@@ -16,6 +16,9 @@ export {
   type RoomPhase,
   type LobbyRosterPlayer,
   type DrawingStrokeCommitted,
+  type DrawingCanvasOpCommitted,
+  type DrawingCanvasOpPayload,
+  type CanvasReplayEvent,
   type DrawingStrokePoint,
 } from "./schemas.js";
 export {

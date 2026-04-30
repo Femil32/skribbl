@@ -123,7 +123,49 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
       .regex(/^#[\da-fA-F]{6}$/, "expected #RRGGBB stroke color"),
     lineWidthPx: z.number().finite().gte(1).lte(96),
   }),
+  /** Drawer-only during `drawing`: clear entire canvas (server assigns `seq` on `drawingCanvasOpCommitted`). */
+  z.object({
+    type: z.literal("drawingCanvasClear"),
+    roomId: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("drawingCanvasFill"),
+    roomId: z.string().min(1),
+    x: z.number().finite(),
+    y: z.number().finite(),
+    color: z
+      .string()
+      .regex(/^#[\da-fA-F]{6}$/, "expected #RRGGBB fill color"),
+  }),
+  z.object({
+    type: z.literal("drawingEraserChunk"),
+    roomId: z.string().min(1),
+    strokeId: z.string().min(1),
+    chunkId: z.string().min(1),
+    points: z.array(drawingStrokePointSchema).min(1).max(256),
+    lineWidthPx: z.number().finite().gte(1).lte(96),
+  }),
 ]);
+
+const drawingCanvasOpPayloadSchema = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("clear") }),
+  z.object({
+    op: z.literal("fill"),
+    x: z.number().finite(),
+    y: z.number().finite(),
+    color: z
+      .string()
+      .regex(/^#[\da-fA-F]{6}$/, "expected #RRGGBB fill color"),
+  }),
+  z.object({
+    op: z.literal("eraserChunk"),
+    strokeId: z.string().min(1),
+    chunkId: z.string().min(1),
+    points: z.array(drawingStrokePointSchema).min(1).max(256),
+    lineWidthPx: z.number().finite().gte(1).lte(96),
+  }),
+]);
+export type DrawingCanvasOpPayload = z.infer<typeof drawingCanvasOpPayloadSchema>;
 
 /** Server → client events pushed over WebSocket. */
 export const serverEventSchema = z.discriminatedUnion("type", [
@@ -205,11 +247,28 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     color: z.string(),
     lineWidthPx: z.number(),
   }),
+  /**
+   * Authoritative non-stroke canvas op (clear / fill / eraser chunk). Shares the same monotonic `seq` as
+   * `drawingStrokeCommitted` within the drawing phase (`room.drawingStrokeSeq`, Story 3.6).
+   */
+  z.object({
+    type: z.literal("drawingCanvasOpCommitted"),
+    roomId: z.string(),
+    seq: z.number().int().nonnegative(),
+    senderPlayerId: z.string(),
+    op: drawingCanvasOpPayloadSchema,
+  }),
 ]);
 
 export type ClientCommand = z.infer<typeof clientCommandSchema>;
 export type ServerEvent = z.infer<typeof serverEventSchema>;
 export type DrawingStrokeCommitted = Extract<ServerEvent, { type: "drawingStrokeCommitted" }>;
+export type DrawingCanvasOpCommitted = Extract<
+  ServerEvent,
+  { type: "drawingCanvasOpCommitted" }
+>;
+/** Ordered replay stream for the canvas (strokes + destructive ops share `seq`, Story 3.6). */
+export type CanvasReplayEvent = DrawingStrokeCommitted | DrawingCanvasOpCommitted;
 
 export function safeParseClientCommand(data: unknown) {
   return clientCommandSchema.safeParse(data);

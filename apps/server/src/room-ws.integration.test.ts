@@ -730,4 +730,139 @@ describe("handleClientCommand + RoomManager", () => {
       vi.useRealTimers();
     }
   });
+
+  it("drawing phase: non-drawer canvas clear yields NOT_DRAWER", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.useFakeTimers();
+    try {
+      const rm = new RoomManager(8, integrationWordBank());
+      const host = captureWs();
+      const guest = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        guest.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+      vi.advanceTimersByTime(resolveWordChoiceMs());
+
+      const room = rm.getRoomForSocket(host.ws);
+      expect(room).toBeDefined();
+      if (!room) throw new Error("unexpected");
+
+      const drawerId = room.currentDrawerPlayerId!;
+      const guesserCapt = drawerId === created.playerId ? guest : host;
+
+      handleClientCommand(
+        drawerId === created.playerId ? host.ws : guest.ws,
+        { type: "chooseWord", choiceIndex: 0 },
+        rm,
+      );
+      expect(room.phase).toBe("drawing");
+
+      handleClientCommand(
+        guesserCapt.ws,
+        {
+          type: "drawingCanvasClear",
+          roomId: room.id,
+        } satisfies ClientCommand,
+        rm,
+      );
+
+      const last = parseServerEvent(JSON.parse(guesserCapt.sent.at(-1)!));
+      expect(last.type).toBe("error");
+      if (last.type === "error") expect(last.code).toBe("NOT_DRAWER");
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
+
+  it("lobby phase: drawer canvas clear yields WRONG_PHASE", () => {
+    const rm = new RoomManager(8, integrationWordBank());
+    const host = captureWs();
+    const guest = captureWs();
+
+    handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+    const created = parseServerEvent(JSON.parse(host.sent[0]!));
+    if (created.type !== "roomCreated") throw new Error("unexpected");
+
+    handleClientCommand(
+      guest.ws,
+      { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+      rm,
+    );
+
+    const room = rm.getRoomForSocket(host.ws)!;
+    handleClientCommand(
+      host.ws,
+      {
+        type: "drawingCanvasClear",
+        roomId: room.id,
+      } satisfies ClientCommand,
+      rm,
+    );
+
+    const err = host.sent.map((l) => parseServerEvent(JSON.parse(l))).find((e) => e.type === "error");
+    expect(err?.type).toBe("error");
+    if (err?.type === "error") expect(err.code).toBe("WRONG_PHASE");
+  });
+
+  it("drawing phase: drawer canvas clear with mismatched roomId yields BAD_ROOM", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.useFakeTimers();
+    try {
+      const rm = new RoomManager(8, integrationWordBank());
+      const host = captureWs();
+      const guest = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        guest.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+      vi.advanceTimersByTime(resolveWordChoiceMs());
+
+      const room = rm.getRoomForSocket(host.ws);
+      expect(room).toBeDefined();
+      if (!room) throw new Error("unexpected");
+
+      const drawerId = room.currentDrawerPlayerId!;
+      const drawerWs = drawerId === created.playerId ? host.ws : guest.ws;
+
+      handleClientCommand(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
+      expect(room.phase).toBe("drawing");
+
+      handleClientCommand(
+        drawerWs,
+        {
+          type: "drawingCanvasClear",
+          roomId: "not-the-connected-room-id",
+        } satisfies ClientCommand,
+        rm,
+      );
+
+      const drawerSent = drawerId === created.playerId ? host.sent : guest.sent;
+      const last = parseServerEvent(JSON.parse(drawerSent.at(-1)!));
+      expect(last.type).toBe("error");
+      if (last.type === "error") expect(last.code).toBe("BAD_ROOM");
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
 });

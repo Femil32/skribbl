@@ -2,7 +2,7 @@
 
 import type {
   AvatarPresetId,
-  DrawingStrokeCommitted,
+  CanvasReplayEvent,
   LobbyRosterPlayer,
   RoomPhase,
 } from "@skribbl/shared";
@@ -47,7 +47,8 @@ export type GuestJoinLobbyState =
         matchRoundIndex: number;
       } | null;
       wordChoicePickError?: string | null;
-      remoteStrokeCommits: DrawingStrokeCommitted[];
+      /** Replay buffer (Story 3.5–3.6); cleared on lobby or new match round. */
+      remoteCanvasCommits: CanvasReplayEvent[];
     }
   | {
       /** Server `error.code` when the failure came from an `error` event; omit for generic failures. */
@@ -79,8 +80,8 @@ export type UseGuestJoinRoomResult = {
  * **`safeParseServerEvent`**. Keeps the socket open after **`roomJoined`** for lobby roster /
  * match start events (Story 1.6+).
  */
-/** Avoid unbounded `remoteStrokeCommits` growth during long drawing phases. */
-const MAX_REMOTE_STROKE_COMMITS_BUFFER = 8192;
+/** Avoid unbounded `remoteCanvasCommits` growth during long drawing phases. */
+const MAX_REMOTE_CANVAS_COMMITS_BUFFER = 8192;
 
 const TERMINAL_PROTOCOL_CODES_AFTER_JOINED = new Set([
   "BAD_PAYLOAD",
@@ -211,7 +212,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
             players: [],
             wordChoiceOffer: null,
             wordChoicePickError: null,
-            remoteStrokeCommits: [],
+            remoteCanvasCommits: [],
           });
           setTransport("live");
           return;
@@ -261,7 +262,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
             const phaseDeadlineMs =
               mp.phaseDeadlineMs !== undefined ? mp.phaseDeadlineMs : undefined;
 
-            let nextCommits = prev.remoteStrokeCommits;
+            let nextCommits = prev.remoteCanvasCommits;
             if (mp.phase === "lobby") nextCommits = [];
             else if (
               prev.matchRoundIndex !== undefined &&
@@ -279,7 +280,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
               phaseDeadlineMs,
               wordChoiceOffer,
               wordChoicePickError,
-              remoteStrokeCommits: nextCommits,
+              remoteCanvasCommits: nextCommits,
             };
           });
           return;
@@ -368,17 +369,18 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
         case "pong":
         case "roomCreated":
           return;
-        case "drawingStrokeCommitted": {
-          const strokeEv = parsed.data;
+        case "drawingStrokeCommitted":
+        case "drawingCanvasOpCommitted": {
+          const canvasEv = parsed.data;
           setState((prev) => {
             if (prev.status !== "joined") return prev;
-            if (strokeEv.roomId !== prev.roomId) return prev;
+            if (canvasEv.roomId !== prev.roomId) return prev;
             return {
               ...prev,
-              remoteStrokeCommits: [
-                ...prev.remoteStrokeCommits,
-                strokeEv,
-              ].slice(-MAX_REMOTE_STROKE_COMMITS_BUFFER),
+              remoteCanvasCommits: [
+                ...prev.remoteCanvasCommits,
+                canvasEv,
+              ].slice(-MAX_REMOTE_CANVAS_COMMITS_BUFFER),
             };
           });
           return;

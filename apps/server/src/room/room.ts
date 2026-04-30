@@ -23,8 +23,9 @@ export class Room {
   wordChoiceTimerHandle: ReturnType<typeof setTimeout> | null = null;
 
   /**
-   * Monotonic stroke-batch sequence within the current drawing phase (Epic 3).
-   * Reset when entering `drawing`.
+   * Monotonic **canvas** sequence within the current drawing phase (Epic 3): stroke batches and
+   * canvas ops (`drawingCanvasOpCommitted`) share this counter (Story 3.4 + 3.6). Reset when entering `drawing`.
+   * (Field name `drawingStrokeSeq` is historical — treats strokes as the first canvas op type.)
    */
   drawingStrokeSeq = 0;
 

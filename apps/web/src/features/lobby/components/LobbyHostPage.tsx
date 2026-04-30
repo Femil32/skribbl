@@ -433,7 +433,7 @@ export function LobbyHostPage() {
                 onBrushColorChange={setBrushColor}
                 onBrushWidthChange={setBrushWidthPx}
                 sendJsonLine={sendGameJsonLine}
-                remoteCommitted={state.remoteStrokeCommits}
+                remoteCanvasCommits={state.remoteCanvasCommits}
                 wsLive={transport === "live"}
               />
             ) : state.phase === "matchEnded" ? (

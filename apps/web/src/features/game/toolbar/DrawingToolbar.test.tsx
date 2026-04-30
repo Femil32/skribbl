@@ -4,12 +4,20 @@ import { describe, expect, it, vi } from "vitest";
 
 import { DrawingToolbar } from "./DrawingToolbar";
 
+const defaultMeta = {
+  roomId: "room-1",
+  sendJsonLine: () => {},
+  activeTool: "brush" as const,
+  onActiveToolChange: () => {},
+};
+
 describe("DrawingToolbar", () => {
   it("renders toolbar when drawer during drawing with root test id", () => {
     render(
       <DrawingToolbar
         phase="drawing"
         isDrawer
+        {...defaultMeta}
         brushColor="#ef4444"
         brushWidthPx={4}
         onBrushColorChange={() => {}}
@@ -24,6 +32,7 @@ describe("DrawingToolbar", () => {
       <DrawingToolbar
         phase="drawing"
         isDrawer={false}
+        {...defaultMeta}
         brushColor="#000000"
         brushWidthPx={4}
         onBrushColorChange={() => {}}
@@ -38,6 +47,7 @@ describe("DrawingToolbar", () => {
       <DrawingToolbar
         phase="choosingWord"
         isDrawer
+        {...defaultMeta}
         brushColor="#000000"
         brushWidthPx={4}
         onBrushColorChange={() => {}}
@@ -52,6 +62,7 @@ describe("DrawingToolbar", () => {
       <DrawingToolbar
         phase="drawing"
         isDrawer
+        {...defaultMeta}
         brushColor="#22c55e"
         brushWidthPx={8}
         onBrushColorChange={() => {}}
@@ -76,6 +87,7 @@ describe("DrawingToolbar", () => {
       <DrawingToolbar
         phase="drawing"
         isDrawer
+        {...defaultMeta}
         brushColor="#0f172a"
         brushWidthPx={4}
         onBrushColorChange={() => {}}
@@ -93,6 +105,7 @@ describe("DrawingToolbar", () => {
       <DrawingToolbar
         phase="drawing"
         isDrawer
+        {...defaultMeta}
         brushColor="#0f172a"
         brushWidthPx={4}
         onBrushColorChange={onColor}
@@ -101,5 +114,51 @@ describe("DrawingToolbar", () => {
     );
     await user.click(screen.getByRole("button", { name: /color blue/i }));
     expect(onColor).toHaveBeenCalledWith("#3b82f6");
+  });
+
+  it("switches active tool and sets aria-pressed on eraser", async () => {
+    const user = userEvent.setup();
+    const onTool = vi.fn();
+    render(
+      <DrawingToolbar
+        phase="drawing"
+        isDrawer
+        {...defaultMeta}
+        activeTool="brush"
+        onActiveToolChange={onTool}
+        brushColor="#0f172a"
+        brushWidthPx={4}
+        onBrushColorChange={() => {}}
+        onBrushWidthChange={() => {}}
+      />,
+    );
+    await user.click(screen.getByTestId("drawing-tool-eraser"));
+    expect(onTool).toHaveBeenCalledWith("eraser");
+  });
+
+  it("clear confirm sends wire command only (canvas clears on server replay)", async () => {
+    const user = userEvent.setup();
+    const sendJsonLine = vi.fn();
+    render(
+      <DrawingToolbar
+        phase="drawing"
+        isDrawer
+        roomId="rid-99"
+        sendJsonLine={sendJsonLine}
+        activeTool="brush"
+        onActiveToolChange={() => {}}
+        brushColor="#0f172a"
+        brushWidthPx={4}
+        onBrushColorChange={() => {}}
+        onBrushWidthChange={() => {}}
+      />,
+    );
+
+    await user.click(screen.getByTestId("drawing-tool-clear"));
+    await user.click(screen.getByTestId("drawing-clear-confirm"));
+
+    expect(sendJsonLine).toHaveBeenCalledTimes(1);
+    const raw = sendJsonLine.mock.calls[0]![0] as string;
+    expect(JSON.parse(raw)).toEqual({ type: "drawingCanvasClear", roomId: "rid-99" });
   });
 });

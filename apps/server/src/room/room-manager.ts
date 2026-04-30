@@ -6,7 +6,9 @@ import {
   isValidRoomCodeForJoin,
   normalizeRoomCode,
   serializeServerEvent,
+  type ClientCommand,
   type LobbyRosterPlayer,
+  type DrawingCanvasOpPayload,
   type ServerEvent,
 } from "@skribbl/shared";
 import type { WebSocket } from "ws";
@@ -506,6 +508,27 @@ export class RoomManager {
     return { ok: true, room };
   }
 
+  /**
+   * Shared gate for drawer-only canvas commands during `drawing` (Story 3.4 + 3.6).
+   * `room.drawingStrokeSeq` is the unified monotonic sequence for stroke chunks and canvas ops.
+   */
+  private validateDrawerCanvasCommand(
+    ws: WebSocket,
+    roomId: string,
+  ):
+    | { ok: true; room: Room; playerId: string }
+    | { ok: false; code: string } {
+    const room = this.getRoomForSocket(ws);
+    const session = this.getLobbySession(ws);
+    if (!room || !session) return { ok: false, code: "INTERNAL" };
+    if (roomId !== room.id) return { ok: false, code: "BAD_ROOM" };
+    if (room.phase !== "drawing") return { ok: false, code: "WRONG_PHASE" };
+    if (!room.currentDrawerPlayerId || session.playerId !== room.currentDrawerPlayerId) {
+      return { ok: false, code: "NOT_DRAWER" };
+    }
+    return { ok: true, room, playerId: session.playerId };
+  }
+
   applyDrawingStrokeChunk(
     ws: WebSocket,
     cmd: {
@@ -518,14 +541,10 @@ export class RoomManager {
       lineWidthPx: number;
     },
   ): { ok: true; seq: number } | { ok: false; code: string } {
-    const room = this.getRoomForSocket(ws);
-    const session = this.getLobbySession(ws);
-    if (!room || !session) return { ok: false, code: "INTERNAL" };
-    if (cmd.roomId !== room.id) return { ok: false, code: "BAD_ROOM" };
-    if (room.phase !== "drawing") return { ok: false, code: "WRONG_PHASE" };
-    if (!room.currentDrawerPlayerId || session.playerId !== room.currentDrawerPlayerId) {
-      return { ok: false, code: "NOT_DRAWER" };
-    }
+    const gate = this.validateDrawerCanvasCommand(ws, cmd.roomId);
+    if (!gate.ok) return gate;
+
+    const { room, playerId } = gate;
 
     room.drawingStrokeSeq += 1;
     const seq = room.drawingStrokeSeq;
@@ -533,12 +552,66 @@ export class RoomManager {
       type: "drawingStrokeCommitted",
       roomId: room.id,
       seq,
-      senderPlayerId: session.playerId,
+      senderPlayerId: playerId,
       strokeId: cmd.strokeId,
       chunkId: cmd.chunkId,
       points: cmd.points,
       color: cmd.color,
       lineWidthPx: cmd.lineWidthPx,
+    };
+
+    for (const sock of room.sockets) {
+      this.sendEvent(sock, payload);
+    }
+
+    return { ok: true, seq };
+  }
+
+  applyDrawingCanvasCommand(
+    ws: WebSocket,
+    cmd: Extract<
+      ClientCommand,
+      | { type: "drawingCanvasClear" }
+      | { type: "drawingCanvasFill" }
+      | { type: "drawingEraserChunk" }
+    >,
+  ): { ok: true; seq: number } | { ok: false; code: string } {
+    const gate = this.validateDrawerCanvasCommand(ws, cmd.roomId);
+    if (!gate.ok) return gate;
+
+    const { room, playerId } = gate;
+
+    let op: DrawingCanvasOpPayload;
+    switch (cmd.type) {
+      case "drawingCanvasClear":
+        op = { op: "clear" };
+        break;
+      case "drawingCanvasFill":
+        op = { op: "fill", x: cmd.x, y: cmd.y, color: cmd.color };
+        break;
+      case "drawingEraserChunk":
+        op = {
+          op: "eraserChunk",
+          strokeId: cmd.strokeId,
+          chunkId: cmd.chunkId,
+          points: cmd.points,
+          lineWidthPx: cmd.lineWidthPx,
+        };
+        break;
+      default: {
+        const _exhaustive: never = cmd;
+        return _exhaustive;
+      }
+    }
+
+    room.drawingStrokeSeq += 1;
+    const seq = room.drawingStrokeSeq;
+    const payload: ServerEvent = {
+      type: "drawingCanvasOpCommitted",
+      roomId: room.id,
+      seq,
+      senderPlayerId: playerId,
+      op,
     };
 
     for (const sock of room.sockets) {

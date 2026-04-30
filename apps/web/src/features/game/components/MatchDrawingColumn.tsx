@@ -1,8 +1,12 @@
 "use client";
 
-import type { DrawingStrokeCommitted, RoomPhase } from "@skribbl/shared";
-import { useMemo } from "react";
-import { DrawingCanvas, type DrawingCanvasMode } from "@/features/game/canvas/DrawingCanvas";
+import type { CanvasReplayEvent, RoomPhase } from "@skribbl/shared";
+import { useMemo, useState } from "react";
+import {
+  DrawingCanvas,
+  type DrawingActiveTool,
+  type DrawingCanvasMode,
+} from "@/features/game/canvas/DrawingCanvas";
 import { DrawingToolbar } from "@/features/game/toolbar/DrawingToolbar";
 
 export type MatchDrawingColumnProps = {
@@ -17,12 +21,12 @@ export type MatchDrawingColumnProps = {
   onBrushColorChange: (hex: `#${string}`) => void;
   onBrushWidthChange: (px: number) => void;
   sendJsonLine: (raw: string) => void;
-  remoteCommitted: DrawingStrokeCommitted[];
+  remoteCanvasCommits: CanvasReplayEvent[];
   wsLive: boolean;
 };
 
 /**
- * Direction-1 canvas stack: optional drawer toolbar + shared `DrawingCanvas` (Story 3.5).
+ * Direction-1 canvas stack: optional drawer toolbar + shared `DrawingCanvas` (Story 3.5 + 3.6).
  */
 export function MatchDrawingColumn({
   phase,
@@ -35,9 +39,11 @@ export function MatchDrawingColumn({
   onBrushColorChange,
   onBrushWidthChange,
   sendJsonLine,
-  remoteCommitted,
+  remoteCanvasCommits,
   wsLive,
 }: MatchDrawingColumnProps) {
+  const [activeTool, setActiveTool] = useState<DrawingActiveTool>("brush");
+
   const isDrawer =
     drawerPlayerId !== undefined && drawerPlayerId === localPlayerId;
 
@@ -67,8 +73,12 @@ export function MatchDrawingColumn({
       <DrawingToolbar
         phase={phase}
         isDrawer={isDrawer}
+        roomId={roomId}
+        sendJsonLine={sendJsonLine}
         brushColor={brushColor}
         brushWidthPx={brushWidthPx}
+        activeTool={activeTool}
+        onActiveToolChange={setActiveTool}
         onBrushColorChange={onBrushColorChange}
         onBrushWidthChange={onBrushWidthChange}
       />
@@ -83,9 +93,10 @@ export function MatchDrawingColumn({
           className="min-h-[200px]"
           brushColor={brushColor}
           brushWidthPx={brushWidthPx}
+          activeTool={activeTool}
           mode={canvasMode}
           strokeTransport={strokeTransport}
-          remoteCommitted={remoteCommitted}
+          remoteCanvasCommits={remoteCanvasCommits}
         />
       </div>
     </div>

@@ -1,5 +1,5 @@
 # generated: 2026-04-29T12:00:00Z
-# last_updated: 2026-04-30 (story 3-5 done)
+# last_updated: 2026-04-30 (story 3-6 done)
 # project: skribbl
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,8 +35,8 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: '2026-04-29T00:00:00Z'
-last_updated: '2026-04-30'
-# Epic 3 in-progress — 3-5 done; 3-6 backlog; Epic 2 — 2-7 review
+last_updated: '2026-04-30T18:00:00Z'
+# Epic 3 in-progress — 3-6 done; Epic 2 — 2-7 review
 project: skribbl
 project_key: NOKEY
 tracking_system: file-system
@@ -69,7 +69,7 @@ development_status:
   3-3-local-stroke-capture-batched-upstream-payloads: done
   3-4-server-sequencing-fan-out-stroke-batches-live: done
   3-5-palette-brush-sizing-toolbar: done
-  3-6-eraser-fill-clear-semantics-via-op-log: backlog
+  3-6-eraser-fill-clear-semantics-via-op-log: done
   epic-3-retrospective: optional
 
   epic-4: backlog
