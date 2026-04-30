@@ -22,6 +22,7 @@ import {
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { applyFloodFillAtCssPoint } from "./flood-fill";
 import { pointerClientToCanvasCss } from "./pointer-mapping";
+import { connectRemoteChunkPoints } from "./remote-chunk-bridge";
 import {
   drawEraserPolylineOnContext,
   drawStrokePolylineOnContext,
@@ -97,6 +98,10 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
     const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastRenderedRef = useRef<DrawingStrokePoint | null>(null);
     const remoteWatermarkRef = useRef(0);
+    /** Last point per brush `strokeId` so remote chunked polylines connect across flush windows. */
+    const remoteBrushChunkTailRef = useRef<Map<string, DrawingStrokePoint>>(new Map());
+    /** Same for eraser chunks (Story 3.6 batched eraser). */
+    const remoteEraserChunkTailRef = useRef<Map<string, DrawingStrokePoint>>(new Map());
     const isPointerDrawingRef = useRef(false);
     /** Tracks whether current pointer gesture is eraser (for batch payload shape). */
     const activePointerIsEraserRef = useRef(false);
@@ -152,6 +157,8 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
 
       if (dimChanged) {
         remoteWatermarkRef.current = 0;
+        remoteBrushChunkTailRef.current.clear();
+        remoteEraserChunkTailRef.current.clear();
         lastRenderedRef.current = null;
         batchBufferRef.current = [];
         bumpCanvasLayoutGeneration();
@@ -294,6 +301,8 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
 
       if (sortedRemoteCanvasCommits.length === 0) {
         remoteWatermarkRef.current = 0;
+        remoteBrushChunkTailRef.current.clear();
+        remoteEraserChunkTailRef.current.clear();
       }
 
       if (!canvasEl || !ctx || !wrapper) return;
@@ -309,7 +318,12 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
 
         if (evt.type === "drawingStrokeCommitted") {
           if (evt.senderPlayerId === localId) continue;
-          drawStrokePolylineOnContext(ctx, evt.points, evt.color, evt.lineWidthPx);
+          const bridged = connectRemoteChunkPoints(
+            evt.strokeId,
+            evt.points,
+            remoteBrushChunkTailRef.current,
+          );
+          drawStrokePolylineOnContext(ctx, bridged, evt.color, evt.lineWidthPx);
           continue;
         }
 
@@ -320,13 +334,21 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
         switch (evt.op.op) {
           case "clear":
             ctx.clearRect(0, 0, cssW, cssH);
+            remoteBrushChunkTailRef.current.clear();
+            remoteEraserChunkTailRef.current.clear();
             break;
           case "fill":
             applyFloodFillAtCssPoint(canvasEl, ctx, evt.op.x, evt.op.y, evt.op.color, dpr);
             break;
-          case "eraserChunk":
-            drawEraserPolylineOnContext(ctx, evt.op.points, evt.op.lineWidthPx);
+          case "eraserChunk": {
+            const bridged = connectRemoteChunkPoints(
+              evt.op.strokeId,
+              evt.op.points,
+              remoteEraserChunkTailRef.current,
+            );
+            drawEraserPolylineOnContext(ctx, bridged, evt.op.lineWidthPx);
             break;
+          }
         }
       }
     }, [sortedRemoteCanvasCommits, strokeTransport?.localPlayerId, canvasLayoutGeneration]);
