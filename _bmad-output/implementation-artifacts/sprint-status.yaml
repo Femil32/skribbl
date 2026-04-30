@@ -36,7 +36,7 @@
 
 generated: '2026-04-29T00:00:00Z'
 last_updated: '2026-04-30'
-# Epic 3 in-progress — 3-1–3-2 done; Epic 2 — 2-7 review
+# Epic 3 in-progress — 3-1–3-4 done; 3-5–3-6 backlog; Epic 2 — 2-7 review
 project: skribbl
 project_key: NOKEY
 tracking_system: file-system
@@ -66,8 +66,8 @@ development_status:
   epic-3: in-progress
   3-1-direction-1-match-shell-canvas-column-chat-column-scaffold: done
   3-2-drawingcanvas-controller-mapping-sizing: done
-  3-3-local-stroke-capture-batched-upstream-payloads: backlog
-  3-4-server-sequencing-fan-out-stroke-batches-live: backlog
+  3-3-local-stroke-capture-batched-upstream-payloads: done
+  3-4-server-sequencing-fan-out-stroke-batches-live: done
   3-5-palette-brush-sizing-toolbar: backlog
   3-6-eraser-fill-clear-semantics-via-op-log: backlog
   epic-3-retrospective: optional

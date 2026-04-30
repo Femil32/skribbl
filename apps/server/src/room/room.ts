@@ -23,6 +23,12 @@ export class Room {
   wordChoiceTimerHandle: ReturnType<typeof setTimeout> | null = null;
 
   /**
+   * Monotonic stroke-batch sequence within the current drawing phase (Epic 3).
+   * Reset when entering `drawing`.
+   */
+  drawingStrokeSeq = 0;
+
+  /**
    * Monotonic/session clock ms when {@link phase} transitioned to `drawing` (Story 2.6).
    * Cleared when leaving `drawing` (timer-driven `roundResult` or future early guess).
    */

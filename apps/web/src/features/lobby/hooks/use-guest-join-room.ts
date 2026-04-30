@@ -335,6 +335,8 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
         case "pong":
         case "roomCreated":
           return;
+        case "drawingStrokeCommitted":
+          return;
         default: {
           const _exhaustive: never = parsed.data;
           return _exhaustive;

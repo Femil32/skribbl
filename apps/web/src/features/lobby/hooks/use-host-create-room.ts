@@ -363,6 +363,8 @@ export function useHostCreateRoom(
         case "pong":
         case "roomJoined":
           return;
+        case "drawingStrokeCommitted":
+          return;
         default: {
           const _exhaustive: never = parsed.data;
           return _exhaustive;

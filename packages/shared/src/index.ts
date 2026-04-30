@@ -15,6 +15,8 @@ export {
   type ServerEvent,
   type RoomPhase,
   type LobbyRosterPlayer,
+  type DrawingStrokeCommitted,
+  type DrawingStrokePoint,
 } from "./schemas.js";
 export {
   ROOM_CODE_ALPHABET,

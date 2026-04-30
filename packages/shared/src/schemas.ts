@@ -50,6 +50,14 @@ export const lobbyRosterPlayerSchema = z.object({
 
 export type LobbyRosterPlayer = z.infer<typeof lobbyRosterPlayerSchema>;
 
+/** Single batched sample in CSS-pixel canvas space (Story 3.3). */
+export const drawingStrokePointSchema = z.object({
+  x: z.number().finite(),
+  y: z.number().finite(),
+});
+
+export type DrawingStrokePoint = z.infer<typeof drawingStrokePointSchema>;
+
 /** Client → server commands (extend in Story 1.2+ with joinRoom, etc.). */
 export const clientCommandSchema = z.discriminatedUnion("type", [
   z.object({
@@ -99,6 +107,21 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   /** Host-only: after `matchEnded`, reset the room to lobby for a rematch (Story 2.7). */
   z.object({
     type: z.literal("returnToLobby"),
+  }),
+  /**
+   * Drawer-only during `drawing`: batched polyline segment (Epic 3 — NFR-P3 ~50ms batching on client).
+   * Server assigns monotonic `seq` on `drawingStrokeCommitted` (Story 3.4).
+   */
+  z.object({
+    type: z.literal("drawingStrokeChunk"),
+    roomId: z.string().min(1),
+    strokeId: z.string().min(1),
+    chunkId: z.string().min(1),
+    points: z.array(drawingStrokePointSchema).min(1).max(256),
+    color: z
+      .string()
+      .regex(/^#[\da-fA-F]{6}$/, "expected #RRGGBB stroke color"),
+    lineWidthPx: z.number().finite().gte(1).lte(96),
   }),
 ]);
 
@@ -167,10 +190,26 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     matchRoundIndex: z.number().int().nonnegative(),
     phaseDeadlineMs: z.number(),
   }),
+  /**
+   * Drawer receives ack; all peers receive the same chunk with authoritative sequence (Story 3.4).
+   * Drawer should ignore applies for `senderPlayerId === localPlayerId` because local ink is already rendered.
+   */
+  z.object({
+    type: z.literal("drawingStrokeCommitted"),
+    roomId: z.string(),
+    seq: z.number().int().nonnegative(),
+    senderPlayerId: z.string(),
+    strokeId: z.string(),
+    chunkId: z.string(),
+    points: z.array(drawingStrokePointSchema).min(1).max(256),
+    color: z.string(),
+    lineWidthPx: z.number(),
+  }),
 ]);
 
 export type ClientCommand = z.infer<typeof clientCommandSchema>;
 export type ServerEvent = z.infer<typeof serverEventSchema>;
+export type DrawingStrokeCommitted = Extract<ServerEvent, { type: "drawingStrokeCommitted" }>;
 
 export function safeParseClientCommand(data: unknown) {
   return clientCommandSchema.safeParse(data);

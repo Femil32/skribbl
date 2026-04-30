@@ -301,6 +301,24 @@ export function handleClientCommand(
       }
       return;
     }
+    case "drawingStrokeChunk": {
+      const outcome = roomManager.applyDrawingStrokeChunk(ws, cmd);
+      if (!outcome.ok) {
+        sendProtocolError(
+          ws,
+          outcome.code,
+          outcome.code === "NOT_DRAWER"
+            ? "Only the drawer can send strokes right now."
+            : outcome.code === "WRONG_PHASE"
+              ? "Strokes only while the round is in the drawing phase."
+              : outcome.code === "BAD_ROOM"
+                ? "That room doesn't match your connection."
+                : "Stroke could not be applied.",
+          roomManager,
+        );
+      }
+      return;
+    }
     default: {
       const _exhaustive: never = cmd;
       return _exhaustive;

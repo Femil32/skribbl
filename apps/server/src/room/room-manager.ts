@@ -148,6 +148,7 @@ export class RoomManager {
   ): void {
     room.roundSecretWord = word;
     room.phase = "drawing";
+    room.drawingStrokeSeq = 0;
     room.drawingPhaseStartedAtMs = Date.now();
     room.drawingPhaseAwardedGuesserIds = new Set();
     const roundMs = resolveRoundMs();
@@ -503,6 +504,48 @@ export class RoomManager {
     room.hostSocket = ws;
     this.socketToRoomId.set(ws, room.id);
     return { ok: true, room };
+  }
+
+  applyDrawingStrokeChunk(
+    ws: WebSocket,
+    cmd: {
+      type: "drawingStrokeChunk";
+      roomId: string;
+      strokeId: string;
+      chunkId: string;
+      points: { x: number; y: number }[];
+      color: string;
+      lineWidthPx: number;
+    },
+  ): { ok: true; seq: number } | { ok: false; code: string } {
+    const room = this.getRoomForSocket(ws);
+    const session = this.getLobbySession(ws);
+    if (!room || !session) return { ok: false, code: "INTERNAL" };
+    if (cmd.roomId !== room.id) return { ok: false, code: "BAD_ROOM" };
+    if (room.phase !== "drawing") return { ok: false, code: "WRONG_PHASE" };
+    if (!room.currentDrawerPlayerId || session.playerId !== room.currentDrawerPlayerId) {
+      return { ok: false, code: "NOT_DRAWER" };
+    }
+
+    room.drawingStrokeSeq += 1;
+    const seq = room.drawingStrokeSeq;
+    const payload: ServerEvent = {
+      type: "drawingStrokeCommitted",
+      roomId: room.id,
+      seq,
+      senderPlayerId: session.playerId,
+      strokeId: cmd.strokeId,
+      chunkId: cmd.chunkId,
+      points: cmd.points,
+      color: cmd.color,
+      lineWidthPx: cmd.lineWidthPx,
+    };
+
+    for (const sock of room.sockets) {
+      this.sendEvent(sock, payload);
+    }
+
+    return { ok: true, seq };
   }
 
   joinRoom(

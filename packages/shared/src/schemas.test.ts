@@ -66,6 +66,46 @@ describe("clientCommandSchema", () => {
       false,
     );
   });
+
+  it("accepts drawingStrokeChunk with hex color", () => {
+    const result = clientCommandSchema.safeParse({
+      type: "drawingStrokeChunk",
+      roomId: "r1",
+      strokeId: "s1",
+      chunkId: "c1",
+      points: [{ x: 1, y: 2 }],
+      color: "#aabbCC",
+      lineWidthPx: 4,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects drawingStrokeChunk with malformed color", () => {
+    expect(
+      clientCommandSchema.safeParse({
+        type: "drawingStrokeChunk",
+        roomId: "r1",
+        strokeId: "s1",
+        chunkId: "c1",
+        points: [{ x: 0, y: 0 }],
+        color: "red",
+        lineWidthPx: 4,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("serializeClientCommand validates drawingStrokeChunk", () => {
+    const json = serializeClientCommand({
+      type: "drawingStrokeChunk",
+      roomId: "r1",
+      strokeId: "s1",
+      chunkId: "c1",
+      points: [{ x: 0, y: 0 }],
+      color: "#000000",
+      lineWidthPx: 2,
+    });
+    expect(JSON.parse(json).type).toBe("drawingStrokeChunk");
+  });
 });
 
 describe("serverEventSchema", () => {
@@ -146,6 +186,21 @@ describe("serverEventSchema", () => {
       words: ["apple", "banana", "citrus"],
       matchRoundIndex: 0,
       phaseDeadlineMs: 1_700_000_000_000,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts drawingStrokeCommitted", () => {
+    const result = serverEventSchema.safeParse({
+      type: "drawingStrokeCommitted",
+      roomId: "r",
+      seq: 1,
+      senderPlayerId: "p1",
+      strokeId: "s",
+      chunkId: "c",
+      points: [{ x: 0, y: 0 }],
+      color: "#000000",
+      lineWidthPx: 4,
     });
     expect(result.success).toBe(true);
   });
