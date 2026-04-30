@@ -41,6 +41,12 @@ export function messageForProtocolErrorCode(code: string): string {
       return "Pick one of the three words shown.";
     case "ALREADY_CHOSE":
       return "You already chose a word for this round.";
+    case "CHAT_TOO_LONG":
+      return "That message is too long for chat.";
+    case "CHAT_EMPTY":
+      return "Enter something to send.";
+    case "BAD_ROOM":
+      return "That room does not match your connection. Try reconnecting.";
     case "NO_WORD_OFFER":
       return "Word choices are not ready yet. Wait a moment and try again.";
     default:

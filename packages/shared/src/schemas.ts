@@ -145,6 +145,12 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
     points: z.array(drawingStrokePointSchema).min(1).max(256),
     lineWidthPx: z.number().finite().gte(1).lte(96),
   }),
+  /** Room chat / guesses (Epic 4, FR19). Text sanitized + length-checked on server. */
+  z.object({
+    type: z.literal("chatMessage"),
+    roomId: z.string().min(1),
+    text: z.string().min(1).max(4096),
+  }),
 ]);
 
 const drawingCanvasOpPayloadSchema = z.discriminatedUnion("op", [
@@ -275,10 +281,44 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     senderPlayerId: z.string(),
     op: drawingCanvasOpPayloadSchema,
   }),
+  /** Player chat row (Epic 4, FR19). */
+  z.object({
+    type: z.literal("chatPlayerMessage"),
+    roomId: z.string(),
+    id: z.string(),
+    ts: z.number().int().nonnegative(),
+    senderPlayerId: z.string(),
+    senderDisplayName: z.string(),
+    text: z.string(),
+  }),
+  /** System chat row (e.g. drawer spoiler guard). */
+  z.object({
+    type: z.literal("chatSystemMessage"),
+    roomId: z.string(),
+    id: z.string(),
+    ts: z.number().int().nonnegative(),
+    text: z.string(),
+  }),
+  /**
+   * Correct guess fan-out (FR23). `revealedWord` omitted for spoiler-safe recipients (FR21).
+   */
+  z.object({
+    type: z.literal("chatCorrectGuess"),
+    roomId: z.string(),
+    id: z.string(),
+    ts: z.number().int().nonnegative(),
+    guesserPlayerId: z.string(),
+    guesserDisplayName: z.string(),
+    revealedWord: z.string().optional(),
+    censoredAnnouncement: z.string(),
+  }),
 ]);
 
 export type ClientCommand = z.infer<typeof clientCommandSchema>;
 export type ServerEvent = z.infer<typeof serverEventSchema>;
+export type ChatPlayerMessageEvent = Extract<ServerEvent, { type: "chatPlayerMessage" }>;
+export type ChatSystemMessageEvent = Extract<ServerEvent, { type: "chatSystemMessage" }>;
+export type ChatCorrectGuessEvent = Extract<ServerEvent, { type: "chatCorrectGuess" }>;
 export type DrawingStrokeCommitted = Extract<ServerEvent, { type: "drawingStrokeCommitted" }>;
 export type DrawingHintTick = Extract<ServerEvent, { type: "drawingHintTick" }>;
 export type DrawingCanvasOpCommitted = Extract<

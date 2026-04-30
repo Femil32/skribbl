@@ -21,7 +21,16 @@ export {
   type DrawingCanvasOpPayload,
   type CanvasReplayEvent,
   type DrawingStrokePoint,
+  type ChatCorrectGuessEvent,
+  type ChatPlayerMessageEvent,
+  type ChatSystemMessageEvent,
 } from "./schemas.js";
+export {
+  assertChatMessageLength,
+  CHAT_MESSAGE_MAX_GRAPHEMES,
+  normalizeGuessText,
+  sanitizeChatMessage,
+} from "./chat-text.js";
 export {
   HINT_MASK_CHAR,
   eligibleLetterIndices,

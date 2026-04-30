@@ -23,6 +23,7 @@ import { PhaseBar } from "@/features/match/components/PhaseBar";
 import { ScoreboardSummary } from "@/features/match/components/ScoreboardSummary";
 import { MatchHintFeed } from "@/features/match/components/MatchHintFeed";
 import { WordChoicePanel } from "@/features/match/components/WordChoicePanel";
+import { MatchChatPanel } from "@/features/match/components/MatchChatPanel";
 
 const formatHintId = "join-room-code-format-hint";
 const protocolErrId = "join-room-protocol-error";
@@ -128,6 +129,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
     awaitingRoomHandshake: guestAwaitingHandshake,
     chooseWord: guestChooseWord,
     sendGameJsonLine: guestSendGameJsonLine,
+    sendChat: guestSendChat,
   } = useGuestJoinRoom({
     activeJoinAttempt,
     connectionAttemptId: joinGeneration,
@@ -304,24 +306,40 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                 />
               ) : null}
               {isMatchFlowPhase(guestState.phase) ? (
-                <MatchDrawingColumn
-                  phase={guestState.phase}
-                  localPlayerId={guestState.playerId}
-                  drawerPlayerId={guestState.drawerPlayerId}
-                  roomId={guestState.roomId}
-                  matchRoundIndex={guestState.matchRoundIndex}
-                  brushColor={brushColor}
-                  brushWidthPx={brushWidthPx}
-                  onBrushColorChange={setBrushColor}
-                  onBrushWidthChange={setBrushWidthPx}
-                  sendJsonLine={guestSendGameJsonLine}
-                  remoteCanvasCommits={guestState.remoteCanvasCommits}
-                  wsLive={guestTransport === "live"}
-                />
+                <div className="grid gap-4 lg:grid-cols-[1fr_minmax(280px,340px)] lg:items-start w-full max-w-4xl mx-auto">
+                  <MatchDrawingColumn
+                    phase={guestState.phase}
+                    localPlayerId={guestState.playerId}
+                    drawerPlayerId={guestState.drawerPlayerId}
+                    roomId={guestState.roomId}
+                    matchRoundIndex={guestState.matchRoundIndex}
+                    brushColor={brushColor}
+                    brushWidthPx={brushWidthPx}
+                    onBrushColorChange={setBrushColor}
+                    onBrushWidthChange={setBrushWidthPx}
+                    sendJsonLine={guestSendGameJsonLine}
+                    remoteCanvasCommits={guestState.remoteCanvasCommits}
+                    wsLive={guestTransport === "live"}
+                  />
+                  <MatchChatPanel
+                    localPlayerId={guestState.playerId}
+                    feed={guestState.chatFeed}
+                    onSend={guestSendChat}
+                    disabled={guestTransport !== "live"}
+                  />
+                </div>
               ) : guestState.phase === "matchEnded" ? (
-                <p className="text-sm text-base-content/70">
-                  Match finished — scores are above. Wait for the host to play again.
-                </p>
+                <div className="w-full max-w-lg mx-auto">
+                  <MatchChatPanel
+                    localPlayerId={guestState.playerId}
+                    feed={guestState.chatFeed}
+                    onSend={guestSendChat}
+                    disabled={guestTransport !== "live"}
+                  />
+                  <p className="text-sm text-base-content/70 mt-3">
+                    Match finished — scores are above. Wait for the host to play again.
+                  </p>
+                </div>
               ) : (
                 <p className="text-sm text-base-content/70">
                   Waiting for the host to begin. You will not have a Start control here.

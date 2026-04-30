@@ -35,8 +35,8 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: '2026-04-29T00:00:00Z'
-last_updated: '2026-04-30T14:26:30Z'
-# Epic 3 in-progress — 3-6 done; Epic 2 — 2-7 done; 2-5 review (hints cadence)
+last_updated: '2026-04-30T20:15:00Z'
+# Epic 4 done — chat, guess adjudication, scoring hooks, fan-out UX (2026-04-30)
 project: skribbl
 project_key: NOKEY
 tracking_system: file-system
@@ -58,7 +58,7 @@ development_status:
   2-2-round-robin-drawer-rotation: done
   2-3-word-bank-loading-drawer-wordchoicepanel: done
   2-4-drawing-phase-countdown-timer-driven-round-end: done
-  2-5-progressive-letter-hints-cadence: review
+  2-5-progressive-letter-hints-cadence: done
   2-6-score-rules-running-totals: done
   2-7-match-end-scoreboardsummary: done
   epic-2-retrospective: optional
@@ -72,11 +72,11 @@ development_status:
   3-6-eraser-fill-clear-semantics-via-op-log: done
   epic-3-retrospective: optional
 
-  epic-4: backlog
-  4-1-chatpanel-composer-realtime-history: backlog
-  4-2-guess-adjudication-exact-match-spoiler-safe-broadcasts: backlog
-  4-3-score-awards-drawer-bonuses-wiring: backlog
-  4-4-correct-guess-fan-out-messaging-ux-beats: backlog
+  epic-4: done
+  4-1-chatpanel-composer-realtime-history: done
+  4-2-guess-adjudication-exact-match-spoiler-safe-broadcasts: done
+  4-3-score-awards-drawer-bonuses-wiring: done
+  4-4-correct-guess-fan-out-messaging-ux-beats: done
   epic-4-retrospective: optional
 
   epic-5: backlog

@@ -71,6 +71,11 @@ export function serializeReturnToLobbyCommand(): string {
   return serializeClientCommand({ type: "returnToLobby" });
 }
 
+/** Room chat / guesses (Epic 4). */
+export function serializeChatMessageCommand(roomId: string, text: string): string {
+  return serializeClientCommand({ type: "chatMessage", roomId, text });
+}
+
 /**
  * Optional dev helper: open a WebSocket and send one ping when NEXT_PUBLIC debug WS URL is set.
  * Gated so production bundles do not require a live game server.

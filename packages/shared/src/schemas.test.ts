@@ -283,6 +283,43 @@ describe("serverEventSchema", () => {
     });
     expect(result.success).toBe(true);
   });
+
+  it("accepts Epic 4 chat server events", () => {
+    expect(
+      serverEventSchema.safeParse({
+        type: "chatPlayerMessage",
+        roomId: "r",
+        id: "i1",
+        ts: 1,
+        senderPlayerId: "a",
+        senderDisplayName: "Al",
+        text: "hi",
+      }).success,
+    ).toBe(true);
+    expect(
+      serverEventSchema.safeParse({
+        type: "chatCorrectGuess",
+        roomId: "r",
+        id: "i2",
+        ts: 2,
+        guesserPlayerId: "a",
+        guesserDisplayName: "Al",
+        censoredAnnouncement: "Al guessed the word!",
+      }).success,
+    ).toBe(true);
+    expect(
+      serverEventSchema.safeParse({
+        type: "chatCorrectGuess",
+        roomId: "r",
+        id: "i3",
+        ts: 3,
+        guesserPlayerId: "a",
+        guesserDisplayName: "Al",
+        revealedWord: "apple",
+        censoredAnnouncement: "Al guessed the word!",
+      }).success,
+    ).toBe(true);
+  });
 });
 
 describe("isMatchFlowPhase", () => {
@@ -339,6 +376,15 @@ describe("serializeClientCommand", () => {
     const line = serializeClientCommand({ type: "returnToLobby" });
     expect(JSON.parse(line)).toEqual({ type: "returnToLobby" });
     expect(clientCommandSchema.safeParse(JSON.parse(line)).success).toBe(true);
+  });
+
+  it("accepts chatMessage", () => {
+    const result = clientCommandSchema.safeParse({
+      type: "chatMessage",
+      roomId: "r1",
+      text: "hello",
+    });
+    expect(result.success).toBe(true);
   });
 
   it("round-trips reconnectHost", () => {

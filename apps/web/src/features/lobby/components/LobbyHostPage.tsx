@@ -20,6 +20,7 @@ import { PhaseBar } from "@/features/match/components/PhaseBar";
 import { ScoreboardSummary } from "@/features/match/components/ScoreboardSummary";
 import { MatchHintFeed } from "@/features/match/components/MatchHintFeed";
 import { WordChoicePanel } from "@/features/match/components/WordChoicePanel";
+import { MatchChatPanel } from "@/features/match/components/MatchChatPanel";
 import {
   buildRoomInviteUrl,
   resolvePublicWebOrigin,
@@ -88,6 +89,7 @@ export function LobbyHostPage() {
     chooseWord,
     returnToLobby,
     sendGameJsonLine,
+    sendChat,
   } = useHostCreateRoom({
     shouldConnect,
     attemptId,
@@ -431,24 +433,35 @@ export function LobbyHostPage() {
               />
             ) : null}
             {isMatchFlowPhase(state.phase) ? (
-              <MatchDrawingColumn
-                phase={state.phase}
-                localPlayerId={state.playerId}
-                drawerPlayerId={state.drawerPlayerId}
-                roomId={state.roomId}
-                matchRoundIndex={state.matchRoundIndex}
-                brushColor={brushColor}
-                brushWidthPx={brushWidthPx}
-                onBrushColorChange={setBrushColor}
-                onBrushWidthChange={setBrushWidthPx}
-                sendJsonLine={sendGameJsonLine}
-                remoteCanvasCommits={state.remoteCanvasCommits}
-                wsLive={transport === "live"}
-              />
+              <div className="grid gap-4 lg:grid-cols-[1fr_minmax(280px,340px)] lg:items-start">
+                <MatchDrawingColumn
+                  phase={state.phase}
+                  localPlayerId={state.playerId}
+                  drawerPlayerId={state.drawerPlayerId}
+                  roomId={state.roomId}
+                  matchRoundIndex={state.matchRoundIndex}
+                  brushColor={brushColor}
+                  brushWidthPx={brushWidthPx}
+                  onBrushColorChange={setBrushColor}
+                  onBrushWidthChange={setBrushWidthPx}
+                  sendJsonLine={sendGameJsonLine}
+                  remoteCanvasCommits={state.remoteCanvasCommits}
+                  wsLive={transport === "live"}
+                />
+                <MatchChatPanel
+                  localPlayerId={state.playerId}
+                  feed={state.chatFeed}
+                  onSend={sendChat}
+                  disabled={transport !== "live"}
+                />
+              </div>
             ) : state.phase === "matchEnded" ? (
-              <p className="text-sm text-center text-base-content/70">
-                Final scores are above. Play again resets everyone to zero.
-              </p>
+              <MatchChatPanel
+                localPlayerId={state.playerId}
+                feed={state.chatFeed}
+                onSend={sendChat}
+                disabled={transport !== "live"}
+              />
             ) : null}
           </div>
 

@@ -5,6 +5,7 @@ import type {
   CanvasReplayEvent,
   LobbyRosterPlayer,
   RoomPhase,
+  ServerEvent,
 } from "@skribbl/shared";
 import { safeParseServerEvent } from "@skribbl/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -24,11 +25,21 @@ import {
   serializeStartMatchCommand,
   serializeChooseWordCommand,
   serializeReturnToLobbyCommand,
+  serializeChatMessageCommand,
 } from "@/lib/ws-client";
 import {
   appendDrawingHintRows,
   type MatchHintFeedRow,
 } from "@/features/lobby/lib/drawing-hint-rows";
+
+type ChatFeedEvent = Extract<
+  ServerEvent,
+  | { type: "chatPlayerMessage" }
+  | { type: "chatSystemMessage" }
+  | { type: "chatCorrectGuess" }
+>;
+
+const MAX_CHAT_FEED = 400;
 
 export type HostLobbyState =
   | { status: "idle" }
@@ -59,6 +70,8 @@ export type HostLobbyState =
       remoteCanvasCommits: CanvasReplayEvent[];
       /** Bounded rows from **`drawingHintTick`** (Story 2.5); cleared leaving `drawing` or on round mismatch. */
       drawingHintRows: MatchHintFeedRow[];
+      /** Live chat tail (Epic 4); cleared when returning to pre-match `lobby`. */
+      chatFeed: ChatFeedEvent[];
     }
   | { status: "error"; message: string };
 
@@ -87,6 +100,8 @@ export type UseHostCreateRoomResult = {
   returnToLobby: () => void;
   /** Raw JSON line for drawing commands (open socket only). */
   sendGameJsonLine: (raw: string) => void;
+  /** Send a chat line / guess (Epic 4). */
+  sendChat: (text: string) => void;
 };
 
 /** Avoid unbounded `remoteCanvasCommits` growth during long drawing phases. */
@@ -129,6 +144,18 @@ export function useHostCreateRoom(
     if (!w || w.readyState !== WebSocket.OPEN) return;
     try {
       w.send(raw);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const sendChat = useCallback((text: string) => {
+    const w = wsRef.current;
+    if (!w || w.readyState !== WebSocket.OPEN) return;
+    const rid = hostResumeContextRef.current?.roomId;
+    if (!rid) return;
+    try {
+      w.send(serializeChatMessageCommand(rid, text));
     } catch {
       /* ignore */
     }
@@ -236,6 +263,7 @@ export function useHostCreateRoom(
             wordChoicePickError: null,
             remoteCanvasCommits: [],
             drawingHintRows: [],
+            chatFeed: [],
           });
           setTransport("live");
           return;
@@ -286,6 +314,7 @@ export function useHostCreateRoom(
 
             let nextCommits = prev.remoteCanvasCommits;
             let drawingHintRows = prev.drawingHintRows;
+            let chatFeed = prev.chatFeed;
             const roundBump =
               prev.matchRoundIndex !== undefined &&
               mp.matchRoundIndex !== undefined &&
@@ -294,6 +323,7 @@ export function useHostCreateRoom(
             if (mp.phase === "lobby") {
               nextCommits = [];
               drawingHintRows = [];
+              chatFeed = [];
             } else if (roundBump) {
               nextCommits = [];
               drawingHintRows = [];
@@ -311,6 +341,7 @@ export function useHostCreateRoom(
               wordChoicePickError,
               remoteCanvasCommits: nextCommits,
               drawingHintRows,
+              chatFeed,
               ...(mp.phase === "lobby" ? { isStartPending: false } : {}),
             };
           });
@@ -451,6 +482,20 @@ export function useHostCreateRoom(
           });
           return;
         }
+        case "chatPlayerMessage":
+        case "chatSystemMessage":
+        case "chatCorrectGuess": {
+          const chatEv = parsed.data;
+          setState((prev) => {
+            if (prev.status !== "lobby") return prev;
+            if (chatEv.roomId !== prev.roomId) return prev;
+            return {
+              ...prev,
+              chatFeed: [...prev.chatFeed, chatEv].slice(-MAX_CHAT_FEED),
+            };
+          });
+          return;
+        }
         default: {
           const _exhaustive: never = parsed.data;
           return _exhaustive;
@@ -538,6 +583,7 @@ export function useHostCreateRoom(
       chooseWord,
       returnToLobby,
       sendGameJsonLine,
+      sendChat,
     };
   }
 
@@ -552,6 +598,7 @@ export function useHostCreateRoom(
       chooseWord,
       returnToLobby,
       sendGameJsonLine,
+      sendChat,
     };
   }
 
@@ -566,6 +613,7 @@ export function useHostCreateRoom(
       chooseWord,
       returnToLobby,
       sendGameJsonLine,
+      sendChat,
     };
   }
 
@@ -579,5 +627,6 @@ export function useHostCreateRoom(
     chooseWord,
     returnToLobby,
     sendGameJsonLine,
+    sendChat,
   };
 }

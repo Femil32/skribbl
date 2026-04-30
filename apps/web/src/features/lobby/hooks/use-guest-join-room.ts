@@ -5,6 +5,7 @@ import type {
   CanvasReplayEvent,
   LobbyRosterPlayer,
   RoomPhase,
+  ServerEvent,
 } from "@skribbl/shared";
 import {
   isValidRoomCodeForJoin,
@@ -22,11 +23,20 @@ import {
 } from "@/features/lobby/lib/transport-user-messages";
 import type { LobbyConnectionReason, LobbyTransportPhase } from "@/features/lobby/lib/lobby-transport";
 import { missingGameWebSocketUrlUserMessage, resolveGameWebSocketUrl } from "@/lib/game-ws-url";
-import { serializeChooseWordCommand, serializeJoinRoomCommand } from "@/lib/ws-client";
+import { serializeChooseWordCommand, serializeJoinRoomCommand, serializeChatMessageCommand } from "@/lib/ws-client";
 import {
   appendDrawingHintRows,
   type MatchHintFeedRow,
 } from "@/features/lobby/lib/drawing-hint-rows";
+
+type ChatFeedEvent = Extract<
+  ServerEvent,
+  | { type: "chatPlayerMessage" }
+  | { type: "chatSystemMessage" }
+  | { type: "chatCorrectGuess" }
+>;
+
+const MAX_CHAT_FEED = 400;
 
 export type GuestJoinLobbyState =
   | { status: "idle" }
@@ -54,6 +64,7 @@ export type GuestJoinLobbyState =
       /** Replay buffer (Story 3.5–3.6); cleared on lobby or new match round. */
       remoteCanvasCommits: CanvasReplayEvent[];
       drawingHintRows: MatchHintFeedRow[];
+      chatFeed: ChatFeedEvent[];
     }
   | {
       /** Server `error.code` when the failure came from an `error` event; omit for generic failures. */
@@ -78,6 +89,7 @@ export type UseGuestJoinRoomResult = {
   awaitingRoomHandshake: boolean;
   chooseWord: (choiceIndex: 0 | 1 | 2) => void;
   sendGameJsonLine: (raw: string) => void;
+  sendChat: (text: string) => void;
 };
 
 /**
@@ -118,12 +130,25 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
   const reachedJoinedRef = useRef(false);
   const closedWhileJoinedRef = useRef(false);
   const wsRef = useRef<WebSocket | null>(null);
+  const joinedRoomIdRef = useRef<string | null>(null);
 
   const sendGameJsonLine = useCallback((raw: string) => {
     const w = wsRef.current;
     if (!w || w.readyState !== WebSocket.OPEN) return;
     try {
       w.send(raw);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const sendChat = useCallback((text: string) => {
+    const w = wsRef.current;
+    if (!w || w.readyState !== WebSocket.OPEN) return;
+    const rid = joinedRoomIdRef.current;
+    if (!rid) return;
+    try {
+      w.send(serializeChatMessageCommand(rid, text));
     } catch {
       /* ignore */
     }
@@ -145,6 +170,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
     if (!activeJoinAttempt) {
       reachedJoinedRef.current = false;
       closedWhileJoinedRef.current = false;
+      joinedRoomIdRef.current = null;
       return;
     }
 
@@ -219,7 +245,9 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
             wordChoicePickError: null,
             remoteCanvasCommits: [],
             drawingHintRows: [],
+            chatFeed: [],
           });
+          joinedRoomIdRef.current = parsed.data.roomId;
           setTransport("live");
           return;
         case "lobbyRoster": {
@@ -270,6 +298,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
 
             let nextCommits = prev.remoteCanvasCommits;
             let drawingHintRows = prev.drawingHintRows;
+            let chatFeed = prev.chatFeed;
             const roundBump =
               prev.matchRoundIndex !== undefined &&
               mp.matchRoundIndex !== undefined &&
@@ -278,6 +307,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
             if (mp.phase === "lobby") {
               nextCommits = [];
               drawingHintRows = [];
+              chatFeed = [];
             } else if (roundBump) {
               nextCommits = [];
               drawingHintRows = [];
@@ -295,6 +325,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
               wordChoicePickError,
               remoteCanvasCommits: nextCommits,
               drawingHintRows,
+              chatFeed,
             };
           });
           return;
@@ -421,6 +452,20 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
           });
           return;
         }
+        case "chatPlayerMessage":
+        case "chatSystemMessage":
+        case "chatCorrectGuess": {
+          const chatEv = parsed.data;
+          setState((prev) => {
+            if (prev.status !== "joined") return prev;
+            if (chatEv.roomId !== prev.roomId) return prev;
+            return {
+              ...prev,
+              chatFeed: [...prev.chatFeed, chatEv].slice(-MAX_CHAT_FEED),
+            };
+          });
+          return;
+        }
         default: {
           const _exhaustive: never = parsed.data;
           return _exhaustive;
@@ -485,6 +530,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
       awaitingRoomHandshake: false,
       chooseWord,
       sendGameJsonLine,
+      sendChat,
     };
   }
 
@@ -497,6 +543,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
       awaitingRoomHandshake: false,
       chooseWord,
       sendGameJsonLine,
+      sendChat,
     };
   }
 
@@ -511,6 +558,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
       awaitingRoomHandshake: false,
       chooseWord,
       sendGameJsonLine,
+      sendChat,
     };
   }
 
@@ -522,5 +570,6 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
     awaitingRoomHandshake,
     chooseWord,
     sendGameJsonLine,
+    sendChat,
   };
 }

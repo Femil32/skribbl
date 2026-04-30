@@ -339,6 +339,28 @@ export function handleClientCommand(
       }
       return;
     }
+    case "chatMessage": {
+      const outcome = roomManager.applyChatMessage(ws, cmd.roomId, cmd.text);
+      if (!outcome.ok) {
+        sendProtocolError(
+          ws,
+          outcome.code,
+          outcome.code === "BAD_ROOM"
+            ? "That room doesn't match your connection."
+            : outcome.code === "CHAT_EMPTY"
+              ? "Message was empty after cleanup."
+              : outcome.code === "CHAT_TOO_LONG"
+                ? "Message is too long."
+                : outcome.code === "WRONG_PHASE"
+                  ? "That action isn't available in this phase."
+                  : outcome.code === "GUESSER_IS_DRAWER"
+                    ? "The drawer can't score as a guesser."
+                    : "Message could not be sent.",
+          roomManager,
+        );
+      }
+      return;
+    }
     default: {
       const _exhaustive: never = cmd;
       return _exhaustive;

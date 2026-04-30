@@ -1,14 +1,18 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import pino from "pino";
 import {
+  assertChatMessageLength,
   buildMaskedWord,
   computeGuesserPoints,
   computeTotalLetters,
   eligibleLetterIndices,
   hintRevealOrderSeed,
+  normalizeGuessText,
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,
   isValidRoomCodeForJoin,
   normalizeRoomCode,
+  sanitizeChatMessage,
   serializeServerEvent,
   shuffleIndicesDeterministic,
   type ClientCommand,
@@ -32,6 +36,11 @@ import {
 import type { WordBank } from "../words/word-bank.js";
 import type { LobbySessionIdentity } from "./lobby-session.js";
 import { Room } from "./room.js";
+
+const log = pino({
+  level: process.env.LOG_LEVEL ?? "info",
+  name: "room-manager",
+});
 
 export {
   ROOM_CODE_ALPHABET,
@@ -148,6 +157,37 @@ export class RoomManager {
     }
   }
 
+  /** Story 2.4 / Epic 4: timer expiry or all guessers correct — leaves `drawing` and schedules next beat. */
+  private transitionDrawingToRoundResult(
+    room: Room,
+    timeouts: ReturnType<typeof setTimeout>[],
+    drawerId: string,
+    roundIndex: number,
+  ): void {
+    if (!this.roomsById.get(room.id) || room.phase !== "drawing") return;
+
+    for (const t of timeouts) clearTimeout(t);
+    timeouts.length = 0;
+
+    room.phase = "roundResult";
+    room.drawingPhaseStartedAtMs = null;
+    room.drawingPhaseAwardedGuesserIds = null;
+    this.broadcastMatchPhase(room, undefined, drawerId, roundIndex);
+    if (roundIndex + 1 < resolveRoundsPerMatch()) {
+      const next = setTimeout(
+        () => this.queueRoundStart(room, roundIndex + 1, 0, "roundResult", timeouts),
+        resolveInterRoundGapMs(),
+      );
+      timeouts.push(next);
+    } else {
+      const endMatch = setTimeout(() => {
+        if (!this.roomsById.get(room.id) || room.phase !== "roundResult") return;
+        this.enterMatchEnded(room, roundIndex);
+      }, resolveInterRoundGapMs());
+      timeouts.push(endMatch);
+    }
+  }
+
   private lockWordAndBeginDrawing(
     room: Room,
     timeouts: ReturnType<typeof setTimeout>[],
@@ -211,29 +251,7 @@ export class RoomManager {
 
     /** Story 2.4–2.5: clear every queued **`setTimeout`** (hint ticks + drawing end) before inter-round timers. Epic 4: mirror on early correct guess (`clearMatchTimers`). */
     const drawingEnd = setTimeout(() => {
-      if (!this.roomsById.get(room.id) || room.phase !== "drawing") return;
-
-      for (const t of timeouts) clearTimeout(t);
-      timeouts.length = 0;
-
-      room.phase = "roundResult";
-      room.drawingPhaseStartedAtMs = null;
-      room.drawingPhaseAwardedGuesserIds = null;
-      this.broadcastMatchPhase(room, undefined, drawerId, roundIndex);
-      if (roundIndex + 1 < resolveRoundsPerMatch()) {
-        const next = setTimeout(
-          () => this.queueRoundStart(room, roundIndex + 1, 0, "roundResult", timeouts),
-          resolveInterRoundGapMs(),
-        );
-        timeouts.push(next);
-      } else {
-        /** Story 2.7: same inter-round gap, then terminal `matchEnded` + fresh roster. */
-        const endMatch = setTimeout(() => {
-          if (!this.roomsById.get(room.id) || room.phase !== "roundResult") return;
-          this.enterMatchEnded(room, roundIndex);
-        }, resolveInterRoundGapMs());
-        timeouts.push(endMatch);
-      }
+      this.transitionDrawingToRoundResult(room, timeouts, drawerId, roundIndex);
     }, roundMs);
     timeouts.push(drawingEnd);
   }
@@ -405,8 +423,184 @@ export class RoomManager {
     scores[drawerId] = (scores[drawerId] ?? 0) + assist;
     awarded.add(opts.guesserPlayerId);
 
+    log.info(
+      {
+        event: "correct_guess_award",
+        roomId: opts.roomId,
+        guesserPlayerId: opts.guesserPlayerId,
+        drawerPlayerId: drawerId,
+        guesserPts,
+        drawerAssistPts: assist,
+        elapsedMs: elapsed,
+      },
+      "Awarded points for correct guess",
+    );
+
     this.broadcastLobbyRoster(room);
     return { ok: true };
+  }
+
+  private allNonDrawerGuessersAwarded(room: Room): boolean {
+    const drawer = room.currentDrawerPlayerId;
+    const order = room.matchPlayerOrder;
+    const awarded = room.drawingPhaseAwardedGuesserIds;
+    if (!drawer || !order?.length || !awarded) return false;
+    for (const pid of order) {
+      if (pid === drawer) continue;
+      if (!awarded.has(pid)) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Epic 4 — chat ingress: sanitize, optional exact-guess adjudication (FR20–FR22), spoiler-safe fan-out (FR21).
+   */
+  applyChatMessage(
+    ws: WebSocket,
+    roomId: string,
+    rawText: string,
+  ): { ok: true } | { ok: false; code: string } {
+    const room = this.getRoomForSocket(ws);
+    const session = this.getLobbySession(ws);
+    if (!room || !session) return { ok: false, code: "INTERNAL" };
+    if (roomId !== room.id) return { ok: false, code: "BAD_ROOM" };
+
+    const sanitized = sanitizeChatMessage(rawText);
+    if (sanitized === "") return { ok: false, code: "CHAT_EMPTY" };
+    const len = assertChatMessageLength(sanitized);
+    if (!len.ok) return { ok: false, code: len.code };
+
+    const senderId = session.playerId;
+    const senderName = session.displayName;
+    const secret = room.roundSecretWord;
+    const drawerId = room.currentDrawerPlayerId;
+    const inDrawing = room.phase === "drawing";
+    const normalizedSecret =
+      secret && inDrawing ? normalizeGuessText(secret) : null;
+    const normalizedMsg = normalizeGuessText(sanitized);
+    const isExact = Boolean(
+      normalizedSecret &&
+        normalizedSecret.length > 0 &&
+        normalizedMsg === normalizedSecret,
+    );
+
+    if (inDrawing && isExact && secret) {
+      if (senderId === drawerId) {
+        this.broadcastPlayerChatWithPerRecipientText(
+          room,
+          senderId,
+          senderName,
+          sanitized,
+          (recipientId) => {
+            const awarded = room.drawingPhaseAwardedGuesserIds;
+            const mayKnow =
+              recipientId === senderId || (awarded?.has(recipientId) ?? false);
+            return mayKnow ? sanitized : "—";
+          },
+        );
+        return { ok: true };
+      }
+
+      const t = Date.now();
+      const award = this.applyCorrectGuessAward({
+        roomId: room.id,
+        guesserPlayerId: senderId,
+        occurredAtMs: t,
+      });
+
+      if (award.ok) {
+        const censored = `${senderName} guessed the word!`;
+        this.broadcastCorrectGuess(room, senderId, senderName, secret, censored);
+        if (this.allNonDrawerGuessersAwarded(room)) {
+          const timeouts = this.matchTimersByRoomId.get(room.id);
+          const d = room.currentDrawerPlayerId;
+          if (timeouts && d) {
+            this.transitionDrawingToRoundResult(room, timeouts, d, room.matchRoundIndex);
+          }
+        }
+        return { ok: true };
+      }
+
+      if (award.code === "ALREADY_AWARDED_THIS_DRAWING") {
+        this.broadcastPlayerChatWithPerRecipientText(
+          room,
+          senderId,
+          senderName,
+          sanitized,
+          (recipientId) => {
+            const awarded = room.drawingPhaseAwardedGuesserIds;
+            const mayKnow =
+              recipientId === senderId ||
+              recipientId === drawerId ||
+              (awarded?.has(recipientId) ?? false);
+            return mayKnow ? sanitized : "•••";
+          },
+        );
+        return { ok: true };
+      }
+
+      return award;
+    }
+
+    this.broadcastPlayerChatWithPerRecipientText(room, senderId, senderName, sanitized, () => sanitized);
+    return { ok: true };
+  }
+
+  private broadcastPlayerChatWithPerRecipientText(
+    room: Room,
+    senderPlayerId: string,
+    senderDisplayName: string,
+    _canonicalText: string,
+    textForRecipient: (recipientId: string) => string,
+  ): void {
+    const ts = Date.now();
+    const id = randomUUID();
+    for (const sock of room.sockets) {
+      const recipientId = this.socketLobbyIdentity.get(sock)?.playerId;
+      if (!recipientId) continue;
+      this.sendEvent(sock, {
+        type: "chatPlayerMessage",
+        roomId: room.id,
+        id,
+        ts,
+        senderPlayerId,
+        senderDisplayName,
+        text: textForRecipient(recipientId),
+      });
+    }
+  }
+
+  private broadcastCorrectGuess(
+    room: Room,
+    guesserPlayerId: string,
+    guesserDisplayName: string,
+    secretWord: string,
+    censoredAnnouncement: string,
+  ): void {
+    const id = randomUUID();
+    const ts = Date.now();
+    const awarded = room.drawingPhaseAwardedGuesserIds;
+    const drawerId = room.currentDrawerPlayerId;
+    if (!awarded || !drawerId) return;
+
+    for (const sock of room.sockets) {
+      const recipientId = this.socketLobbyIdentity.get(sock)?.playerId;
+      if (!recipientId) continue;
+      const mayReveal =
+        recipientId === guesserPlayerId ||
+        recipientId === drawerId ||
+        awarded.has(recipientId);
+      this.sendEvent(sock, {
+        type: "chatCorrectGuess",
+        roomId: room.id,
+        id,
+        ts,
+        guesserPlayerId,
+        guesserDisplayName,
+        ...(mayReveal ? { revealedWord: secretWord } : {}),
+        censoredAnnouncement,
+      });
+    }
   }
 
   /** Drawer-only: lock word and skip remaining word-choice wait (Story 2.3). */

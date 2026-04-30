@@ -946,4 +946,208 @@ describe("handleClientCommand + RoomManager", () => {
       vi.useRealTimers();
     }
   });
+
+  it("chatMessage exact match awards, reveals to drawer and guesser, ends round when lone guesser wins", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.stubEnv("ROUND_MS", "80000");
+    vi.useFakeTimers();
+    try {
+      const rm = new RoomManager(8, integrationWordBank());
+      const host = captureWs();
+      const guest = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        guest.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+      const guestJoined = parseServerEvent(JSON.parse(guest.sent[0]!));
+      expect(guestJoined.type).toBe("roomJoined");
+      const guestPlayerId =
+        guestJoined.type === "roomJoined" ? guestJoined.playerId : "";
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+
+      const drawerPhaseEv = [...host.sent, ...guest.sent]
+        .map((line) => parseServerEvent(JSON.parse(line)))
+        .find(
+          (e): e is Extract<typeof e, { type: "matchPhase" }> =>
+            e.type === "matchPhase" && e.phase === "choosingWord",
+        );
+      const drawerId = drawerPhaseEv?.drawerPlayerId;
+      expect(drawerId).toBeTruthy();
+
+      const drawerCapt = drawerId === created.playerId ? host : guest;
+      const guesserCapt = drawerId === created.playerId ? guest : host;
+      const guesserId = drawerId === created.playerId ? guestPlayerId : created.playerId;
+
+      const offers = drawerCapt.sent
+        .map((line) => parseServerEvent(JSON.parse(line)))
+        .filter((e) => e.type === "wordChoiceOffer");
+      expect(offers.length).toBeGreaterThanOrEqual(1);
+      const words = offers[0]?.type === "wordChoiceOffer" ? offers[0].words : null;
+      expect(words).toBeTruthy();
+      const choiceIndex = 1;
+      const secret = words![choiceIndex]!;
+
+      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex }, rm);
+
+      const roomBefore = rm.getRoomForSocket(host.ws);
+      expect(roomBefore?.phase).toBe("drawing");
+      expect(roomBefore?.roundSecretWord).toBe(secret);
+
+      handleClientCommand(
+        guesserCapt.ws,
+        { type: "chatMessage", roomId: roomBefore!.id, text: `  ${secret.toUpperCase()} ` },
+        rm,
+      );
+
+      function lastCorrectGuess(sent: string[]) {
+        const all = sent
+          .map((line) => parseServerEvent(JSON.parse(line)))
+          .filter((e) => e.type === "chatCorrectGuess");
+        return all[all.length - 1];
+      }
+
+      const hCG = lastCorrectGuess(host.sent);
+      const gCG = lastCorrectGuess(guest.sent);
+      expect(hCG?.type).toBe("chatCorrectGuess");
+      expect(gCG?.type).toBe("chatCorrectGuess");
+      if (hCG?.type === "chatCorrectGuess" && gCG?.type === "chatCorrectGuess") {
+        expect(hCG.revealedWord).toBe(secret);
+        expect(gCG.revealedWord).toBe(secret);
+      }
+
+      const roster = lastLobbyRoster([...host.sent, ...guest.sent]);
+      expect(roster?.type).toBe("lobbyRoster");
+      if (roster?.type === "lobbyRoster") {
+        const scores = Object.fromEntries(roster.players.map((p) => [p.playerId, p.score]));
+        expect(scores[guesserId]).toBeGreaterThan(0);
+        expect(scores[drawerId!]).toBeGreaterThan(0);
+      }
+
+      const roomAfter = rm.getRoomForSocket(host.ws);
+      expect(roomAfter?.phase).toBe("roundResult");
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
+
+  it("chatCorrectGuess omits revealedWord for players still guessing (FR21)", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "2");
+    vi.stubEnv("ROUND_MS", "80000");
+    vi.useFakeTimers();
+    try {
+      const rm = new RoomManager(
+        8,
+        createStaticWordBank(["onlyone", "onlytwo", "onlythree"]),
+      );
+      const host = captureWs();
+      const g1 = captureWs();
+      const g2 = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+      handleClientCommand(
+        g1.ws,
+        {
+          type: "joinRoom",
+          roomCode: created.roomCode,
+          displayName: "Ga",
+          avatarPresetId: "preset-2",
+        },
+        rm,
+      );
+      handleClientCommand(
+        g2.ws,
+        {
+          type: "joinRoom",
+          roomCode: created.roomCode,
+          displayName: "Gb",
+          avatarPresetId: "preset-3",
+        },
+        rm,
+      );
+      const g1Join = parseServerEvent(JSON.parse(g1.sent[0]!));
+      const g2Join = parseServerEvent(JSON.parse(g2.sent[0]!));
+      const g1Id = g1Join.type === "roomJoined" ? g1Join.playerId : "";
+      expect(g2Join.type).toBe("roomJoined");
+      const g2Id = g2Join.type === "roomJoined" ? g2Join.playerId : "";
+      expect(g1Id && g2Id).toBeTruthy();
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+
+      const drawerEv = [...host.sent, ...g1.sent, ...g2.sent]
+        .map((line) => parseServerEvent(JSON.parse(line)))
+        .find(
+          (e): e is Extract<typeof e, { type: "matchPhase" }> =>
+            e.type === "matchPhase" && e.phase === "choosingWord",
+        );
+      const drawerId = drawerEv?.drawerPlayerId!;
+      expect(drawerId).toBeTruthy();
+
+      let drawerWs: WebSocket;
+      let guesserWs: WebSocket;
+      let spectatorWs: WebSocket;
+      if (drawerId === created.playerId) {
+        drawerWs = host.ws;
+        guesserWs = g1.ws;
+        spectatorWs = g2.ws;
+      } else if (drawerId === g1Id) {
+        drawerWs = g1.ws;
+        guesserWs = host.ws;
+        spectatorWs = g2.ws;
+      } else {
+        drawerWs = g2.ws;
+        guesserWs = host.ws;
+        spectatorWs = g1.ws;
+      }
+
+      const drawerSent =
+        drawerWs === host.ws ? host.sent : drawerWs === g1.ws ? g1.sent : g2.sent;
+      const offersLines = drawerSent
+        .map((line) => parseServerEvent(JSON.parse(line)))
+        .filter((e) => e.type === "wordChoiceOffer");
+      const words = offersLines[0]?.type === "wordChoiceOffer" ? offersLines[0].words : null;
+      expect(words).toBeTruthy();
+      const secret = words![0]!;
+
+      const roomRef = rm.getRoomForSocket(host.ws)!;
+      handleClientCommand(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
+      expect(roomRef.phase).toBe("drawing");
+
+      handleClientCommand(
+        guesserWs,
+        { type: "chatMessage", roomId: roomRef.id, text: secret },
+        rm,
+      );
+
+      function lastCg(sent: string[]) {
+        const xs = sent
+          .map((l) => parseServerEvent(JSON.parse(l)))
+          .filter((e) => e.type === "chatCorrectGuess");
+        return xs[xs.length - 1];
+      }
+
+      const specSent = spectatorWs === host.ws ? host.sent : spectatorWs === g1.ws ? g1.sent : g2.sent;
+      const specEv = lastCg(specSent);
+      expect(specEv?.type).toBe("chatCorrectGuess");
+      if (specEv?.type === "chatCorrectGuess") {
+        expect(specEv.revealedWord).toBeUndefined();
+        expect(specEv.censoredAnnouncement.length).toBeGreaterThan(0);
+      }
+      expect(roomRef.phase).toBe("drawing");
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
 });
