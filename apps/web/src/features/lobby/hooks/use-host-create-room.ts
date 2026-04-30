@@ -25,6 +25,10 @@ import {
   serializeChooseWordCommand,
   serializeReturnToLobbyCommand,
 } from "@/lib/ws-client";
+import {
+  appendDrawingHintRows,
+  type MatchHintFeedRow,
+} from "@/features/lobby/lib/drawing-hint-rows";
 
 export type HostLobbyState =
   | { status: "idle" }
@@ -53,6 +57,8 @@ export type HostLobbyState =
       wordChoicePickError?: string | null;
       /** Replay buffer for peers (Story 3.5–3.6) — strokes + canvas ops; cleared on lobby or new match round. */
       remoteCanvasCommits: CanvasReplayEvent[];
+      /** Bounded rows from **`drawingHintTick`** (Story 2.5); cleared leaving `drawing` or on round mismatch. */
+      drawingHintRows: MatchHintFeedRow[];
     }
   | { status: "error"; message: string };
 
@@ -229,6 +235,7 @@ export function useHostCreateRoom(
             wordChoiceOffer: null,
             wordChoicePickError: null,
             remoteCanvasCommits: [],
+            drawingHintRows: [],
           });
           setTransport("live");
           return;
@@ -278,13 +285,20 @@ export function useHostCreateRoom(
               mp.phaseDeadlineMs !== undefined ? mp.phaseDeadlineMs : undefined;
 
             let nextCommits = prev.remoteCanvasCommits;
-            if (mp.phase === "lobby") nextCommits = [];
-            else if (
+            let drawingHintRows = prev.drawingHintRows;
+            const roundBump =
               prev.matchRoundIndex !== undefined &&
               mp.matchRoundIndex !== undefined &&
-              mp.matchRoundIndex !== prev.matchRoundIndex
-            ) {
+              mp.matchRoundIndex !== prev.matchRoundIndex;
+
+            if (mp.phase === "lobby") {
               nextCommits = [];
+              drawingHintRows = [];
+            } else if (roundBump) {
+              nextCommits = [];
+              drawingHintRows = [];
+            } else if (mp.phase !== "drawing") {
+              drawingHintRows = [];
             }
 
             return {
@@ -296,6 +310,7 @@ export function useHostCreateRoom(
               wordChoiceOffer,
               wordChoicePickError,
               remoteCanvasCommits: nextCommits,
+              drawingHintRows,
               ...(mp.phase === "lobby" ? { isStartPending: false } : {}),
             };
           });
@@ -392,6 +407,28 @@ export function useHostCreateRoom(
           setState((prev) => {
             if (prev.status !== "lobby") return prev;
             return { ...prev, isStartPending: false };
+          });
+          return;
+        }
+        case "drawingHintTick": {
+          const h = parsed.data;
+          setState((prev) => {
+            if (prev.status !== "lobby") return prev;
+            if (h.roomId !== prev.roomId) return prev;
+            if (prev.phase !== "drawing") return prev;
+            if (prev.matchRoundIndex !== h.matchRoundIndex) {
+              return prev;
+            }
+            const row: MatchHintFeedRow = {
+              hintIndex: h.hintIndex,
+              maskedWord: h.maskedWord,
+              totalLetters: h.totalLetters,
+              revealedLetterCount: h.revealedLetterCount,
+            };
+            return {
+              ...prev,
+              drawingHintRows: appendDrawingHintRows(prev.drawingHintRows, row),
+            };
           });
           return;
         }

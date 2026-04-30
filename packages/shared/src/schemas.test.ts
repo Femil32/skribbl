@@ -221,6 +221,32 @@ describe("serverEventSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts drawingHintTick", () => {
+    const result = serverEventSchema.safeParse({
+      type: "drawingHintTick",
+      roomId: "550e8400-e29b-41d4-a716-446655440000",
+      matchRoundIndex: 0,
+      hintIndex: 2,
+      maskedWord: `\u25CF\u25CFapple`,
+      totalLetters: 5,
+      revealedLetterCount: 3,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects drawingHintTick when revealedLetterCount exceeds totalLetters", () => {
+    const result = serverEventSchema.safeParse({
+      type: "drawingHintTick",
+      roomId: "550e8400-e29b-41d4-a716-446655440000",
+      matchRoundIndex: 0,
+      hintIndex: 2,
+      maskedWord: "hello",
+      totalLetters: 5,
+      revealedLetterCount: 6,
+    });
+    expect(result.success).toBe(false);
+  });
+
   it("accepts drawingStrokeCommitted", () => {
     const result = serverEventSchema.safeParse({
       type: "drawingStrokeCommitted",

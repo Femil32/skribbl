@@ -16,11 +16,20 @@ export {
   type RoomPhase,
   type LobbyRosterPlayer,
   type DrawingStrokeCommitted,
+  type DrawingHintTick,
   type DrawingCanvasOpCommitted,
   type DrawingCanvasOpPayload,
   type CanvasReplayEvent,
   type DrawingStrokePoint,
 } from "./schemas.js";
+export {
+  HINT_MASK_CHAR,
+  eligibleLetterIndices,
+  buildMaskedWord,
+  shuffleIndicesDeterministic,
+  hintRevealOrderSeed,
+  computeTotalLetters,
+} from "./hint-mask.js";
 export {
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,

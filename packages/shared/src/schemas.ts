@@ -233,6 +233,23 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     phaseDeadlineMs: z.number(),
   }),
   /**
+   * Periodic letter-reveal ticks during **`drawing`** (Story 2.5). Guessers derive UI only from
+   * authoritative **`maskedWord`**; **`HINT_MASK_CHAR`** in **`@skribbl/shared`/hint-mask** documents the glyph.
+   */
+  z
+    .object({
+      type: z.literal("drawingHintTick"),
+      roomId: z.string(),
+      matchRoundIndex: z.number().int().nonnegative(),
+      hintIndex: z.number().int().nonnegative(),
+      maskedWord: z.string(),
+      totalLetters: z.number().int().nonnegative(),
+      revealedLetterCount: z.number().int().nonnegative(),
+    })
+    .refine((d) => d.revealedLetterCount <= d.totalLetters, {
+      message: "revealedLetterCount must be <= totalLetters",
+    }),
+  /**
    * Drawer receives ack; all peers receive the same chunk with authoritative sequence (Story 3.4).
    * Drawer should ignore applies for `senderPlayerId === localPlayerId` because local ink is already rendered.
    */
@@ -263,6 +280,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
 export type ClientCommand = z.infer<typeof clientCommandSchema>;
 export type ServerEvent = z.infer<typeof serverEventSchema>;
 export type DrawingStrokeCommitted = Extract<ServerEvent, { type: "drawingStrokeCommitted" }>;
+export type DrawingHintTick = Extract<ServerEvent, { type: "drawingHintTick" }>;
 export type DrawingCanvasOpCommitted = Extract<
   ServerEvent,
   { type: "drawingCanvasOpCommitted" }

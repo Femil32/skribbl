@@ -1,11 +1,16 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import {
+  buildMaskedWord,
   computeGuesserPoints,
+  computeTotalLetters,
+  eligibleLetterIndices,
+  hintRevealOrderSeed,
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,
   isValidRoomCodeForJoin,
   normalizeRoomCode,
   serializeServerEvent,
+  shuffleIndicesDeterministic,
   type ClientCommand,
   type LobbyRosterPlayer,
   type DrawingCanvasOpPayload,
@@ -15,6 +20,8 @@ import type { WebSocket } from "ws";
 import {
   resolveDrawerAssistPerCorrect,
   resolveGuesserScoreBracket,
+  HINT_SCHEDULE_BEFORE_ROUND_END_MS,
+  resolveHintCadenceMs,
   resolveInterRoundGapMs,
   resolveMaxPlayers,
   resolveMatchStartHandshakeMs,
@@ -154,11 +161,61 @@ export class RoomManager {
     room.drawingPhaseStartedAtMs = Date.now();
     room.drawingPhaseAwardedGuesserIds = new Set();
     const roundMs = resolveRoundMs();
+    const cadenceMs = resolveHintCadenceMs();
     const drawingEndsAt = Date.now() + roundMs;
     this.broadcastMatchPhase(room, drawingEndsAt, drawerId, roundIndex);
-    /** Story 2.4: timer expiry → `roundResult`. Epic 4: clear this timeout on correct guess and transition early (see `clearMatchTimers` / guess adjudication). */
+
+    const seed = hintRevealOrderSeed({
+      roomId: room.id,
+      matchRoundIndex: roundIndex,
+      secretWord: word,
+    });
+    const indices = shuffleIndicesDeterministic(eligibleLetterIndices(word), seed);
+    const eligibleCount = indices.length;
+    const maxSlots = Math.max(
+      0,
+      Math.floor((roundMs - HINT_SCHEDULE_BEFORE_ROUND_END_MS) / cadenceMs),
+    );
+    const tickCount = Math.min(eligibleCount, maxSlots);
+    const totalLetters = computeTotalLetters(word);
+    /** Epic 4: early correct guess should **`clearMatchTimers`** / reuse drawing-end teardown so hints never leak past **`drawing`. */
+    const revealedPositions = new Set<number>();
+    const secretSnapshot = word;
+    const roomSnapshotId = room.id;
+
+    for (let hintIdx = 0; hintIdx < tickCount; hintIdx++) {
+      const revealPos = indices[hintIdx]!;
+      const delayMs = cadenceMs * (hintIdx + 1);
+      const hintTimer = setTimeout(() => {
+        if (!this.roomsById.get(roomSnapshotId) || room.phase !== "drawing") return;
+        if (room.matchRoundIndex !== roundIndex) return;
+
+        revealedPositions.add(revealPos);
+        const revealedLetterCount = revealedPositions.size;
+        const maskedWord = buildMaskedWord(secretSnapshot, revealedPositions);
+        const tick: ServerEvent = {
+          type: "drawingHintTick",
+          roomId: room.id,
+          matchRoundIndex: roundIndex,
+          hintIndex: hintIdx,
+          maskedWord,
+          totalLetters,
+          revealedLetterCount,
+        };
+        for (const sock of room.sockets) {
+          this.sendEvent(sock, tick);
+        }
+      }, delayMs);
+      timeouts.push(hintTimer);
+    }
+
+    /** Story 2.4–2.5: clear every queued **`setTimeout`** (hint ticks + drawing end) before inter-round timers. Epic 4: mirror on early correct guess (`clearMatchTimers`). */
     const drawingEnd = setTimeout(() => {
       if (!this.roomsById.get(room.id) || room.phase !== "drawing") return;
+
+      for (const t of timeouts) clearTimeout(t);
+      timeouts.length = 0;
+
       room.phase = "roundResult";
       room.drawingPhaseStartedAtMs = null;
       room.drawingPhaseAwardedGuesserIds = null;

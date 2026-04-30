@@ -23,6 +23,10 @@ import {
 import type { LobbyConnectionReason, LobbyTransportPhase } from "@/features/lobby/lib/lobby-transport";
 import { missingGameWebSocketUrlUserMessage, resolveGameWebSocketUrl } from "@/lib/game-ws-url";
 import { serializeChooseWordCommand, serializeJoinRoomCommand } from "@/lib/ws-client";
+import {
+  appendDrawingHintRows,
+  type MatchHintFeedRow,
+} from "@/features/lobby/lib/drawing-hint-rows";
 
 export type GuestJoinLobbyState =
   | { status: "idle" }
@@ -49,6 +53,7 @@ export type GuestJoinLobbyState =
       wordChoicePickError?: string | null;
       /** Replay buffer (Story 3.5–3.6); cleared on lobby or new match round. */
       remoteCanvasCommits: CanvasReplayEvent[];
+      drawingHintRows: MatchHintFeedRow[];
     }
   | {
       /** Server `error.code` when the failure came from an `error` event; omit for generic failures. */
@@ -213,6 +218,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
             wordChoiceOffer: null,
             wordChoicePickError: null,
             remoteCanvasCommits: [],
+            drawingHintRows: [],
           });
           setTransport("live");
           return;
@@ -263,13 +269,20 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
               mp.phaseDeadlineMs !== undefined ? mp.phaseDeadlineMs : undefined;
 
             let nextCommits = prev.remoteCanvasCommits;
-            if (mp.phase === "lobby") nextCommits = [];
-            else if (
+            let drawingHintRows = prev.drawingHintRows;
+            const roundBump =
               prev.matchRoundIndex !== undefined &&
               mp.matchRoundIndex !== undefined &&
-              mp.matchRoundIndex !== prev.matchRoundIndex
-            ) {
+              mp.matchRoundIndex !== prev.matchRoundIndex;
+
+            if (mp.phase === "lobby") {
               nextCommits = [];
+              drawingHintRows = [];
+            } else if (roundBump) {
+              nextCommits = [];
+              drawingHintRows = [];
+            } else if (mp.phase !== "drawing") {
+              drawingHintRows = [];
             }
 
             return {
@@ -281,6 +294,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
               wordChoiceOffer,
               wordChoicePickError,
               remoteCanvasCommits: nextCommits,
+              drawingHintRows,
             };
           });
           return;
@@ -364,6 +378,28 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
             });
             return;
           }
+          return;
+        }
+        case "drawingHintTick": {
+          const h = parsed.data;
+          setState((prev) => {
+            if (prev.status !== "joined") return prev;
+            if (h.roomId !== prev.roomId) return prev;
+            if (prev.phase !== "drawing") return prev;
+            if (prev.matchRoundIndex !== h.matchRoundIndex) {
+              return prev;
+            }
+            const row: MatchHintFeedRow = {
+              hintIndex: h.hintIndex,
+              maskedWord: h.maskedWord,
+              totalLetters: h.totalLetters,
+              revealedLetterCount: h.revealedLetterCount,
+            };
+            return {
+              ...prev,
+              drawingHintRows: appendDrawingHintRows(prev.drawingHintRows, row),
+            };
+          });
           return;
         }
         case "pong":

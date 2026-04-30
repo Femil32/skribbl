@@ -129,6 +129,31 @@ export function resolveInterRoundGapMs(): number {
   return DEFAULT_INTER_ROUND_GAP_MS;
 }
 
+/** Default interval between **`drawingHintTick`** emissions (Story 2.5 / FR9). Override: **`HINT_CADENCE_MS`**. */
+export const DEFAULT_HINT_CADENCE_MS = 8_000;
+
+/**
+ * Leaves this many milliseconds before **`ROUND_MS`** when budgeting hint slots so drawing-end and the
+ * final tick rarely race: `maxTicks ≈ floor((ROUND_MS − margin) / HINT_CADENCE_MS)` (paired with **`resolveRoundMs`**).
+ */
+export const HINT_SCHEDULE_BEFORE_ROUND_END_MS = 500;
+
+let didWarnInvalidHintCadence = false;
+
+export function resolveHintCadenceMs(): number {
+  const raw = process.env.HINT_CADENCE_MS;
+  if (!raw) return DEFAULT_HINT_CADENCE_MS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isFinite(n) && n >= 2_000 && n <= 60_000) return n;
+  if (!didWarnInvalidHintCadence) {
+    didWarnInvalidHintCadence = true;
+    console.warn(
+      `[game] HINT_CADENCE_MS env invalid (${JSON.stringify(raw)}); using ${DEFAULT_HINT_CADENCE_MS} (allowed 2000–60000)`,
+    );
+  }
+  return DEFAULT_HINT_CADENCE_MS;
+}
+
 /** Max guesser points at instant solve (elapsed 0). Override: `GUESSER_SCORE_MAX`. */
 export const DEFAULT_GUESSER_SCORE_MAX = 100;
 

@@ -10,6 +10,7 @@ import { createStaticWordBank } from "./words/word-bank.js";
 import {
   resolveInterRoundGapMs,
   resolveMatchStartHandshakeMs,
+  resolveHintCadenceMs,
   resolveRoundMs,
   resolveWordChoiceMs,
 } from "./config/game.js";
@@ -860,6 +861,86 @@ describe("handleClientCommand + RoomManager", () => {
       const last = parseServerEvent(JSON.parse(drawerSent.at(-1)!));
       expect(last.type).toBe("error");
       if (last.type === "error") expect(last.code).toBe("BAD_ROOM");
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
+
+  it("drawingHintTick: hints fire on cadence until round end; none after teardown", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.stubEnv("ROUND_MS", "120000");
+    vi.stubEnv("HINT_CADENCE_MS", "2000");
+    vi.useFakeTimers();
+    try {
+      const rm = new RoomManager(8, integrationWordBank());
+      const host = captureWs();
+      const guest = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        guest.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+      vi.advanceTimersByTime(resolveWordChoiceMs());
+
+      const room = rm.getRoomForSocket(host.ws);
+      expect(room).toBeDefined();
+      if (!room) throw new Error("unexpected");
+
+      const drawerId = room.currentDrawerPlayerId!;
+      const drawerWs = drawerId === created.playerId ? host.ws : guest.ws;
+
+      handleClientCommand(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
+      expect(room.phase).toBe("drawing");
+      const secret = room.roundSecretWord;
+      expect(secret).toBeTruthy();
+
+      function hostHints() {
+        return host.sent
+          .map((line) => parseServerEvent(JSON.parse(line)))
+          .filter((e): e is Extract<typeof e, { type: "drawingHintTick" }> =>
+            Boolean(e.type === "drawingHintTick"),
+          );
+      }
+
+      vi.advanceTimersByTime(resolveHintCadenceMs());
+      vi.advanceTimersByTime(resolveHintCadenceMs());
+
+      let hints = hostHints();
+      expect(hints.length).toBeGreaterThanOrEqual(2);
+      expect(hints[1]!.hintIndex).toBeGreaterThan(hints[0]!.hintIndex);
+
+      vi.advanceTimersByTime(resolveHintCadenceMs() * 50);
+      hints = hostHints();
+      expect(hints.length).toBeGreaterThan(0);
+
+      const lastFully = hints[hints.length - 1]!;
+      expect(lastFully.revealedLetterCount).toBe(lastFully.totalLetters);
+      expect(lastFully.maskedWord).toBe(secret);
+
+      const countAtFreeze = hints.length;
+
+      vi.advanceTimersByTime(resolveRoundMs());
+
+      hints = hostHints();
+      expect(hints.length).toBe(countAtFreeze);
+
+      vi.advanceTimersByTime(10 * 60_000);
+      hints = hostHints();
+      expect(hints.length).toBe(countAtFreeze);
+      expect(room.phase).not.toBe("drawing");
+
+      hints.forEach((h, i) => {
+        expect(h.hintIndex).toBe(i);
+      });
     } finally {
       vi.unstubAllEnvs();
       vi.useRealTimers();

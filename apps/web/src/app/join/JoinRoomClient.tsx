@@ -21,6 +21,7 @@ import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster
 import { MatchDrawingColumn } from "@/features/game/components/MatchDrawingColumn";
 import { PhaseBar } from "@/features/match/components/PhaseBar";
 import { ScoreboardSummary } from "@/features/match/components/ScoreboardSummary";
+import { MatchHintFeed } from "@/features/match/components/MatchHintFeed";
 import { WordChoicePanel } from "@/features/match/components/WordChoicePanel";
 
 const formatHintId = "join-room-code-format-hint";
@@ -266,6 +267,17 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                   drawerPlayerId={guestState.drawerPlayerId}
                   matchRoundIndex={guestState.matchRoundIndex}
                   phaseDeadlineMs={guestState.phaseDeadlineMs}
+                />
+              ) : null}
+              {guestState.phase === "drawing" ? (
+                <MatchHintFeed
+                  rows={guestState.drawingHintRows}
+                  suppressForDrawer={
+                    Boolean(
+                      guestState.drawerPlayerId &&
+                        guestState.playerId === guestState.drawerPlayerId,
+                    )
+                  }
                 />
               ) : null}
               {guestState.phase === "matchEnded" ? (
