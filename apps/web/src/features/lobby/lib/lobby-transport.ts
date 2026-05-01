@@ -19,6 +19,8 @@ export type LobbyBannerPresentation = {
   title: string;
   description?: string;
   showRetry: boolean;
+  /** Full page reload affordance (e.g. missing WS URL or browser blocked sockets). */
+  showReload: boolean;
 };
 
 /**
@@ -44,6 +46,7 @@ export function lobbyConnectionBannerModel(input: {
       title: "Real-time play is not available",
       description: errorMessage,
       showRetry: false,
+      showReload: true,
     };
   }
 
@@ -54,6 +57,7 @@ export function lobbyConnectionBannerModel(input: {
       title: "Could not reach the game server",
       description: errorMessage,
       showRetry: true,
+      showReload: false,
     };
   }
 
@@ -65,6 +69,7 @@ export function lobbyConnectionBannerModel(input: {
       description:
         "The live connection dropped. Check your network, then retry. If it keeps happening, the host or your network may be blocking WebSockets.",
       showRetry: true,
+      showReload: false,
     };
   }
 
@@ -76,6 +81,7 @@ export function lobbyConnectionBannerModel(input: {
       description:
         "Hang tight — the server is resuming your seat after a connection drop or manual retry.",
       showRetry: false,
+      showReload: false,
     };
   }
 
@@ -93,6 +99,7 @@ export function lobbyConnectionBannerModel(input: {
           ? "Establishing a fresh connection."
           : "Starting a secure realtime session.",
       showRetry: false,
+      showReload: false,
     };
   }
 
@@ -104,6 +111,7 @@ export function lobbyConnectionBannerModel(input: {
         title: "Connected",
         description: "Finishing room setup…",
         showRetry: false,
+        showReload: false,
       };
     }
     return {
@@ -112,6 +120,7 @@ export function lobbyConnectionBannerModel(input: {
       title: "Live",
       description: "Realtime connection is active.",
       showRetry: false,
+      showReload: false,
     };
   }
 

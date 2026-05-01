@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useCallback, useState } from "react";
 import type { AvatarPresetId } from "@skribbl/shared";
 import {
   DEFAULT_AVATAR_PRESET_ID,
@@ -142,6 +142,10 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
     setJoinGeneration((n) => n + 1);
   };
 
+  const reloadFullPage = useCallback(() => {
+    if (typeof window !== "undefined") window.location.reload();
+  }, []);
+
   const connecting = guestState.status === "connecting";
   const bannerErrorDetail =
     guestState.status === "error" ? guestState.message : guestTransportError;
@@ -224,6 +228,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
           onRetry={
             guestTransport === "disconnected" ? bumpGuestConnection : undefined
           }
+          onReload={guestTransport === "blocked" ? reloadFullPage : undefined}
         />
         <div className="flex flex-1 flex-col items-center justify-center p-8">
           <div
@@ -391,6 +396,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
         errorMessage={bannerErrorDetail}
         awaitingRoomHandshake={guestAwaitingHandshake}
         onRetry={bannerOnRetry}
+        onReload={guestTransport === "blocked" ? reloadFullPage : undefined}
       />
       <div className="flex flex-1 flex-col items-center justify-center p-8">
         <div className="card bg-base-100 shadow-xl w-full max-w-lg">

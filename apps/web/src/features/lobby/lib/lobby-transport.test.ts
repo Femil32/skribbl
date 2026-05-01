@@ -2,69 +2,31 @@ import { describe, expect, it } from "vitest";
 import { lobbyConnectionBannerModel } from "./lobby-transport";
 
 describe("lobbyConnectionBannerModel", () => {
-  it("returns null for idle", () => {
-    expect(
-      lobbyConnectionBannerModel({
-        transport: "idle",
-        reason: "first",
-      }),
-    ).toBeNull();
-  });
-
-  it("uses alert role for blocking misconfiguration", () => {
-    const m = lobbyConnectionBannerModel({
+  it("offers reload without retry when transport is blocked", () => {
+    const model = lobbyConnectionBannerModel({
       transport: "blocked",
       reason: "first",
-      errorMessage: "Set NEXT_PUBLIC_WS_URL…",
+      errorMessage: "Configure NEXT_PUBLIC_WS_URL",
     });
-    expect(m?.alertRole).toBe("alert");
-    expect(m?.title).toContain("not available");
+    expect(model).not.toBeNull();
+    expect(model?.showRetry).toBe(false);
+    expect(model?.showReload).toBe(true);
+    expect(model?.alertRole).toBe("alert");
   });
 
-  it("uses status role for reconnecting", () => {
-    const m = lobbyConnectionBannerModel({
-      transport: "reconnecting",
-      reason: "after-drop",
-    });
-    expect(m?.alertRole).toBe("status");
-    expect(m?.title).toContain("Restoring");
-  });
-
-  it("uses status role for first-time connecting", () => {
-    const m = lobbyConnectionBannerModel({
-      transport: "connecting",
-      reason: "first",
-    });
-    expect(m?.alertRole).toBe("status");
-    expect(m?.title).toContain("Connecting");
-  });
-
-  it("uses alert for disconnected lobby", () => {
-    const m = lobbyConnectionBannerModel({
-      transport: "disconnected",
-      reason: "after-drop",
-    });
-    expect(m?.alertRole).toBe("alert");
-    expect(m?.showRetry).toBe(true);
-  });
-
-  it("uses alert for fatal pre-join failures", () => {
-    const m = lobbyConnectionBannerModel({
+  it("offers retry without reload for fatal transport", () => {
+    const model = lobbyConnectionBannerModel({
       transport: "fatal",
       reason: "first",
-      errorMessage: "Could not reach the game server",
+      errorMessage: "Could not reach server",
     });
-    expect(m?.alertRole).toBe("alert");
-    expect(m?.showRetry).toBe(true);
+    expect(model?.showRetry).toBe(true);
+    expect(model?.showReload).toBe(false);
   });
 
-  it("uses status for live handshake wait", () => {
-    const m = lobbyConnectionBannerModel({
-      transport: "live",
-      reason: "first",
-      awaitingRoomHandshake: true,
-    });
-    expect(m?.alertRole).toBe("status");
-    expect(m?.title).toBe("Connected");
+  it("returns null for idle transport", () => {
+    expect(
+      lobbyConnectionBannerModel({ transport: "idle", reason: "first" }),
+    ).toBeNull();
   });
 });

@@ -10,6 +10,8 @@ export type LobbyConnectionBannerProps = {
   awaitingRoomHandshake?: boolean;
   onRetry?: () => void;
   retryLabel?: string;
+  onReload?: () => void;
+  reloadLabel?: string;
 };
 
 /**
@@ -24,6 +26,8 @@ export function LobbyConnectionBanner(props: LobbyConnectionBannerProps) {
     awaitingRoomHandshake,
     onRetry,
     retryLabel = "Retry connection",
+    onReload,
+    reloadLabel = "Reload page",
   } = props;
 
   const model = lobbyConnectionBannerModel({
@@ -35,7 +39,26 @@ export function LobbyConnectionBanner(props: LobbyConnectionBannerProps) {
 
   if (!model) return null;
 
-  const { alertRole, alertClass, title, description, showRetry } = model;
+  const { alertRole, alertClass, title, description, showRetry, showReload } = model;
+
+  const retrySlot =
+    showRetry && onRetry ? (
+      <button type="button" className="btn btn-primary btn-sm shrink-0" onClick={onRetry}>
+        {retryLabel}
+      </button>
+    ) : null;
+
+  const reloadSlot =
+    showReload && onReload ? (
+      <button type="button" className="btn btn-outline btn-primary btn-sm shrink-0" onClick={onReload}>
+        {reloadLabel}
+      </button>
+    ) : null;
+
+  const actionsSlot =
+    retrySlot || reloadSlot ? (
+      <div className="flex flex-wrap gap-2 shrink-0 justify-end">{retrySlot}{reloadSlot}</div>
+    ) : null;
 
   return (
     <div
@@ -50,11 +73,7 @@ export function LobbyConnectionBanner(props: LobbyConnectionBannerProps) {
             <p className="text-base-content/90 mt-0.5">{description}</p>
           ) : null}
         </div>
-        {showRetry && onRetry ? (
-          <button type="button" className="btn btn-primary btn-sm shrink-0" onClick={onRetry}>
-            {retryLabel}
-          </button>
-        ) : null}
+        {actionsSlot}
       </div>
     </div>
   );

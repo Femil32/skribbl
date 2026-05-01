@@ -44,4 +44,19 @@ describe("LobbyConnectionBanner", () => {
     await user.click(screen.getByRole("button", { name: /retry connection/i }));
     expect(onRetry).toHaveBeenCalledOnce();
   });
+
+  it("shows Reload page for blocked transport when onReload provided", async () => {
+    const user = userEvent.setup();
+    const onReload = vi.fn();
+    render(
+      <LobbyConnectionBanner
+        transport="blocked"
+        reason="first"
+        errorMessage="Real-time requires configuration."
+        onReload={onReload}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /reload page/i }));
+    expect(onReload).toHaveBeenCalledOnce();
+  });
 });

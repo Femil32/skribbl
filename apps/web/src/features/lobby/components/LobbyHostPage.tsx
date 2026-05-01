@@ -101,6 +101,10 @@ export function LobbyHostPage() {
     setAttemptId((n) => n + 1);
   }, []);
 
+  const reloadFullPage = useCallback(() => {
+    if (typeof window !== "undefined") window.location.reload();
+  }, []);
+
   const [toast, setToast] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
   const [brushColor, setBrushColor] = useState("#0f172a");
@@ -245,6 +249,7 @@ export function LobbyHostPage() {
               ? bumpConnectionAttempt
               : undefined
           }
+          onReload={transport === "blocked" ? reloadFullPage : undefined}
         />
         <div className="flex flex-1 flex-col items-center justify-center p-8">
           <div className="card bg-base-100 shadow-xl w-full max-w-lg">
