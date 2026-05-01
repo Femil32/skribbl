@@ -1,5 +1,5 @@
 # generated: 2026-04-29T12:00:00Z
-# last_updated: 2026-04-30 (2-5 story file created → ready-for-dev)
+# last_updated: 2026-05-01 (4-2 → done)
 # project: skribbl
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,8 +35,8 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: '2026-04-29T00:00:00Z'
-last_updated: '2026-04-30T20:15:00Z'
-# Epic 4 done — chat, guess adjudication, scoring hooks, fan-out UX (2026-04-30)
+last_updated: '2026-05-01T22:00:00Z'
+# Epic 4: 4-1–4-2 shipped; 4-3–4-4 remain on the roadmap (tracking below).
 project: skribbl
 project_key: NOKEY
 tracking_system: file-system
@@ -72,11 +72,11 @@ development_status:
   3-6-eraser-fill-clear-semantics-via-op-log: done
   epic-3-retrospective: optional
 
-  epic-4: done
+  epic-4: in-progress
   4-1-chatpanel-composer-realtime-history: done
   4-2-guess-adjudication-exact-match-spoiler-safe-broadcasts: done
-  4-3-score-awards-drawer-bonuses-wiring: done
-  4-4-correct-guess-fan-out-messaging-ux-beats: done
+  4-3-score-awards-drawer-bonuses-wiring: backlog
+  4-4-correct-guess-fan-out-messaging-ux-beats: backlog
   epic-4-retrospective: optional
 
   epic-5: backlog

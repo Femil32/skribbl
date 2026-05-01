@@ -1,6 +1,11 @@
 "use client";
 
-import type { ServerEvent } from "@skribbl/shared";
+import {
+  assertChatMessageLength,
+  CHAT_MESSAGE_MAX_GRAPHEMES,
+  sanitizeChatMessage,
+  type ServerEvent,
+} from "@skribbl/shared";
 import { FormEvent, useEffect, useRef, useState } from "react";
 
 export type MatchChatFeedEvent = Extract<
@@ -17,12 +22,12 @@ type MatchChatPanelProps = {
   disabled: boolean;
 };
 
-function lineForCorrectGuess(
+/** Exported for unit tests — AC6: prefer server facts only (revealedWord vs censoredAnnouncement). */
+export function lineForCorrectGuess(
   ev: Extract<MatchChatFeedEvent, { type: "chatCorrectGuess" }>,
 ): string {
-  if (ev.revealedWord !== undefined && ev.revealedWord !== "") {
-    return `${ev.guesserDisplayName} guessed: ${ev.revealedWord}`;
-  }
+  const revealed = ev.revealedWord?.trim();
+  if (revealed) return `${ev.guesserDisplayName} guessed: ${revealed}`;
   return ev.censoredAnnouncement;
 }
 
@@ -50,9 +55,14 @@ export function MatchChatPanel({ localPlayerId, feed, onSend, disabled }: MatchC
     e.preventDefault();
     const t = draft.trim();
     if (t === "" || disabled) return;
+    if (!assertChatMessageLength(sanitizeChatMessage(t)).ok) return;
     onSend(t);
     setDraft("");
   }
+
+  const trimmedDraft = draft.trim();
+  const chatLengthOk =
+    trimmedDraft === "" || assertChatMessageLength(sanitizeChatMessage(trimmedDraft)).ok;
 
   return (
     <section
@@ -115,29 +125,39 @@ export function MatchChatPanel({ localPlayerId, feed, onSend, disabled }: MatchC
         })}
       </ol>
       <form
-        className="shrink-0 flex gap-2 p-2 border-t border-base-300 bg-base-100 rounded-b-box"
+        className="shrink-0 flex flex-col gap-1 p-2 border-t border-base-300 bg-base-100 rounded-b-box"
         onSubmit={onSubmit}
       >
-        <label className="sr-only" htmlFor="match-chat-composer">
-          Type a guess in chat
-        </label>
-        <input
-          id="match-chat-composer"
-          data-testid="chat-composer-input"
-          className="input input-bordered input-sm flex-1 min-w-0"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          disabled={disabled}
-          maxLength={600}
-          autoComplete="off"
-        />
-        <button
-          type="submit"
-          className="btn btn-sm btn-primary shrink-0"
-          disabled={disabled || draft.trim() === ""}
-        >
-          Send
-        </button>
+        <div className="flex gap-2">
+          <label className="sr-only" htmlFor="match-chat-composer">
+            Type a guess in chat
+          </label>
+          <input
+            id="match-chat-composer"
+            data-testid="chat-composer-input"
+            className="input input-bordered input-sm flex-1 min-w-0"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            disabled={disabled}
+            autoComplete="off"
+            aria-invalid={trimmedDraft !== "" && !chatLengthOk}
+            aria-describedby={
+              trimmedDraft !== "" && !chatLengthOk ? "match-chat-composer-limit" : undefined
+            }
+          />
+          <button
+            type="submit"
+            className="btn btn-sm btn-primary shrink-0"
+            disabled={disabled || trimmedDraft === "" || !chatLengthOk}
+          >
+            Send
+          </button>
+        </div>
+        {trimmedDraft !== "" && !chatLengthOk ? (
+          <p id="match-chat-composer-limit" className="text-xs text-error px-1" role="alert">
+            Message is too long (max {CHAT_MESSAGE_MAX_GRAPHEMES} graphemes).
+          </p>
+        ) : null}
       </form>
     </section>
   );

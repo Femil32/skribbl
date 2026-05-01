@@ -476,7 +476,9 @@ export class RoomManager {
     const drawerId = room.currentDrawerPlayerId;
     const inDrawing = room.phase === "drawing";
     const normalizedSecret =
-      secret && inDrawing ? normalizeGuessText(secret) : null;
+      secret && inDrawing
+        ? normalizeGuessText(sanitizeChatMessage(secret))
+        : null;
     const normalizedMsg = normalizeGuessText(sanitized);
     const isExact = Boolean(
       normalizedSecret &&

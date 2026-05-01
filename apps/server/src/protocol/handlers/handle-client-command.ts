@@ -41,6 +41,33 @@ function parseLobbyPlayer(cmd: {
   };
 }
 
+function chatMessageErrorDetail(code: string): string {
+  switch (code) {
+    case "BAD_ROOM":
+      return "That room doesn't match your connection.";
+    case "CHAT_EMPTY":
+      return "Message was empty after cleanup.";
+    case "CHAT_TOO_LONG":
+      return "Message is too long.";
+    case "WRONG_PHASE":
+      return "That action isn't available in this phase.";
+    case "GUESSER_IS_DRAWER":
+      return "The drawer can't score as a guesser.";
+    case "UNKNOWN_ROOM":
+      return "That room no longer exists.";
+    case "NO_DRAWER":
+      return "There is no active drawer for this round.";
+    case "NOT_IN_MATCH":
+      return "You are not in this match.";
+    case "NO_DRAWING_START":
+      return "Drawing has not started yet.";
+    case "INTERNAL":
+      return "Something went wrong. Try again.";
+    default:
+      return "Message could not be sent.";
+  }
+}
+
 function sendServerEvent(
   ws: WebSocket,
   event: ServerEvent,
@@ -345,17 +372,7 @@ export function handleClientCommand(
         sendProtocolError(
           ws,
           outcome.code,
-          outcome.code === "BAD_ROOM"
-            ? "That room doesn't match your connection."
-            : outcome.code === "CHAT_EMPTY"
-              ? "Message was empty after cleanup."
-              : outcome.code === "CHAT_TOO_LONG"
-                ? "Message is too long."
-                : outcome.code === "WRONG_PHASE"
-                  ? "That action isn't available in this phase."
-                  : outcome.code === "GUESSER_IS_DRAWER"
-                    ? "The drawer can't score as a guesser."
-                    : "Message could not be sent.",
+          chatMessageErrorDetail(outcome.code),
           roomManager,
         );
       }
