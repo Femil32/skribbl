@@ -39,6 +39,10 @@ export function isRosterScoreVisiblePhase(phase: RoomPhase): boolean {
   return isMatchFlowPhase(phase) || phase === "matchEnded";
 }
 
+/** Authoritative socket presence for roster rows (Story 5.3). Omitted on wire → `connected`. */
+export const rosterConnectionStatusSchema = z.enum(["connected", "disconnected"]);
+export type RosterConnectionStatus = z.infer<typeof rosterConnectionStatusSchema>;
+
 export const lobbyRosterPlayerSchema = z.object({
   playerId: z.string(),
   displayName: z.string(),
@@ -46,6 +50,11 @@ export const lobbyRosterPlayerSchema = z.object({
   isHost: z.boolean(),
   /** Running total for the match (FR10); omitted on wire is treated as 0 in parsers. */
   score: z.number().int().nonnegative().default(0),
+  /**
+   * Mid-match disconnect: seat retained in `awaitingReconnect` but socket gone.
+   * Default `connected` preserves older payloads.
+   */
+  connectionStatus: rosterConnectionStatusSchema.default("connected"),
 });
 
 export type LobbyRosterPlayer = z.infer<typeof lobbyRosterPlayerSchema>;

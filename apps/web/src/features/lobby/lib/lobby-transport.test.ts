@@ -27,7 +27,7 @@ describe("lobbyConnectionBannerModel", () => {
       reason: "after-drop",
     });
     expect(m?.alertRole).toBe("status");
-    expect(m?.title).toContain("Reconnecting");
+    expect(m?.title).toContain("Restoring");
   });
 
   it("uses status role for first-time connecting", () => {

@@ -750,6 +750,123 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
+  it("drawing: guest disconnect lists them as disconnected on lobbyRoster; reconnect clears flag", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.useFakeTimers();
+    try {
+      const rm = new RoomManager(8, integrationWordBank());
+      const host = captureWs();
+      const guest = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        guest.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+      const guestJoined = parseServerEvent(JSON.parse(guest.sent[0]!));
+      if (guestJoined.type !== "roomJoined") throw new Error("unexpected");
+      const guestPlayerId = guestJoined.playerId;
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+      vi.advanceTimersByTime(resolveWordChoiceMs());
+
+      const room = rm.getRoomForSocket(host.ws);
+      if (!room) throw new Error("unexpected");
+      const drawerId = room.currentDrawerPlayerId!;
+      const drawerCapt = drawerId === created.playerId ? host : guest;
+      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
+      expect(room.phase).toBe("drawing");
+
+      rm.leaveSocketRoom(guest.ws);
+
+      const rosterEv = lastLobbyRoster(host.sent);
+      expect(rosterEv?.type).toBe("lobbyRoster");
+      if (rosterEv?.type !== "lobbyRoster") throw new Error("unexpected");
+      expect(rosterEv.players).toHaveLength(2);
+      const dropped = rosterEv.players.find((p) => p.playerId === guestPlayerId);
+      expect(dropped?.connectionStatus).toBe("disconnected");
+      expect(dropped?.isHost).toBe(false);
+      const hostLive = rosterEv.players.find((p) => p.playerId === created.playerId);
+      expect(hostLive?.connectionStatus).toBe("connected");
+      expect(hostLive?.isHost).toBe(true);
+
+      const guestAgain = captureWs();
+      handleClientCommand(
+        guestAgain.ws,
+        {
+          type: "reconnectPlayer",
+          roomId: room.id,
+          playerId: guestPlayerId,
+          ...guestIdentity,
+        },
+        rm,
+      );
+      const rejoined = parseServerEvent(JSON.parse(guestAgain.sent[0]!));
+      expect(rejoined.type).toBe("roomJoined");
+
+      const rosterAfter = lastLobbyRoster(host.sent);
+      expect(rosterAfter?.type).toBe("lobbyRoster");
+      if (rosterAfter?.type !== "lobbyRoster") throw new Error("unexpected");
+      expect(rosterAfter.players.find((p) => p.playerId === guestPlayerId)?.connectionStatus).toBe(
+        "connected",
+      );
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
+
+  it("drawing: host disconnect keeps Host roster row via hostPlayerId while disconnected", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.useFakeTimers();
+    try {
+      const rm = new RoomManager(8, integrationWordBank());
+      const host = captureWs();
+      const guest = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        guest.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+      vi.advanceTimersByTime(resolveWordChoiceMs());
+
+      const room = rm.getRoomForSocket(host.ws);
+      if (!room) throw new Error("unexpected");
+      const drawerId = room.currentDrawerPlayerId!;
+      const drawerCapt = drawerId === created.playerId ? host : guest;
+      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
+      expect(room.phase).toBe("drawing");
+
+      rm.leaveSocketRoom(host.ws);
+
+      const rosterEv = lastLobbyRoster(guest.sent);
+      expect(rosterEv?.type).toBe("lobbyRoster");
+      if (rosterEv?.type !== "lobbyRoster") throw new Error("unexpected");
+      const hostRow = rosterEv.players.find((p) => p.playerId === created.playerId);
+      expect(hostRow?.connectionStatus).toBe("disconnected");
+      expect(hostRow?.isHost).toBe(true);
+      const guestRow = rosterEv.players.find((p) => p.playerId !== created.playerId);
+      expect(guestRow?.connectionStatus).toBe("connected");
+      expect(guestRow?.isHost).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
+
   it("chatMessage exact guess wires computeGuesserPoints + drawer assist and sends lobbyRoster before chatCorrectGuess", () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.stubEnv("ROUND_MS", "80000");

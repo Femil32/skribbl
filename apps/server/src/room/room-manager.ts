@@ -98,20 +98,33 @@ export class RoomManager {
 
   /** Sorted by `playerId` (deterministic roster order — Story 1.6). */
   buildLobbyRosterPlayers(room: Room): LobbyRosterPlayer[] {
-    const rows: LobbyRosterPlayer[] = [];
+    const byId = new Map<string, LobbyRosterPlayer>();
+
+    for (const [playerId, stash] of room.awaitingReconnect) {
+      byId.set(playerId, {
+        playerId: stash.playerId,
+        displayName: stash.displayName,
+        avatarPresetId: stash.avatarPresetId,
+        isHost: room.hostPlayerId === playerId,
+        score: room.scoresByPlayerId[playerId] ?? 0,
+        connectionStatus: "disconnected",
+      });
+    }
+
     for (const ws of room.sockets) {
       const identity = this.socketLobbyIdentity.get(ws);
       if (!identity) continue;
-      rows.push({
+      byId.set(identity.playerId, {
         playerId: identity.playerId,
         displayName: identity.displayName,
         avatarPresetId: identity.avatarPresetId,
-        isHost: room.hostSocket === ws,
+        isHost: room.hostPlayerId === identity.playerId,
         score: room.scoresByPlayerId[identity.playerId] ?? 0,
+        connectionStatus: "connected",
       });
     }
-    rows.sort((a, b) => a.playerId.localeCompare(b.playerId));
-    return rows;
+
+    return [...byId.values()].sort((a, b) => a.playerId.localeCompare(b.playerId));
   }
 
   private sendEvent(ws: WebSocket, event: ServerEvent): void {

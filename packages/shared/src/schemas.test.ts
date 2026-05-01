@@ -191,6 +191,29 @@ describe("serverEventSchema", () => {
     expect(row.score).toBe(0);
   });
 
+  it("lobby roster player defaults connectionStatus to connected when omitted", () => {
+    const row = lobbyRosterPlayerSchema.parse({
+      playerId: "a",
+      displayName: "Hue",
+      avatarPresetId: "preset-1",
+      isHost: true,
+      score: 0,
+    });
+    expect(row.connectionStatus).toBe("connected");
+  });
+
+  it("lobby roster player accepts disconnected status", () => {
+    const row = lobbyRosterPlayerSchema.parse({
+      playerId: "a",
+      displayName: "Hue",
+      avatarPresetId: "preset-1",
+      isHost: false,
+      score: 12,
+      connectionStatus: "disconnected",
+    });
+    expect(row.connectionStatus).toBe("disconnected");
+  });
+
   it("accepts matchStarting with phase literal", () => {
     const result = serverEventSchema.safeParse({
       type: "matchStarting",

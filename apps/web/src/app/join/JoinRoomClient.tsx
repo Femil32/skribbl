@@ -487,7 +487,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                         onClick={() => setAvatarId(p.id)}
                       >
                         <span
-                          className="inline-block size-6 rounded-full border border-base-300 bg-gradient-to-br from-primary/30 to-secondary/40"
+                          className="inline-block size-6 rounded-full border border-base-300 bg-linear-to-br from-primary/30 to-secondary/40"
                           aria-hidden
                         />
                         {p.label}

@@ -64,11 +64,14 @@ export function ScoreboardSummary({
               : isLeaderRow && tieAtTop
                 ? "border-secondary bg-secondary/10"
                 : "border-base-300 bg-base-100";
-          const rowLabel = `Rank ${String(rank)} of ${String(sorted.length)}, ${p.displayName}, score ${String(p.score ?? 0)}`;
+          const away = (p.connectionStatus ?? "connected") === "disconnected";
+          const rowLabel = `Rank ${String(rank)} of ${String(sorted.length)}, ${p.displayName}, score ${String(p.score ?? 0)}${away ? ", disconnected" : ""}`;
           return (
             <li key={p.playerId} aria-label={rowLabel}>
               <div
-                className={`card border-2 ${emphasis} shadow-sm`}
+                className={`card border-2 shadow-sm ${emphasis}${
+                  away ? " opacity-75 border-dashed" : ""
+                }`}
                 data-testid={`scoreboard-row-${p.playerId}`}
               >
                 <div className="card-body flex-row items-center gap-4 py-3 px-4">
@@ -88,6 +91,11 @@ export function ScoreboardSummary({
                     </div>
                     <span className="text-xs text-base-content/60">
                       {presetLabel(p.avatarPresetId)}
+                      {away ? (
+                        <span className="block mt-0.5 text-base-content/55">
+                          Disconnected · may reconnect
+                        </span>
+                      ) : null}
                     </span>
                   </div>
                   <span className="shrink-0 text-xl font-bold tabular-nums text-base-content">

@@ -9,6 +9,7 @@ function row(
   return {
     avatarPresetId: "preset-1",
     isHost: false,
+    connectionStatus: "connected",
     ...partial,
   };
 }

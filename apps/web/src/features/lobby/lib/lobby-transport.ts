@@ -72,9 +72,9 @@ export function lobbyConnectionBannerModel(input: {
     return {
       alertRole: "status",
       alertClass: "alert alert-info",
-      title: "Reconnecting to the game server…",
+      title: "Restoring your session…",
       description:
-        "Hang tight — this is a new connection after a drop or manual retry.",
+        "Hang tight — the server is resuming your seat after a connection drop or manual retry.",
       showRetry: false,
     };
   }

@@ -20,7 +20,10 @@ function resolveDrawerName(
   drawerPlayerId: string | undefined,
 ): string | undefined {
   if (!drawerPlayerId) return undefined;
-  return players.find((p) => p.playerId === drawerPlayerId)?.displayName;
+  const row = players.find((p) => p.playerId === drawerPlayerId);
+  if (!row) return undefined;
+  const away = (row.connectionStatus ?? "connected") === "disconnected";
+  return away ? `${row.displayName} (away)` : row.displayName;
 }
 
 function resolveLeaderChip(players: LobbyRosterPlayer[]): {
@@ -29,7 +32,11 @@ function resolveLeaderChip(players: LobbyRosterPlayer[]): {
 } | null {
   if (players.length === 0) return null;
   const top = sortPlayersByFinalScore(players)[0]!;
-  return { displayName: top.displayName, score: top.score ?? 0 };
+  const away = (top.connectionStatus ?? "connected") === "disconnected";
+  return {
+    displayName: away ? `${top.displayName} (away)` : top.displayName,
+    score: top.score ?? 0,
+  };
 }
 
 function phaseShowsCountdownTimer(phase: RoomPhase): boolean {
