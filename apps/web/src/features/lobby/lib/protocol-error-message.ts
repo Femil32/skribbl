@@ -49,6 +49,13 @@ export function messageForProtocolErrorCode(code: string): string {
       return "That room does not match your connection. Try reconnecting.";
     case "NO_WORD_OFFER":
       return "Word choices are not ready yet. Wait a moment and try again.";
+    case "NO_STASHED_SESSION":
+      return "Your seat timed out — rejoin manually if the room is still accepting players.";
+    case "HOST_USE_RECONNECT_HOST":
+      return "Reconnect using the host option for this seat.";
+    case "CANVAS_OP_LOG_GAP":
+    case "CANVAS_OP_LOG_OVERFLOW":
+      return "Drawing state fell out of sync. Wait for the next round — the canvas will refresh.";
     default:
       return "Something went wrong. Try again.";
   }

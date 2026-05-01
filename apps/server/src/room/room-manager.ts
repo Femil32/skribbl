@@ -16,8 +16,10 @@ import {
   sanitizeChatMessage,
   serializeServerEvent,
   shuffleIndicesDeterministic,
+  MAX_HYDRATE_CHAT_TAIL,
   type ClientCommand,
   type LobbyRosterPlayer,
+  type CanvasReplayEvent,
   type DrawingCanvasOpPayload,
   type ServerEvent,
 } from "@skribbl/shared";
@@ -37,6 +39,10 @@ import {
 import type { WordBank } from "../words/word-bank.js";
 import type { LobbySessionIdentity } from "./lobby-session.js";
 import { Room } from "./room.js";
+import {
+  transcriptRowsForHydrateRecipient,
+  type ChatTranscriptFanoutRow,
+} from "./chat-transcript.js";
 
 const log = pino({
   level: process.env.LOG_LEVEL ?? "info",
@@ -61,6 +67,13 @@ export type ReconnectHostFailureReason =
   | "NOT_HOST"
   | "ROOM_FULL"
   | "ALREADY_CONNECTED";
+
+export type ReconnectPlayerFailureReason =
+  | "UNKNOWN_ROOM"
+  | "ROOM_FULL"
+  | "NO_STASHED_SESSION"
+  | "ALREADY_CONNECTED"
+  | "HOST_USE_RECONNECT_HOST";
 
 export type NewLobbyPlayer = Pick<
   LobbySessionIdentity,
@@ -107,6 +120,109 @@ export class RoomManager {
     } catch {
       this.leaveSocketRoom(ws);
     }
+  }
+
+  private countOccupiedSeatIds(room: Room): number {
+    const ids = new Set<string>();
+    for (const s of room.sockets) {
+      const id = this.socketLobbyIdentity.get(s)?.playerId;
+      if (id) ids.add(id);
+    }
+    for (const pid of room.awaitingReconnect.keys()) ids.add(pid);
+    return ids.size;
+  }
+
+  private roomHasCapacity(room: Room): boolean {
+    return this.countOccupiedSeatIds(room) < room.maxPlayers;
+  }
+
+  private transcriptAudiencePlayerIds(room: Room): string[] {
+    if (room.matchPlayerOrder?.length) return [...room.matchPlayerOrder];
+    const ids: string[] = [];
+    for (const s of room.sockets) {
+      const pid = this.socketLobbyIdentity.get(s)?.playerId;
+      if (pid) ids.push(pid);
+    }
+    return ids;
+  }
+
+  private pushChatTranscriptFanout(room: Room, row: ChatTranscriptFanoutRow): void {
+    room.chatTranscriptFanoutRows.push(row);
+    while (room.chatTranscriptFanoutRows.length > MAX_HYDRATE_CHAT_TAIL) {
+      room.chatTranscriptFanoutRows.shift();
+    }
+  }
+
+  private notifyCanvasIntegrityFailure(
+    actor: WebSocket | undefined,
+    room: Room,
+    code: string,
+    message?: string,
+  ): void {
+    const resync: ServerEvent = {
+      type: "canvasOpLogResync",
+      roomId: room.id,
+      code,
+      ...(message !== undefined ? { message } : {}),
+    };
+    if (actor) {
+      try {
+        actor.send(
+          serializeServerEvent({
+            type: "error",
+            code,
+            ...(message !== undefined ? { message } : {}),
+          }),
+        );
+      } catch {
+        this.leaveSocketRoom(actor);
+      }
+    }
+    for (const sock of room.sockets) this.sendEvent(sock, resync);
+  }
+
+  /** Targeted canvas + chat tail for one socket after successful reconnect (Story 5.2). */
+  sendRoomHydrate(ws: WebSocket, room: Room, recipientPlayerId: string): void {
+    let canvasCommits: CanvasReplayEvent[] = [];
+    if (room.phase === "drawing") {
+      const verified = room.canvasPhaseLog.verifyAgainstWatermark(room.drawingStrokeSeq);
+      if (!verified.ok) {
+        this.notifyCanvasIntegrityFailure(
+          ws,
+          room,
+          verified.code,
+          "Canvas hydrate aborted — op log inconsistent with server seq.",
+        );
+        return;
+      }
+      canvasCommits = [...room.canvasPhaseLog.snapshot()];
+    }
+
+    const chatTail = transcriptRowsForHydrateRecipient(
+      room.chatTranscriptFanoutRows,
+      recipientPlayerId,
+      MAX_HYDRATE_CHAT_TAIL,
+    );
+
+    const hydrate: ServerEvent = {
+      type: "roomHydrate",
+      roomId: room.id,
+      phase: room.phase,
+      drawingStrokeSeq: room.drawingStrokeSeq,
+      matchRoundIndex:
+        room.phase === "lobby"
+          ? undefined
+          : Number.isFinite(room.matchRoundIndex)
+            ? room.matchRoundIndex
+            : undefined,
+      drawerPlayerId:
+        room.phase === "lobby" || room.phase === "matchEnded"
+          ? null
+          : room.currentDrawerPlayerId ?? null,
+      canvasCommits,
+      chatTail,
+    };
+    this.sendEvent(ws, hydrate);
   }
 
   private clearMatchTimers(roomId: string): void {
@@ -199,6 +315,7 @@ export class RoomManager {
     room.roundSecretWord = word;
     room.phase = "drawing";
     room.drawingStrokeSeq = 0;
+    room.canvasPhaseLog.reset();
     room.drawingPhaseStartedAtMs = Date.now();
     room.drawingPhaseAwardedGuesserIds = new Set();
     const roundMs = resolveRoundMs();
@@ -295,6 +412,10 @@ export class RoomManager {
     if (room.phase !== "matchEnded") return { ok: false, code: "WRONG_PHASE" };
 
     this.clearMatchTimers(room.id);
+    room.awaitingReconnect.clear();
+    room.chatTranscriptFanoutRows = [];
+    room.canvasPhaseLog.reset();
+    room.drawingStrokeSeq = 0;
     room.phase = "lobby";
     room.matchPlayerOrder = null;
     room.currentDrawerPlayerId = null;
@@ -356,6 +477,9 @@ export class RoomManager {
    */
   private scheduleMatchFlow(room: Room): void {
     this.clearMatchTimers(room.id);
+    room.awaitingReconnect.clear();
+    room.chatTranscriptFanoutRows = [];
+    room.canvasPhaseLog.reset();
     const timeouts: ReturnType<typeof setTimeout>[] = [];
     this.matchTimersByRoomId.set(room.id, timeouts);
 
@@ -569,6 +693,20 @@ export class RoomManager {
   ): void {
     const ts = Date.now();
     const id = randomUUID();
+    const audience = this.transcriptAudiencePlayerIds(room);
+    const textByRecipient: Record<string, string> = {};
+    for (const pid of audience) {
+      textByRecipient[pid] = textForRecipient(pid);
+    }
+    this.pushChatTranscriptFanout(room, {
+      kind: "player",
+      id,
+      ts,
+      roomId: room.id,
+      senderPlayerId,
+      senderDisplayName,
+      textByRecipient,
+    });
     for (const sock of room.sockets) {
       const recipientId = this.socketLobbyIdentity.get(sock)?.playerId;
       if (!recipientId) continue;
@@ -596,6 +734,24 @@ export class RoomManager {
     const awarded = room.drawingPhaseAwardedGuesserIds;
     const drawerId = room.currentDrawerPlayerId;
     if (!awarded || !drawerId) return;
+
+    const audience = this.transcriptAudiencePlayerIds(room);
+    const revealedWordByRecipient: Record<string, string | undefined> = {};
+    for (const pid of audience) {
+      const mayReveal =
+        pid === guesserPlayerId || pid === drawerId || awarded.has(pid);
+      revealedWordByRecipient[pid] = mayReveal ? secretWord : undefined;
+    }
+    this.pushChatTranscriptFanout(room, {
+      kind: "correctGuess",
+      id,
+      ts,
+      roomId: room.id,
+      guesserPlayerId,
+      guesserDisplayName,
+      censoredAnnouncement,
+      revealedWordByRecipient,
+    });
 
     for (const sock of room.sockets) {
       const recipientId = this.socketLobbyIdentity.get(sock)?.playerId;
@@ -691,11 +847,19 @@ export class RoomManager {
 
   leaveSocketRoom(ws: WebSocket): void {
     const roomId = this.socketToRoomId.get(ws);
+    const identity = roomId ? this.socketLobbyIdentity.get(ws) : undefined;
     if (!roomId) {
       this.socketLobbyIdentity.delete(ws);
       return;
     }
     const room = this.roomsById.get(roomId);
+    if (room && identity && room.phase !== "lobby") {
+      room.awaitingReconnect.set(identity.playerId, {
+        playerId: identity.playerId,
+        displayName: identity.displayName,
+        avatarPresetId: identity.avatarPresetId,
+      });
+    }
     if (room) {
       room.sockets.delete(ws);
       if (room.hostSocket === ws) {
@@ -750,25 +914,72 @@ export class RoomManager {
   ): { ok: true; room: Room } | { ok: false; reason: ReconnectHostFailureReason } {
     const room = this.roomsById.get(roomId);
     if (!room) return { ok: false, reason: "UNKNOWN_ROOM" };
-    if (room.phase !== "lobby") return { ok: false, reason: "JOIN_NOT_ALLOWED" };
     if (room.hostPlayerId !== expectedPlayerId) return { ok: false, reason: "NOT_HOST" };
+
+    const stashedSession = room.awaitingReconnect.get(expectedPlayerId);
+    const midMatchReclaim = stashedSession !== undefined;
+    if (!midMatchReclaim && room.phase !== "lobby") {
+      return { ok: false, reason: "JOIN_NOT_ALLOWED" };
+    }
 
     for (const s of room.sockets) {
       const id = this.socketLobbyIdentity.get(s);
       if (id?.playerId === expectedPlayerId) return { ok: false, reason: "ALREADY_CONNECTED" };
     }
 
-    if (!room.hasCapacity()) return { ok: false, reason: "ROOM_FULL" };
+    if (!this.roomHasCapacity(room)) return { ok: false, reason: "ROOM_FULL" };
 
     this.leaveSocketRoom(ws);
 
+    if (stashedSession) {
+      room.awaitingReconnect.delete(expectedPlayerId);
+    }
+
+    const displayName = stashedSession ? stashedSession.displayName : player.displayName;
+    const avatarPresetId = stashedSession ? stashedSession.avatarPresetId : player.avatarPresetId;
+
     this.socketLobbyIdentity.set(ws, {
       playerId: expectedPlayerId,
-      displayName: player.displayName,
-      avatarPresetId: player.avatarPresetId,
+      displayName,
+      avatarPresetId,
     });
     room.sockets.add(ws);
     room.hostSocket = ws;
+    this.socketToRoomId.set(ws, room.id);
+    return { ok: true, room };
+  }
+
+  reconnectPlayer(
+    ws: WebSocket,
+    roomId: string,
+    expectedPlayerId: string,
+    _player: NewLobbyPlayer,
+  ): { ok: true; room: Room } | { ok: false; reason: ReconnectPlayerFailureReason } {
+    const room = this.roomsById.get(roomId);
+    if (!room) return { ok: false, reason: "UNKNOWN_ROOM" };
+    if (room.hostPlayerId === expectedPlayerId) {
+      return { ok: false, reason: "HOST_USE_RECONNECT_HOST" };
+    }
+    const stashed = room.awaitingReconnect.get(expectedPlayerId);
+    if (!stashed) return { ok: false, reason: "NO_STASHED_SESSION" };
+
+    for (const s of room.sockets) {
+      const id = this.socketLobbyIdentity.get(s);
+      if (id?.playerId === expectedPlayerId) return { ok: false, reason: "ALREADY_CONNECTED" };
+    }
+
+    if (!this.roomHasCapacity(room)) return { ok: false, reason: "ROOM_FULL" };
+
+    this.leaveSocketRoom(ws);
+
+    room.awaitingReconnect.delete(expectedPlayerId);
+
+    this.socketLobbyIdentity.set(ws, {
+      playerId: expectedPlayerId,
+      displayName: stashed.displayName,
+      avatarPresetId: stashed.avatarPresetId,
+    });
+    room.sockets.add(ws);
     this.socketToRoomId.set(ws, room.id);
     return { ok: true, room };
   }
@@ -811,12 +1022,11 @@ export class RoomManager {
 
     const { room, playerId } = gate;
 
-    room.drawingStrokeSeq += 1;
-    const seq = room.drawingStrokeSeq;
-    const payload: ServerEvent = {
+    const nextSeq = room.drawingStrokeSeq + 1;
+    const payload: CanvasReplayEvent = {
       type: "drawingStrokeCommitted",
       roomId: room.id,
-      seq,
+      seq: nextSeq,
       senderPlayerId: playerId,
       strokeId: cmd.strokeId,
       chunkId: cmd.chunkId,
@@ -825,11 +1035,18 @@ export class RoomManager {
       lineWidthPx: cmd.lineWidthPx,
     };
 
+    const appended = room.canvasPhaseLog.tryAppend(payload);
+    if (!appended.ok) {
+      this.notifyCanvasIntegrityFailure(ws, room, appended.code);
+      return { ok: false, code: appended.code };
+    }
+    room.drawingStrokeSeq = nextSeq;
+
     for (const sock of room.sockets) {
       this.sendEvent(sock, payload);
     }
 
-    return { ok: true, seq };
+    return { ok: true, seq: room.drawingStrokeSeq };
   }
 
   applyDrawingCanvasCommand(
@@ -869,21 +1086,27 @@ export class RoomManager {
       }
     }
 
-    room.drawingStrokeSeq += 1;
-    const seq = room.drawingStrokeSeq;
-    const payload: ServerEvent = {
+    const nextSeq = room.drawingStrokeSeq + 1;
+    const payload: CanvasReplayEvent = {
       type: "drawingCanvasOpCommitted",
       roomId: room.id,
-      seq,
+      seq: nextSeq,
       senderPlayerId: playerId,
       op,
     };
+
+    const appended = room.canvasPhaseLog.tryAppend(payload);
+    if (!appended.ok) {
+      this.notifyCanvasIntegrityFailure(ws, room, appended.code);
+      return { ok: false, code: appended.code };
+    }
+    room.drawingStrokeSeq = nextSeq;
 
     for (const sock of room.sockets) {
       this.sendEvent(sock, payload);
     }
 
-    return { ok: true, seq };
+    return { ok: true, seq: room.drawingStrokeSeq };
   }
 
   joinRoom(
@@ -905,7 +1128,7 @@ export class RoomManager {
       return { ok: false, reason: "JOIN_NOT_ALLOWED" };
     }
 
-    if (!room.hasCapacity()) return { ok: false, reason: "ROOM_FULL" };
+    if (!this.roomHasCapacity(room)) return { ok: false, reason: "ROOM_FULL" };
 
     this.leaveSocketRoom(ws);
     const playerId = randomUUID();

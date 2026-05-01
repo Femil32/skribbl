@@ -23,11 +23,20 @@ import {
 } from "@/features/lobby/lib/transport-user-messages";
 import type { LobbyConnectionReason, LobbyTransportPhase } from "@/features/lobby/lib/lobby-transport";
 import { missingGameWebSocketUrlUserMessage, resolveGameWebSocketUrl } from "@/lib/game-ws-url";
-import { serializeChooseWordCommand, serializeJoinRoomCommand, serializeChatMessageCommand } from "@/lib/ws-client";
+import {
+  serializeChooseWordCommand,
+  serializeJoinRoomCommand,
+  serializeReconnectPlayerCommand,
+  serializeChatMessageCommand,
+} from "@/lib/ws-client";
 import {
   appendDrawingHintRows,
   type MatchHintFeedRow,
 } from "@/features/lobby/lib/drawing-hint-rows";
+import {
+  mergeCanvasReplayBySeq,
+  mergeChatFeedWithHydrateTail,
+} from "@/features/lobby/lib/hydrate-merge";
 
 type ChatFeedEvent = Extract<
   ServerEvent,
@@ -107,6 +116,8 @@ const TERMINAL_PROTOCOL_CODES_AFTER_JOINED = new Set([
   "HOST_SESSION_LOST",
   "HOST_RECLAIM_DENIED",
   "ALREADY_CONNECTED",
+  "NO_STASHED_SESSION",
+  "HOST_USE_RECONNECT_HOST",
 ]);
 
 export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomResult {
@@ -131,6 +142,13 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
   const closedWhileJoinedRef = useRef(false);
   const wsRef = useRef<WebSocket | null>(null);
   const joinedRoomIdRef = useRef<string | null>(null);
+  const guestResumeContextRef = useRef<{
+    roomId: string;
+    playerId: string;
+    roomCode: string;
+    displayName: string;
+    avatarPresetId: AvatarPresetId;
+  } | null>(null);
 
   const sendGameJsonLine = useCallback((raw: string) => {
     const w = wsRef.current;
@@ -171,6 +189,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
       reachedJoinedRef.current = false;
       closedWhileJoinedRef.current = false;
       joinedRoomIdRef.current = null;
+      guestResumeContextRef.current = null;
       return;
     }
 
@@ -204,9 +223,19 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
     ws.addEventListener("open", () => {
       setTransport("live");
       try {
-        ws.send(
-          serializeJoinRoomCommand(normalized, displayName, avatarPresetId),
-        );
+        const resume = retryAfterJoinedDrop ? guestResumeContextRef.current : null;
+        if (resume) {
+          ws.send(
+            serializeReconnectPlayerCommand(
+              resume.roomId,
+              resume.playerId,
+              resume.displayName,
+              resume.avatarPresetId,
+            ),
+          );
+        } else {
+          ws.send(serializeJoinRoomCommand(normalized, displayName, avatarPresetId));
+        }
       } catch {
         fail("Could not send join request. Try again.");
       }
@@ -231,6 +260,13 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
         case "roomJoined":
           reachedJoinedRef.current = true;
           closedWhileJoinedRef.current = false;
+          guestResumeContextRef.current = {
+            roomId: parsed.data.roomId,
+            playerId: parsed.data.playerId,
+            roomCode: parsed.data.roomCode,
+            displayName: parsed.data.displayName,
+            avatarPresetId: parsed.data.avatarPresetId,
+          };
           setState({
             status: "joined",
             roomId: parsed.data.roomId,
@@ -463,6 +499,32 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
               ...prev,
               chatFeed: [...prev.chatFeed, chatEv].slice(-MAX_CHAT_FEED),
             };
+          });
+          return;
+        }
+        case "roomHydrate": {
+          const h = parsed.data;
+          setState((prev) => {
+            if (prev.status !== "joined") return prev;
+            if (h.roomId !== prev.roomId) return prev;
+            return {
+              ...prev,
+              remoteCanvasCommits: mergeCanvasReplayBySeq(
+                prev.remoteCanvasCommits,
+                h.canvasCommits,
+                MAX_REMOTE_CANVAS_COMMITS_BUFFER,
+              ),
+              chatFeed: mergeChatFeedWithHydrateTail(prev.chatFeed, h.chatTail, MAX_CHAT_FEED),
+            };
+          });
+          return;
+        }
+        case "canvasOpLogResync": {
+          const r = parsed.data;
+          setState((prev) => {
+            if (prev.status !== "joined") return prev;
+            if (r.roomId !== prev.roomId) return prev;
+            return { ...prev, remoteCanvasCommits: [] };
           });
           return;
         }

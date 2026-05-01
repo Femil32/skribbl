@@ -9,12 +9,14 @@ vi.mock("pino", () => ({
 }));
 import type { WebSocket } from "ws";
 import {
+  type CanvasReplayEvent,
   type ClientCommand,
   clampGuessElapsedMs,
   computeGuesserPoints,
   NICKNAME_MAX_GRAPHEMES,
   parseServerEvent,
 } from "@skribbl/shared";
+import { CanvasPhaseLog } from "./room/canvas-log.js";
 import { RoomManager } from "./room/room-manager.js";
 import { createStaticWordBank } from "./words/word-bank.js";
 import {
@@ -1748,6 +1750,357 @@ describe("handleClientCommand + RoomManager", () => {
       });
       expect(anyCorrectGuess).toBe(false);
     } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
+
+  it("reconnectHost mid-drawing includes contiguous canvas commits in roomHydrate", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.useFakeTimers();
+    try {
+      const rm = new RoomManager(8, integrationWordBank());
+      const host = captureWs();
+      const guest = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        guest.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+      vi.advanceTimersByTime(resolveWordChoiceMs());
+
+      const room = rm.getRoomForSocket(host.ws)!;
+      const drawerId = room.currentDrawerPlayerId!;
+      const drawerWs = drawerId === created.playerId ? host.ws : guest.ws;
+
+      handleClientCommand(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
+      expect(room.phase).toBe("drawing");
+
+      for (let i = 1; i <= 3; i++) {
+        handleClientCommand(
+          drawerWs,
+          {
+            type: "drawingStrokeChunk",
+            roomId: room.id,
+            strokeId: "s",
+            chunkId: `c${i}`,
+            points: [{ x: i, y: i }],
+            color: "#000000",
+            lineWidthPx: 2,
+          } satisfies ClientCommand,
+          rm,
+        );
+      }
+      expect(room.drawingStrokeSeq).toBe(3);
+
+      rm.leaveSocketRoom(host.ws);
+      expect(room.awaitingReconnect.has(created.playerId)).toBe(true);
+
+      const host2 = captureWs();
+      handleClientCommand(
+        host2.ws,
+        {
+          type: "reconnectHost",
+          roomId: created.roomId,
+          playerId: created.playerId,
+          ...hostIdentity,
+        },
+        rm,
+      );
+
+      const hydrateEv = host2.sent
+        .map((line) => parseServerEvent(JSON.parse(line)))
+        .find((e): e is Extract<typeof e, { type: "roomHydrate" }> => e.type === "roomHydrate");
+      expect(hydrateEv).toBeDefined();
+      if (!hydrateEv || hydrateEv.type !== "roomHydrate") throw new Error("unexpected hydrate");
+      expect(hydrateEv.canvasCommits.map((c) => c.seq)).toEqual([1, 2, 3]);
+      expect(hydrateEv.drawingStrokeSeq).toBe(3);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
+
+  it("reconnectPlayer hydrate keeps chatCorrectGuess spoiler-safe for still-guessing reconnect", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.useFakeTimers();
+    try {
+      const rm = new RoomManager(8, integrationWordBank());
+      const host = captureWs();
+      const guesserCapt = captureWs();
+      const idleCapt = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        guesserCapt.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+      const joinedG = parseServerEvent(JSON.parse(guesserCapt.sent[0]!));
+      if (joinedG.type !== "roomJoined") throw new Error("unexpected");
+
+      handleClientCommand(
+        idleCapt.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity2 },
+        rm,
+      );
+      const joinedIdle = parseServerEvent(JSON.parse(idleCapt.sent[0]!));
+      if (joinedIdle.type !== "roomJoined") throw new Error("unexpected");
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+      vi.advanceTimersByTime(resolveWordChoiceMs());
+
+      const room = rm.getRoomForSocket(host.ws)!;
+      const drawerId = room.currentDrawerPlayerId!;
+
+      const sockByPid = new Map<string, WebSocket>([
+        [created.playerId, host.ws],
+        [joinedG.playerId, guesserCapt.ws],
+        [joinedIdle.playerId, idleCapt.ws],
+      ]);
+      function wsFor(pid: string) {
+        const w = sockByPid.get(pid);
+        if (!w) throw new Error("missing ws");
+        return w;
+      }
+
+      const drawersWs = wsFor(drawerId);
+      const rosterIds = [created.playerId, joinedG.playerId, joinedIdle.playerId];
+      const guessersOnly = rosterIds.filter((pid) => pid !== drawerId);
+      expect(guessersOnly.length).toBe(2);
+      const guesserPid = guessersOnly[0]!;
+      const idlePid = guessersOnly[1]!;
+
+      handleClientCommand(drawersWs, { type: "chooseWord", choiceIndex: 0 }, rm);
+      expect(room.phase).toBe("drawing");
+
+      rm.leaveSocketRoom(wsFor(idlePid));
+
+      handleClientCommand(
+        wsFor(guesserPid),
+        {
+          type: "chatMessage",
+          roomId: room.id,
+          text: room.roundSecretWord!,
+        },
+        rm,
+      );
+
+      const reconnect = captureWs();
+      const reconnectProfile =
+        idlePid === joinedG.playerId
+          ? guestIdentity
+          : idlePid === joinedIdle.playerId
+            ? guestIdentity2
+            : hostIdentity;
+      handleClientCommand(
+        reconnect.ws,
+        {
+          type: "reconnectPlayer",
+          roomId: room.id,
+          playerId: idlePid,
+          ...reconnectProfile,
+        },
+        rm,
+      );
+
+      const hydrateEv = reconnect.sent
+        .map((line) => parseServerEvent(JSON.parse(line)))
+        .find((e): e is Extract<typeof e, { type: "roomHydrate" }> => e.type === "roomHydrate");
+      expect(hydrateEv).toBeDefined();
+      const cgTail = hydrateEv?.chatTail.filter((r) => r.type === "chatCorrectGuess");
+      expect(cgTail?.length).toBeGreaterThan(0);
+      const row = cgTail?.[cgTail.length - 1];
+      expect(row?.type).toBe("chatCorrectGuess");
+      if (row?.type !== "chatCorrectGuess") throw new Error("unexpected");
+      expect(row.revealedWord).toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
+
+  it("drawingStrokeChunk canvas log append failure sends error to drawer and canvasOpLogResync to room", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.useFakeTimers();
+    const origTryAppend = CanvasPhaseLog.prototype.tryAppend;
+    let appendCalls = 0;
+    const trySpy = vi.spyOn(CanvasPhaseLog.prototype, "tryAppend").mockImplementation(function (
+      this: CanvasPhaseLog,
+      commit: CanvasReplayEvent,
+    ) {
+      appendCalls += 1;
+      if (appendCalls <= 1) return origTryAppend.call(this, commit);
+      return { ok: false as const, code: "CANVAS_OP_LOG_OVERFLOW" };
+    });
+    try {
+      const rm = new RoomManager(8, integrationWordBank());
+      const host = captureWs();
+      const guest = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        guest.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+      vi.advanceTimersByTime(resolveWordChoiceMs());
+
+      const room = rm.getRoomForSocket(host.ws)!;
+      const drawerId = room.currentDrawerPlayerId!;
+      const drawerWs = drawerId === created.playerId ? host.ws : guest.ws;
+
+      handleClientCommand(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
+      expect(room.phase).toBe("drawing");
+
+      const stroke = {
+        type: "drawingStrokeChunk" as const,
+        roomId: room.id,
+        strokeId: "s",
+        chunkId: "c1",
+        points: [{ x: 1, y: 1 }],
+        color: "#000000",
+        lineWidthPx: 2,
+      } satisfies ClientCommand;
+
+      handleClientCommand(drawerWs, stroke, rm);
+      handleClientCommand(
+        drawerWs,
+        { ...stroke, chunkId: "c2", points: [{ x: 2, y: 2 }] },
+        rm,
+      );
+
+      const drawerEvents = drawerWs === host.ws ? host.sent : guest.sent;
+      const peerEvents = drawerWs === host.ws ? guest.sent : host.sent;
+
+      const errEv = drawerEvents
+        .map((line) => parseServerEvent(JSON.parse(line)))
+        .filter((e): e is Extract<typeof e, { type: "error" }> => e.type === "error")
+        .find((e) => e.code === "CANVAS_OP_LOG_OVERFLOW");
+      expect(errEv).toBeDefined();
+
+      const drawerResyncs = drawerEvents
+        .map((line) => parseServerEvent(JSON.parse(line)))
+        .filter((e): e is Extract<typeof e, { type: "canvasOpLogResync" }> => e.type === "canvasOpLogResync");
+      expect(drawerResyncs.some((e) => e.code === "CANVAS_OP_LOG_OVERFLOW")).toBe(true);
+
+      const peerResyncs = peerEvents
+        .map((line) => parseServerEvent(JSON.parse(line)))
+        .filter((e): e is Extract<typeof e, { type: "canvasOpLogResync" }> => e.type === "canvasOpLogResync");
+      expect(peerResyncs.some((e) => e.code === "CANVAS_OP_LOG_OVERFLOW")).toBe(true);
+
+      const peerGotBadStroke = peerEvents.some((line) => {
+        const ev = parseServerEvent(JSON.parse(line));
+        return ev.type === "drawingStrokeCommitted" && ev.seq === 2;
+      });
+      expect(peerGotBadStroke).toBe(false);
+    } finally {
+      trySpy.mockRestore();
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
+
+  it("roomHydrate canvas verify failure sends error to reconnecting socket and canvasOpLogResync to room", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.useFakeTimers();
+    const verifySpy = vi.spyOn(CanvasPhaseLog.prototype, "verifyAgainstWatermark").mockReturnValue({
+      ok: false,
+      code: "CANVAS_OP_LOG_GAP",
+    });
+    try {
+      const rm = new RoomManager(8, integrationWordBank());
+      const host = captureWs();
+      const guest = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        guest.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+      vi.advanceTimersByTime(resolveWordChoiceMs());
+
+      const room = rm.getRoomForSocket(host.ws)!;
+      const drawerId = room.currentDrawerPlayerId!;
+      const drawerWs = drawerId === created.playerId ? host.ws : guest.ws;
+
+      handleClientCommand(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
+
+      handleClientCommand(
+        drawerWs,
+        {
+          type: "drawingStrokeChunk",
+          roomId: room.id,
+          strokeId: "s",
+          chunkId: "c1",
+          points: [{ x: 1, y: 1 }],
+          color: "#000000",
+          lineWidthPx: 2,
+        } satisfies ClientCommand,
+        rm,
+      );
+
+      rm.leaveSocketRoom(host.ws);
+
+      const host2 = captureWs();
+      handleClientCommand(
+        host2.ws,
+        {
+          type: "reconnectHost",
+          roomId: created.roomId,
+          playerId: created.playerId,
+          ...hostIdentity,
+        },
+        rm,
+      );
+
+      const host2Events = host2.sent.map((line) => parseServerEvent(JSON.parse(line)));
+      expect(host2Events.some((e) => e.type === "roomHydrate")).toBe(false);
+
+      const reconnectErr = host2Events.filter((e): e is Extract<typeof e, { type: "error" }> => e.type === "error");
+      expect(reconnectErr.some((e) => e.code === "CANVAS_OP_LOG_GAP")).toBe(true);
+
+      expect(
+        host2Events.some(
+          (e): e is Extract<typeof e, { type: "canvasOpLogResync" }> =>
+            e.type === "canvasOpLogResync" && e.code === "CANVAS_OP_LOG_GAP",
+        ),
+      ).toBe(true);
+
+      const guestTail = guest.sent.map((line) => parseServerEvent(JSON.parse(line))).slice(-8);
+      expect(
+        guestTail.some(
+          (e): e is Extract<typeof e, { type: "canvasOpLogResync" }> =>
+            e.type === "canvasOpLogResync" && e.code === "CANVAS_OP_LOG_GAP",
+        ),
+      ).toBe(true);
+    } finally {
+      verifySpy.mockRestore();
       vi.unstubAllEnvs();
       vi.useRealTimers();
     }

@@ -320,6 +320,39 @@ describe("serverEventSchema", () => {
       }).success,
     ).toBe(true);
   });
+
+  it("accepts Story 5.2 roomHydrate and canvasOpLogResync", () => {
+    const stroke = {
+      type: "drawingStrokeCommitted",
+      roomId: "r",
+      seq: 1,
+      senderPlayerId: "p",
+      strokeId: "s",
+      chunkId: "c",
+      points: [{ x: 0, y: 0 }],
+      color: "#000000",
+      lineWidthPx: 2,
+    };
+    expect(
+      serverEventSchema.safeParse({
+        type: "roomHydrate",
+        roomId: "r",
+        phase: "drawing",
+        drawingStrokeSeq: 1,
+        matchRoundIndex: 0,
+        drawerPlayerId: "p",
+        canvasCommits: [stroke],
+        chatTail: [],
+      }).success,
+    ).toBe(true);
+    expect(
+      serverEventSchema.safeParse({
+        type: "canvasOpLogResync",
+        roomId: "r",
+        code: "CANVAS_OP_LOG_GAP",
+      }).success,
+    ).toBe(true);
+  });
 });
 
 describe("isMatchFlowPhase", () => {
@@ -398,5 +431,18 @@ describe("serializeClientCommand", () => {
     const parsed = clientCommandSchema.safeParse(JSON.parse(line));
     expect(parsed.success).toBe(true);
     if (parsed.success) expect(parsed.data.type).toBe("reconnectHost");
+  });
+
+  it("round-trips reconnectPlayer", () => {
+    const line = serializeClientCommand({
+      type: "reconnectPlayer",
+      roomId: "r1",
+      playerId: "p9",
+      displayName: "Edge",
+      avatarPresetId: "preset-2",
+    });
+    const parsed = clientCommandSchema.safeParse(JSON.parse(line));
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.type).toBe("reconnectPlayer");
   });
 });

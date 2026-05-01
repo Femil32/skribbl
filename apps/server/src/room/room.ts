@@ -1,5 +1,8 @@
 import type { WebSocket } from "ws";
 import type { RoomPhase } from "@skribbl/shared";
+import type { LobbySessionIdentity } from "./lobby-session.js";
+import { CanvasPhaseLog } from "./canvas-log.js";
+import type { ChatTranscriptFanoutRow } from "./chat-transcript.js";
 
 /**
  * In-memory room aggregate (Story 1.2 skeleton): code, capacity, lobby phase.
@@ -28,6 +31,21 @@ export class Room {
    * (Field name `drawingStrokeSeq` is historical — treats strokes as the first canvas op type.)
    */
   drawingStrokeSeq = 0;
+
+  /**
+   * Ordered authoritative canvas commits for the **current** drawing phase only (Story 5.2). Reset with
+   * {@link CanvasPhaseLog.reset} whenever a new drawing phase begins; never reuse across rounds silently.
+   */
+  readonly canvasPhaseLog = new CanvasPhaseLog();
+
+  /** Bounded spoiler-aware chat fan-outs for hydrate replay within the active match lifecycle. */
+  chatTranscriptFanoutRows: ChatTranscriptFanoutRow[] = [];
+
+  /**
+   * Stashed lobby identities for sockets that disconnected during an active post-lobby phase (Story 5.2 late
+   * transport recovery). Lobby-phase drops do **not** populate this map (`reconnectHost` covers host lobby reclaim).
+   */
+  readonly awaitingReconnect: Map<string, LobbySessionIdentity> = new Map();
 
   /**
    * Monotonic/session clock ms when {@link phase} transitioned to `drawing` (Story 2.6).

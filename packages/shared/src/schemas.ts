@@ -95,6 +95,18 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
     displayName: z.string(),
     avatarPresetId: avatarPresetIdSchema.optional(),
   }),
+  /**
+   * Reclaim a disconnected **non-host** seat after a transport drop during an active match phase
+   * (Story 5.2+). Requires a prior **`awaitingReconnect`** stash on the server; clients should send
+   * the same **`playerId`** from **`roomJoined`**.
+   */
+  z.object({
+    type: z.literal("reconnectPlayer"),
+    roomId: z.string(),
+    playerId: z.string(),
+    displayName: z.string(),
+    avatarPresetId: avatarPresetIdSchema.optional(),
+  }),
   /** Host-only: request transition from lobby to match handshake (Story 1.6+). */
   z.object({
     type: z.literal("startMatch"),
@@ -172,6 +184,75 @@ const drawingCanvasOpPayloadSchema = z.discriminatedUnion("op", [
   }),
 ]);
 export type DrawingCanvasOpPayload = z.infer<typeof drawingCanvasOpPayloadSchema>;
+
+/** Server + client hydrate: same cap as lobby chat feed tail (`MAX_HYDRATE_CHAT_TAIL`). */
+export const MAX_HYDRATE_CHAT_TAIL = 400;
+
+/**
+ * MVP “snapshot” is an empty baseline at seq 0 + ordered replay (Story 5.2). Hard cap before
+ * **`CANVAS_OP_LOG_OVERFLOW`** / structured resync signals — never silently truncate.
+ */
+export const MAX_CANVAS_OPS_PER_DRAWING_PHASE = 8192;
+
+/** Wire shape for **`drawingStrokeCommitted`** (composed for replay + hydrate). */
+export const drawingStrokeCommittedWireSchema = z.object({
+  type: z.literal("drawingStrokeCommitted"),
+  roomId: z.string(),
+  seq: z.number().int().nonnegative(),
+  senderPlayerId: z.string(),
+  strokeId: z.string(),
+  chunkId: z.string(),
+  points: z.array(drawingStrokePointSchema).min(1).max(256),
+  color: z.string(),
+  lineWidthPx: z.number(),
+});
+
+/** Wire shape for **`drawingCanvasOpCommitted`**. */
+export const drawingCanvasOpCommittedWireSchema = z.object({
+  type: z.literal("drawingCanvasOpCommitted"),
+  roomId: z.string(),
+  seq: z.number().int().nonnegative(),
+  senderPlayerId: z.string(),
+  op: drawingCanvasOpPayloadSchema,
+});
+
+export const canvasReplayEventWireSchema = z.union([
+  drawingStrokeCommittedWireSchema,
+  drawingCanvasOpCommittedWireSchema,
+]);
+export type CanvasReplayEventWire = z.infer<typeof canvasReplayEventWireSchema>;
+
+/** Chat rows allowed inside **`roomHydrate.chatTail`** (spoiler-aware per reconnecting viewer). */
+export const hydrateChatTailWireSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("chatPlayerMessage"),
+    roomId: z.string(),
+    id: z.string(),
+    ts: z.number().int().nonnegative(),
+    senderPlayerId: z.string(),
+    senderDisplayName: z.string(),
+    text: z.string(),
+  }),
+  z.object({
+    type: z.literal("chatSystemMessage"),
+    roomId: z.string(),
+    id: z.string(),
+    ts: z.number().int().nonnegative(),
+    text: z.string(),
+  }),
+  z.object({
+    type: z.literal("chatCorrectGuess"),
+    roomId: z.string(),
+    id: z.string(),
+    ts: z.number().int().nonnegative(),
+    guesserPlayerId: z.string(),
+    guesserDisplayName: z.string(),
+    revealedWord: z.string().optional(),
+    censoredAnnouncement: z.string(),
+  }),
+]);
+
+export type HydrateChatTailEvent = z.infer<typeof hydrateChatTailWireSchema>;
 
 /** Server → client events pushed over WebSocket. */
 export const serverEventSchema = z.discriminatedUnion("type", [
@@ -259,28 +340,12 @@ export const serverEventSchema = z.discriminatedUnion("type", [
    * Drawer receives ack; all peers receive the same chunk with authoritative sequence (Story 3.4).
    * Drawer should ignore applies for `senderPlayerId === localPlayerId` because local ink is already rendered.
    */
-  z.object({
-    type: z.literal("drawingStrokeCommitted"),
-    roomId: z.string(),
-    seq: z.number().int().nonnegative(),
-    senderPlayerId: z.string(),
-    strokeId: z.string(),
-    chunkId: z.string(),
-    points: z.array(drawingStrokePointSchema).min(1).max(256),
-    color: z.string(),
-    lineWidthPx: z.number(),
-  }),
+  drawingStrokeCommittedWireSchema,
   /**
    * Authoritative non-stroke canvas op (clear / fill / eraser chunk). Shares the same monotonic `seq` as
    * `drawingStrokeCommitted` within the drawing phase (`room.drawingStrokeSeq`, Story 3.6).
    */
-  z.object({
-    type: z.literal("drawingCanvasOpCommitted"),
-    roomId: z.string(),
-    seq: z.number().int().nonnegative(),
-    senderPlayerId: z.string(),
-    op: drawingCanvasOpPayloadSchema,
-  }),
+  drawingCanvasOpCommittedWireSchema,
   /** Player chat row (Epic 4, FR19). */
   z.object({
     type: z.literal("chatPlayerMessage"),
@@ -312,6 +377,31 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     revealedWord: z.string().optional(),
     censoredAnnouncement: z.string(),
   }),
+  /**
+   * Targeted hydrate after reconnect (Story 5.2): empty **`canvasCommits`** whenever **`phase`** is not
+   * **`drawing`** (no stale ink from prior rounds — baseline is effectively seq 0 + replay subset).
+   * **`drawingStrokeSeq`** is the authoritative watermark for that phase.
+   */
+  z.object({
+    type: z.literal("roomHydrate"),
+    roomId: z.string(),
+    phase: roomPhaseSchema,
+    drawingStrokeSeq: z.number().int().nonnegative(),
+    matchRoundIndex: z.number().int().nonnegative().optional(),
+    drawerPlayerId: z.string().nullable().optional(),
+    canvasCommits: z.array(canvasReplayEventWireSchema),
+    chatTail: z.array(hydrateChatTailWireSchema),
+  }),
+  /**
+   * Canvas op seq integrity lost or overflow exceeded — reset local canvas replay state and await a
+   * fresh **`roomHydrate`** or phase transition rather than patching gaps silently (Story 5.2 / engine rules).
+   */
+  z.object({
+    type: z.literal("canvasOpLogResync"),
+    roomId: z.string(),
+    code: z.string(),
+    message: z.string().optional(),
+  }),
 ]);
 
 export type ClientCommand = z.infer<typeof clientCommandSchema>;
@@ -327,6 +417,8 @@ export type DrawingCanvasOpCommitted = Extract<
 >;
 /** Ordered replay stream for the canvas (strokes + destructive ops share `seq`, Story 3.6). */
 export type CanvasReplayEvent = DrawingStrokeCommitted | DrawingCanvasOpCommitted;
+export type RoomHydrateEvent = Extract<ServerEvent, { type: "roomHydrate" }>;
+export type CanvasOpLogResyncEvent = Extract<ServerEvent, { type: "canvasOpLogResync" }>;
 
 export function safeParseClientCommand(data: unknown) {
   return clientCommandSchema.safeParse(data);

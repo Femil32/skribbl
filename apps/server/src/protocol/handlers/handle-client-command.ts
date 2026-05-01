@@ -269,6 +269,72 @@ export function handleClientCommand(
         },
         roomManager,
       );
+      roomManager.sendRoomHydrate(ws, room, session.playerId);
+      roomManager.broadcastLobbyRoster(room);
+      return;
+    }
+    case "reconnectPlayer": {
+      const identity = parseLobbyPlayer(cmd);
+      if (!identity.ok) {
+        sendProtocolError(
+          ws,
+          identity.code,
+          identity.code === "BAD_NICKNAME"
+            ? "Pick a short display name."
+            : identity.code === "NICKNAME_TOO_LONG"
+              ? "That name is too long."
+              : "Pick one of the avatar options.",
+          roomManager,
+        );
+        return;
+      }
+      const outcome = roomManager.reconnectPlayer(ws, cmd.roomId, cmd.playerId, identity);
+      if (!outcome.ok) {
+        const errorCode =
+          outcome.reason === "UNKNOWN_ROOM"
+            ? "HOST_SESSION_LOST"
+            : outcome.reason === "HOST_USE_RECONNECT_HOST"
+              ? "HOST_USE_RECONNECT_HOST"
+              : outcome.reason === "NO_STASHED_SESSION"
+                ? "NO_STASHED_SESSION"
+                : outcome.reason;
+        sendProtocolError(
+          ws,
+          errorCode,
+          outcome.reason === "UNKNOWN_ROOM"
+            ? "That room is no longer available."
+            : outcome.reason === "HOST_USE_RECONNECT_HOST"
+              ? "Use the host reconnect flow for your host session."
+              : outcome.reason === "NO_STASHED_SESSION"
+                ? "Reconnect window expired — this seat is no longer resumable."
+                : outcome.reason === "ROOM_FULL"
+                  ? "Room is full"
+                  : "You are already connected in another tab.",
+          roomManager,
+        );
+        return;
+      }
+      const { room } = outcome;
+      const session = roomManager.getLobbySession(ws);
+      if (!session) {
+        sendProtocolError(ws, "INTERNAL", "Could not create session", roomManager);
+        return;
+      }
+      sendServerEvent(
+        ws,
+        {
+          type: "roomJoined",
+          roomId: room.id,
+          roomCode: room.code,
+          phase: room.phase,
+          playerCount: room.playerCount,
+          playerId: session.playerId,
+          displayName: session.displayName,
+          avatarPresetId: session.avatarPresetId,
+        },
+        roomManager,
+      );
+      roomManager.sendRoomHydrate(ws, room, session.playerId);
       roomManager.broadcastLobbyRoster(room);
       return;
     }

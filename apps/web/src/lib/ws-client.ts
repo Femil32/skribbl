@@ -26,6 +26,22 @@ export function serializeCreateRoomCommand(
   });
 }
 
+/** Validated JSON for mid-match guest reconnect (Story 5.2). */
+export function serializeReconnectPlayerCommand(
+  roomId: string,
+  playerId: string,
+  displayName: string,
+  avatarPresetId: AvatarPresetId,
+): string {
+  return serializeClientCommand({
+    type: "reconnectPlayer",
+    roomId,
+    playerId,
+    displayName,
+    avatarPresetId,
+  });
+}
+
 /** Host reclaim after transport drop — same `playerId` from the original `roomCreated`. */
 export function serializeReconnectHostCommand(
   roomId: string,

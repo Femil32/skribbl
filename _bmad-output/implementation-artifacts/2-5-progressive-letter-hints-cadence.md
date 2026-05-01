@@ -1,6 +1,6 @@
 # Story 2.5: Progressive letter hints cadence
 
-Status: review
+Status: done
 
 ## Story
 

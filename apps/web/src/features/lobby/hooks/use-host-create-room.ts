@@ -31,6 +31,10 @@ import {
   appendDrawingHintRows,
   type MatchHintFeedRow,
 } from "@/features/lobby/lib/drawing-hint-rows";
+import {
+  mergeCanvasReplayBySeq,
+  mergeChatFeedWithHydrateTail,
+} from "@/features/lobby/lib/hydrate-merge";
 
 type ChatFeedEvent = Extract<
   ServerEvent,
@@ -493,6 +497,32 @@ export function useHostCreateRoom(
               ...prev,
               chatFeed: [...prev.chatFeed, chatEv].slice(-MAX_CHAT_FEED),
             };
+          });
+          return;
+        }
+        case "roomHydrate": {
+          const h = parsed.data;
+          setState((prev) => {
+            if (prev.status !== "lobby") return prev;
+            if (h.roomId !== prev.roomId) return prev;
+            return {
+              ...prev,
+              remoteCanvasCommits: mergeCanvasReplayBySeq(
+                prev.remoteCanvasCommits,
+                h.canvasCommits,
+                MAX_REMOTE_CANVAS_COMMITS_BUFFER,
+              ),
+              chatFeed: mergeChatFeedWithHydrateTail(prev.chatFeed, h.chatTail, MAX_CHAT_FEED),
+            };
+          });
+          return;
+        }
+        case "canvasOpLogResync": {
+          const r = parsed.data;
+          setState((prev) => {
+            if (prev.status !== "lobby") return prev;
+            if (r.roomId !== prev.roomId) return prev;
+            return { ...prev, remoteCanvasCommits: [] };
           });
           return;
         }

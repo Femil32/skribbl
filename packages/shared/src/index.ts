@@ -24,6 +24,11 @@ export {
   type ChatCorrectGuessEvent,
   type ChatPlayerMessageEvent,
   type ChatSystemMessageEvent,
+  MAX_HYDRATE_CHAT_TAIL,
+  MAX_CANVAS_OPS_PER_DRAWING_PHASE,
+  type HydrateChatTailEvent,
+  type RoomHydrateEvent,
+  type CanvasOpLogResyncEvent,
 } from "./schemas.js";
 export {
   assertChatMessageLength,
