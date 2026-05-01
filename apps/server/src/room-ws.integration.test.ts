@@ -1,13 +1,25 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { logInfoMock } = vi.hoisted(() => ({ logInfoMock: vi.fn() }));
+
+vi.mock("pino", () => ({
+  default: vi.fn(() => ({
+    info: logInfoMock,
+  })),
+}));
 import type { WebSocket } from "ws";
 import {
   type ClientCommand,
+  clampGuessElapsedMs,
+  computeGuesserPoints,
   NICKNAME_MAX_GRAPHEMES,
   parseServerEvent,
 } from "@skribbl/shared";
 import { RoomManager } from "./room/room-manager.js";
 import { createStaticWordBank } from "./words/word-bank.js";
 import {
+  resolveDrawerAssistPerCorrect,
+  resolveGuesserScoreBracket,
   resolveInterRoundGapMs,
   resolveMatchStartHandshakeMs,
   resolveHintCadenceMs,
@@ -33,6 +45,7 @@ const integrationWordBank = () =>
   createStaticWordBank(["apple", "banana", "citrus", "dragon", "eagle"]);
 const hostIdentity = { displayName: "Hosty", avatarPresetId: "preset-1" as const };
 const guestIdentity = { displayName: "Guesty", avatarPresetId: "preset-2" as const };
+const guestIdentity2 = { displayName: "Guest2", avatarPresetId: "preset-3" as const };
 
 function lastLobbyRoster(sent: string[]) {
   for (let i = sent.length - 1; i >= 0; i--) {
@@ -43,6 +56,9 @@ function lastLobbyRoster(sent: string[]) {
 }
 
 describe("handleClientCommand + RoomManager", () => {
+  beforeEach(() => {
+    logInfoMock.mockClear();
+  });
   it("createRoom then joinRoom succeeds for second socket", () => {
     const rm = new RoomManager(8, integrationWordBank());
     const a = captureWs();
@@ -726,6 +742,314 @@ describe("handleClientCommand + RoomManager", () => {
           occurredAtMs: Date.now(),
         }),
       ).toEqual({ ok: false, code: "GUESSER_IS_DRAWER" });
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
+
+  it("chatMessage exact guess wires computeGuesserPoints + drawer assist and sends lobbyRoster before chatCorrectGuess", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.stubEnv("ROUND_MS", "80000");
+    vi.useFakeTimers();
+    try {
+      const roundMs = resolveRoundMs();
+      const bracket = resolveGuesserScoreBracket();
+      const assist = resolveDrawerAssistPerCorrect();
+      const elapsedMs = roundMs / 2;
+      const expectedGuesserPts = computeGuesserPoints(
+        elapsedMs,
+        roundMs,
+        bracket.max,
+        bracket.min,
+      );
+
+      const rm = new RoomManager(8, integrationWordBank());
+      const host = captureWs();
+      const guest = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        guest.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+      const guestJoined = parseServerEvent(JSON.parse(guest.sent[0]!));
+      if (guestJoined.type !== "roomJoined") throw new Error("unexpected");
+      const guestPlayerId = guestJoined.playerId;
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+      vi.advanceTimersByTime(resolveWordChoiceMs());
+
+      const room = rm.getRoomForSocket(host.ws);
+      expect(room).toBeDefined();
+      if (!room) throw new Error("unexpected");
+
+      const drawerId = room.currentDrawerPlayerId!;
+      const drawerCapt = drawerId === created.playerId ? host : guest;
+      const guesserCapt = drawerId === created.playerId ? guest : host;
+      const guesserId =
+        drawerId === created.playerId ? guestPlayerId : created.playerId;
+
+      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
+      expect(room.phase).toBe("drawing");
+      const secretWord = room.roundSecretWord;
+      expect(secretWord).toBeTruthy();
+      if (!secretWord) throw new Error("unexpected");
+
+      vi.advanceTimersByTime(elapsedMs);
+
+      handleClientCommand(
+        guesserCapt.ws,
+        {
+          type: "chatMessage",
+          roomId: room.id,
+          text: secretWord,
+        } satisfies ClientCommand,
+        rm,
+      );
+
+      let rosterIdx = -1;
+      let cgIdx = -1;
+      for (let i = 0; i < guesserCapt.sent.length; i++) {
+        const ev = parseServerEvent(JSON.parse(guesserCapt.sent[i]!));
+        if (ev.type === "lobbyRoster") rosterIdx = i;
+        if (ev.type === "chatCorrectGuess") {
+          cgIdx = i;
+          break;
+        }
+      }
+      expect(rosterIdx).toBeGreaterThanOrEqual(0);
+      expect(cgIdx).toBeGreaterThan(rosterIdx);
+
+      const rosterEv = parseServerEvent(JSON.parse(guesserCapt.sent[rosterIdx]!));
+      expect(rosterEv.type).toBe("lobbyRoster");
+      if (rosterEv.type !== "lobbyRoster") throw new Error("unexpected");
+
+      const byId = Object.fromEntries(
+        rosterEv.players.map((p) => [p.playerId, p.score]),
+      );
+      expect(byId[guesserId]).toBe(expectedGuesserPts);
+      expect(byId[drawerId]).toBe(assist);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
+
+  it("correct_guess_award structured log carries NFR-O2 fields plus effectiveElapsedMs", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.stubEnv("ROUND_MS", "80000");
+    vi.useFakeTimers();
+    try {
+      const roundMs = resolveRoundMs();
+      const bracket = resolveGuesserScoreBracket();
+      const assist = resolveDrawerAssistPerCorrect();
+      const elapsedMs = roundMs / 2;
+
+      const rm = new RoomManager(8, integrationWordBank());
+      const host = captureWs();
+      const guest = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        guest.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+      const guestJoined = parseServerEvent(JSON.parse(guest.sent[0]!));
+      if (guestJoined.type !== "roomJoined") throw new Error("unexpected");
+      const guestPlayerId = guestJoined.playerId;
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+      vi.advanceTimersByTime(resolveWordChoiceMs());
+
+      const room = rm.getRoomForSocket(host.ws);
+      expect(room).toBeDefined();
+      if (!room) throw new Error("unexpected");
+
+      const drawerId = room.currentDrawerPlayerId!;
+      const drawerCapt = drawerId === created.playerId ? host : guest;
+      const guesserCapt = drawerId === created.playerId ? guest : host;
+      const guesserId =
+        drawerId === created.playerId ? guestPlayerId : created.playerId;
+
+      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
+      const secretWord = room.roundSecretWord;
+      expect(secretWord).toBeTruthy();
+      if (!secretWord) throw new Error("unexpected");
+
+      vi.advanceTimersByTime(elapsedMs);
+
+      handleClientCommand(
+        guesserCapt.ws,
+        {
+          type: "chatMessage",
+          roomId: room.id,
+          text: secretWord,
+        } satisfies ClientCommand,
+        rm,
+      );
+
+      const expectedGuesserPts = computeGuesserPoints(
+        elapsedMs,
+        roundMs,
+        bracket.max,
+        bracket.min,
+      );
+      const awardCall = logInfoMock.mock.calls.find(
+        (args) =>
+          typeof args[0] === "object" &&
+          args[0] !== null &&
+          (args[0] as { event?: string }).event === "correct_guess_award",
+      );
+      expect(awardCall).toBeDefined();
+      expect(awardCall![1]).toBe("Awarded points for correct guess");
+      const payload = awardCall![0] as {
+        roomId: string;
+        guesserPlayerId: string;
+        drawerPlayerId: string;
+        guesserPts: number;
+        drawerAssistPts: number;
+        elapsedMs: number;
+        effectiveElapsedMs: number;
+        roundMs: number;
+        guesserScoreMax: number;
+        guesserScoreMin: number;
+      };
+
+      expect(payload).toMatchObject({
+        roomId: room.id,
+        guesserPlayerId: guesserId,
+        drawerPlayerId: drawerId,
+        guesserPts: expectedGuesserPts,
+        drawerAssistPts: assist,
+        roundMs,
+        guesserScoreMax: bracket.max,
+        guesserScoreMin: bracket.min,
+        effectiveElapsedMs: clampGuessElapsedMs(elapsedMs, roundMs),
+      });
+      expect(payload.elapsedMs).toBe(elapsedMs);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
+
+  it("three players: each distinct chat correct guess stacks drawer assist (N × assist)", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.stubEnv("ROUND_MS", "80000");
+    vi.useFakeTimers();
+    try {
+      const assist = resolveDrawerAssistPerCorrect();
+      const rm = new RoomManager(8, integrationWordBank());
+      const host = captureWs();
+      const guest = captureWs();
+      const guest2 = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        guest.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+      handleClientCommand(
+        guest2.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity2 },
+        rm,
+      );
+
+      const gj1 = parseServerEvent(JSON.parse(guest.sent[0]!));
+      const gj2 = parseServerEvent(JSON.parse(guest2.sent[0]!));
+      if (gj1.type !== "roomJoined" || gj2.type !== "roomJoined") {
+        throw new Error("unexpected");
+      }
+      const guestPlayerId = gj1.playerId;
+      const guest2PlayerId = gj2.playerId;
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+      vi.advanceTimersByTime(resolveWordChoiceMs());
+
+      const room = rm.getRoomForSocket(host.ws);
+      expect(room).toBeDefined();
+      if (!room) throw new Error("unexpected");
+
+      const drawerId = room.currentDrawerPlayerId!;
+      const socketsByPlayer = [
+        { id: created.playerId, cap: host },
+        { id: guestPlayerId, cap: guest },
+        { id: guest2PlayerId, cap: guest2 },
+      ];
+      const drawerCapt = socketsByPlayer.find((x) => x.id === drawerId)!.cap;
+      const guesserCaps = socketsByPlayer.filter((x) => x.id !== drawerId).map((x) => x.cap);
+      expect(guesserCaps).toHaveLength(2);
+
+      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
+      const secretWord = room.roundSecretWord;
+      expect(secretWord).toBeTruthy();
+      if (!secretWord) throw new Error("unexpected");
+
+      vi.advanceTimersByTime(5000);
+
+      handleClientCommand(
+        guesserCaps[0].ws,
+        {
+          type: "chatMessage",
+          roomId: room.id,
+          text: secretWord,
+        } satisfies ClientCommand,
+        rm,
+      );
+
+      const rosterAfterFirst = lastLobbyRoster([
+        ...host.sent,
+        ...guest.sent,
+        ...guest2.sent,
+      ]);
+      expect(rosterAfterFirst?.type).toBe("lobbyRoster");
+      if (rosterAfterFirst?.type !== "lobbyRoster") throw new Error("unexpected");
+
+      const drawerScoreAfterFirst = rosterAfterFirst.players.find(
+        (p) => p.playerId === drawerId,
+      )?.score;
+      expect(drawerScoreAfterFirst).toBe(assist);
+
+      vi.advanceTimersByTime(5000);
+
+      handleClientCommand(
+        guesserCaps[1].ws,
+        {
+          type: "chatMessage",
+          roomId: room.id,
+          text: secretWord,
+        } satisfies ClientCommand,
+        rm,
+      );
+
+      const rosterAfterSecond = lastLobbyRoster([
+        ...host.sent,
+        ...guest.sent,
+        ...guest2.sent,
+      ]);
+      expect(rosterAfterSecond?.type).toBe("lobbyRoster");
+      if (rosterAfterSecond?.type !== "lobbyRoster") throw new Error("unexpected");
+
+      const drawerScoreAfterSecond = rosterAfterSecond.players.find(
+        (p) => p.playerId === drawerId,
+      )?.score;
+      expect(drawerScoreAfterSecond).toBe(assist * 2);
     } finally {
       vi.unstubAllEnvs();
       vi.useRealTimers();

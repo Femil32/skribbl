@@ -3,6 +3,7 @@ import pino from "pino";
 import {
   assertChatMessageLength,
   buildMaskedWord,
+  clampGuessElapsedMs,
   computeGuesserPoints,
   computeTotalLetters,
   eligibleLetterIndices,
@@ -370,9 +371,13 @@ export class RoomManager {
   }
 
   /**
-   * Single entry point for correct-guess awards (FR10; Epic 4 chat will delegate here).
+   * Single entry point for correct-guess awards (FR10; Epic 4 chat delegates here).
    * Validates phase, roster, excludes the drawer as guesser, and awards each guesser at most once per
    * drawing phase (duplicate invokes return `"ALREADY_AWARDED_THIS_DRAWING"`).
+   *
+   * **Exclusive ledger mutation for chat wins:** Only this method increments `scoresByPlayerId` for
+   * adjudicated exact guesses (`applyChatMessage` success path calls it exactly once per first-time
+   * guesser each drawing phase). Match bootstrapping resets scores elsewhere; avoid parallel score forks.
    *
    * **Time basis:** Prefer `occurredAtMs = Date.now()` at the instant the server adjudicates an exact word
    * match (same clock basis as when drawing started — see `drawingPhaseStartedAtMs` on the room). Tests may
@@ -415,6 +420,7 @@ export class RoomManager {
     const roundMs = resolveRoundMs();
     const elapsed = opts.occurredAtMs - start;
     const { max: maxPts, min: minPts } = resolveGuesserScoreBracket();
+    const effectiveElapsedMs = clampGuessElapsedMs(elapsed, roundMs);
     const guesserPts = computeGuesserPoints(elapsed, roundMs, maxPts, minPts);
     const assist = resolveDrawerAssistPerCorrect();
 
@@ -432,6 +438,10 @@ export class RoomManager {
         guesserPts,
         drawerAssistPts: assist,
         elapsedMs: elapsed,
+        effectiveElapsedMs,
+        roundMs,
+        guesserScoreMax: maxPts,
+        guesserScoreMin: minPts,
       },
       "Awarded points for correct guess",
     );
@@ -511,6 +521,8 @@ export class RoomManager {
       });
 
       if (award.ok) {
+        // Story 4.3 / FR22: ledger + roster fan-out precedes celebration so totals are authoritative
+        // when `chatCorrectGuess` arrives (`applyCorrectGuessAward` broadcasts `lobbyRoster` internally).
         const censored = `${senderName} guessed the word!`;
         this.broadcastCorrectGuess(room, senderId, senderName, secret, censored);
         if (this.allNonDrawerGuessersAwarded(room)) {
