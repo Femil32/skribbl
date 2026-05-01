@@ -182,7 +182,7 @@ export function LobbyHostPage() {
                       key={p.id}
                       type="button"
                       className={`btn btn-sm gap-2 ${
-                        avatarId === p.id ? "btn-primary" : "btn-outline"
+                        avatarId === p.id ? "btn-primary" : "btn-outline btn-primary"
                       }`}
                       aria-pressed={avatarId === p.id}
                       onClick={() => setAvatarId(p.id)}
@@ -354,7 +354,7 @@ export function LobbyHostPage() {
           <div className="flex flex-col gap-2 w-full border-t border-base-300 pt-4">
             <button
               type="button"
-              className={`${canOfferStart ? "btn btn-primary" : "btn btn-outline"} w-full sm:w-auto self-center`}
+              className={`${canOfferStart ? "btn btn-primary" : "btn btn-outline btn-primary"} w-full sm:w-auto self-center`}
               onClick={() => startMatch()}
               disabled={
                 state.phase !== "lobby" ||
@@ -499,7 +499,7 @@ export function LobbyHostPage() {
             </button>
             <button
               type="button"
-              className="btn btn-ghost btn-primary"
+              className="btn btn-outline btn-primary"
               onClick={() => handleCopy("code", roomCode)}
             >
               Copy code

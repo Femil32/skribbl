@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatRoundCountdown,
   remainingMs,
+  tierToTimerTokenClass,
   timerUrgencyTier,
   type TimerUrgencyTier,
 } from "./timer-display";
@@ -38,5 +39,13 @@ describe("timerUrgencyTier", () => {
   it("clamps out-of-range input", () => {
     expect(timerUrgencyTier(2)).toBe(timerUrgencyTier(1));
     expect(timerUrgencyTier(-1)).toBe(timerUrgencyTier(0));
+  });
+});
+
+describe("tierToTimerTokenClass", () => {
+  it("maps tiers to text-timer-* utilities defined in globals.css @theme", () => {
+    expect(tierToTimerTokenClass("healthy")).toBe("text-timer-healthy");
+    expect(tierToTimerTokenClass("urgent")).toBe("text-timer-urgent");
+    expect(tierToTimerTokenClass("critical")).toBe("text-timer-critical");
   });
 });

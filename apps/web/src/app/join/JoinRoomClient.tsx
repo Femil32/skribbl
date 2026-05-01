@@ -481,7 +481,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                         key={p.id}
                         type="button"
                         className={`btn btn-sm gap-2 ${
-                          avatarId === p.id ? "btn-primary" : "btn-outline"
+                          avatarId === p.id ? "btn-primary" : "btn-outline btn-primary"
                         }`}
                         aria-pressed={avatarId === p.id}
                         onClick={() => setAvatarId(p.id)}

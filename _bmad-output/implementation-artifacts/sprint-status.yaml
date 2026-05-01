@@ -1,5 +1,5 @@
 # generated: 2026-04-29T12:00:00Z
-# last_updated: 2026-05-01 — 5-3 done; 5-2 done; 5-1 backlog; 4-2 review
+# last_updated: 2026-05-01 — 6-1 done; 5-3 done; 5-2 done; 5-1 backlog; 4-2 review
 # project: skribbl
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,9 +35,10 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: '2026-04-29T00:00:00Z'
-last_updated: '2026-05-01T23:59:00Z'
+last_updated: '2026-05-01T21:30:00Z'
 # Epic 4: 4-1 done; 4-2 review; 4-3 done; 4-4 done (post-review UI fix landed).
 # Epic 5: 5-3 done; 5-2 done; 5-1 backlog.
+# Epic 6: 6-1 done; 6-2–6-5 backlog.
 project: skribbl
 project_key: NOKEY
 tracking_system: file-system
@@ -86,8 +87,8 @@ development_status:
   5-3-presence-decay-ui-muted-roster-rows: done
   epic-5-retrospective: optional
 
-  epic-6: backlog
-  6-1-daisyui-theme-tokens-cyan-accent-semantics: backlog
+  epic-6: in-progress
+  6-1-daisyui-theme-tokens-cyan-accent-semantics: done
   6-2-react-error-boundary-ws-down-ux: backlog
   6-3-landing-footer-portfolio-cues-healthz-pairing: backlog
   6-4-accessibility-sweep-landmarks-keyboard-loops-contrast: backlog
