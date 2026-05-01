@@ -1,5 +1,5 @@
 # generated: 2026-04-29T12:00:00Z
-# last_updated: 2026-05-01 (4-3 → ready-for-dev)
+# last_updated: 2026-05-01 (4-3 → done)
 # project: skribbl
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,8 +35,8 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: '2026-04-29T00:00:00Z'
-last_updated: '2026-05-01T22:30:00Z'
-# Epic 4: 4-1 done; 4-2 review; 4-3 review; 4-4 backlog.
+last_updated: '2026-05-01T23:59:00Z'
+# Epic 4: 4-1 done; 4-2 review; 4-3 done; 4-4 backlog.
 project: skribbl
 project_key: NOKEY
 tracking_system: file-system
@@ -75,7 +75,7 @@ development_status:
   epic-4: in-progress
   4-1-chatpanel-composer-realtime-history: done
   4-2-guess-adjudication-exact-match-spoiler-safe-broadcasts: review
-  4-3-score-awards-drawer-bonuses-wiring: review
+  4-3-score-awards-drawer-bonuses-wiring: done
   4-4-correct-guess-fan-out-messaging-ux-beats: backlog
   epic-4-retrospective: optional
 

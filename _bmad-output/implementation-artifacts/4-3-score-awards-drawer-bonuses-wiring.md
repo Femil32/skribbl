@@ -1,6 +1,6 @@
 # Story 4.3: Score awards & drawer bonuses wiring
 
-Status: review
+Status: done
 
 <!-- gds-create-story (2026-05-01). Ultimate context engine analysis completed — comprehensive developer guide created. Brownfield: chat path already invokes `applyCorrectGuessAward`; dev-story should prove FR22 end-to-end, tighten observability (NFR-O2), and forbid duplicate scoring paths. -->
 
@@ -103,8 +103,8 @@ Composer (Cursor agent)
 
 - **Single scoring spine:** JSDoc on **`applyCorrectGuessAward`** states exclusive ledger mutation for adjudicated guesses; repo search shows **`scoresByPlayerId`** increments only from match bootstrap resets and **`applyCorrectGuessAward`** (`apps/server` scope).
 - **Ordering:** Inline comment on **`applyChatMessage`** notes roster broadcast inside award runs before **`chatCorrectGuess`**; integration test asserts per-guesser **`lobbyRoster`** index precedes **`chatCorrectGuess`**.
-- **`correct_guess_award`** log payload includes **`roundMs`**, **`guesserScoreMax`**, **`guesserScoreMin`** (NFR-O2 / AC5).
-- Integration tests exercise **`chatMessage`** via **`handleClientCommand`**: totals match **`computeGuesserPoints`** + **`resolveDrawerAssistPerCorrect`** with **`ROUND_MS=80000`**; three-player test verifies drawer **`N × assist`** for two distinct successful guessers.
+- **`correct_guess_award`** log payload includes **`roundMs`**, **`guesserScoreMax`**, **`guesserScoreMin`**, plus **`effectiveElapsedMs`** (shared **`clampGuessElapsedMs`**, same input as speed decay) alongside raw **`elapsedMs`** (NFR-O2 / AC5).
+- Integration tests exercise **`chatMessage`** via **`handleClientCommand`**: totals match **`computeGuesserPoints`** + **`resolveDrawerAssistPerCorrect`** with **`ROUND_MS=80000`**; three-player test verifies drawer **`N × assist`** for two distinct successful guessers; mocked **`pino`** test locks structured award log shape.
 
 ### File List
 
@@ -112,6 +112,9 @@ Composer (Cursor agent)
 - `_bmad-output/implementation-artifacts/4-3-score-awards-drawer-bonuses-wiring.md`
 - `apps/server/src/room/room-manager.ts`
 - `apps/server/src/room-ws.integration.test.ts`
+- `packages/shared/src/scoring.ts`
+- `packages/shared/src/scoring.test.ts`
+- `packages/shared/src/index.ts`
 
 ---
 
@@ -125,3 +128,4 @@ Composer (Cursor agent)
 
 - **2026-05-01** — Story authored via `gds-create-story 4-3`; status **`ready-for-dev`**; sprint entry **`4-3-score-awards-drawer-bonuses-wiring`** → **`ready-for-dev`**.
 - **2026-05-01** — Implementation: richer **`correct_guess_award`** logging; **`room-manager`** orchestration docs; **`room-ws`** integration tests for chat→ledger→roster ordering and multi-guesser drawer assists; story status **`review`**; sprint **`4-3-score-awards-drawer-bonuses-wiring`** → **`review`**.
+- **2026-05-01** — Code review follow-up: **`clampGuessElapsedMs`** in **`@skribbl/shared`**, **`effectiveElapsedMs`** on **`correct_guess_award`**, structured log regression test; **`4-3-REVIEW.md`** → **`resolved`**; story and sprint **`4-3-score-awards-drawer-bonuses-wiring`** → **`done`**.
