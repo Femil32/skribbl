@@ -8,6 +8,7 @@ import type {
   ServerEvent,
 } from "@skribbl/shared";
 import {
+  isMatchFlowPhase,
   isValidRoomCodeForJoin,
   normalizeRoomCode,
   safeParseServerEvent,
@@ -23,11 +24,23 @@ import {
 } from "@/features/lobby/lib/transport-user-messages";
 import type { LobbyConnectionReason, LobbyTransportPhase } from "@/features/lobby/lib/lobby-transport";
 import { missingGameWebSocketUrlUserMessage, resolveGameWebSocketUrl } from "@/lib/game-ws-url";
-import { serializeChooseWordCommand, serializeJoinRoomCommand, serializeChatMessageCommand } from "@/lib/ws-client";
+import {
+  serializeChooseWordCommand,
+  serializeJoinRoomCommand,
+  serializeResumeSessionCommand,
+  serializeChatMessageCommand,
+} from "@/lib/ws-client";
 import {
   appendDrawingHintRows,
   type MatchHintFeedRow,
 } from "@/features/lobby/lib/drawing-hint-rows";
+import {
+  clearGuestSessionForRoomCode,
+  clearPersistedRoomSession,
+  loadGuestSessionForRoomCode,
+  persistGuestSessionForRoomCode,
+  persistRoomSession,
+} from "@/features/lobby/lib/persist-room-session";
 
 type ChatFeedEvent = Extract<
   ServerEvent,
@@ -104,10 +117,23 @@ const TERMINAL_PROTOCOL_CODES_AFTER_JOINED = new Set([
   "BAD_PAYLOAD",
   "INTERNAL",
   "JOIN_NOT_ALLOWED",
+  "UNKNOWN_ROOM",
+  "ROOM_FULL",
+  "INVALID_SESSION",
   "HOST_SESSION_LOST",
   "HOST_RECLAIM_DENIED",
   "ALREADY_CONNECTED",
 ]);
+
+type GuestSessionContext = {
+  roomId: string;
+  roomCode: string;
+  playerId: string;
+  reconnectToken: string;
+  displayName: string;
+  avatarPresetId: AvatarPresetId;
+  lastPhase: RoomPhase;
+};
 
 export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomResult {
   const {
@@ -131,6 +157,22 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
   const closedWhileJoinedRef = useRef(false);
   const wsRef = useRef<WebSocket | null>(null);
   const joinedRoomIdRef = useRef<string | null>(null);
+  /** Story 5.1 — persisted mid-match reconnect (same tab closure or reload intent). */
+  const guestResumeRef = useRef<GuestSessionContext | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onPageHide = () => {
+      if (!reachedJoinedRef.current || !guestResumeRef.current) return;
+      try {
+        sessionStorage.setItem(`skribbl:intent-guest-resume:${normalized}`, "1");
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, [normalized]);
 
   const sendGameJsonLine = useCallback((raw: string) => {
     const w = wsRef.current;
@@ -171,6 +213,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
       reachedJoinedRef.current = false;
       closedWhileJoinedRef.current = false;
       joinedRoomIdRef.current = null;
+      guestResumeRef.current = null;
       return;
     }
 
@@ -186,8 +229,41 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
     setTransportErrorMessage(undefined);
 
     const retryAfterJoinedDrop = closedWhileJoinedRef.current;
-    setConnectionReason(retryAfterJoinedDrop ? "after-drop" : "first");
-    setTransport(retryAfterJoinedDrop ? "reconnecting" : "connecting");
+    const intentGuest =
+      typeof window !== "undefined"
+        ? sessionStorage.getItem(`skribbl:intent-guest-resume:${normalized}`)
+        : null;
+    let guestResumeCtx = retryAfterJoinedDrop ? guestResumeRef.current : null;
+    let guestResumedCold = false;
+    if (!guestResumeCtx && intentGuest === "1") {
+      const persisted = loadGuestSessionForRoomCode(normalized);
+      if (
+        persisted &&
+        persisted.kind === "guest" &&
+        persisted.reconnectToken.length >= 16
+      ) {
+        guestResumeCtx = {
+          roomId: persisted.roomId,
+          roomCode: persisted.roomCode,
+          playerId: persisted.playerId,
+          reconnectToken: persisted.reconnectToken,
+          displayName: persisted.displayName,
+          avatarPresetId: persisted.avatarPresetId,
+          lastPhase: persisted.lastPhase,
+        };
+        guestResumeRef.current = guestResumeCtx;
+        try {
+          sessionStorage.removeItem(`skribbl:intent-guest-resume:${normalized}`);
+        } catch {
+          /* ignore */
+        }
+        guestResumedCold = true;
+      }
+    }
+
+    const afterJoinUx = retryAfterJoinedDrop || guestResumedCold;
+    setConnectionReason(afterJoinUx ? "after-drop" : "first");
+    setTransport(afterJoinUx ? "reconnecting" : "connecting");
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -204,9 +280,23 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
     ws.addEventListener("open", () => {
       setTransport("live");
       try {
-        ws.send(
-          serializeJoinRoomCommand(normalized, displayName, avatarPresetId),
-        );
+        const g = guestResumeCtx;
+        if (
+          g !== null &&
+          (isMatchFlowPhase(g.lastPhase) || g.lastPhase === "matchEnded")
+        ) {
+          ws.send(
+            serializeResumeSessionCommand(
+              g.roomId,
+              g.playerId,
+              g.reconnectToken,
+              g.displayName,
+              g.avatarPresetId,
+            ),
+          );
+        } else {
+          ws.send(serializeJoinRoomCommand(normalized, displayName, avatarPresetId));
+        }
       } catch {
         fail("Could not send join request. Try again.");
       }
@@ -231,6 +321,24 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
         case "roomJoined":
           reachedJoinedRef.current = true;
           closedWhileJoinedRef.current = false;
+          const gGuest: GuestSessionContext = {
+            roomId: parsed.data.roomId,
+            roomCode: parsed.data.roomCode,
+            playerId: parsed.data.playerId,
+            reconnectToken: parsed.data.reconnectToken,
+            displayName: parsed.data.displayName,
+            avatarPresetId: parsed.data.avatarPresetId,
+            lastPhase: parsed.data.phase,
+          };
+          guestResumeRef.current = gGuest;
+          persistRoomSession({
+            kind: "guest",
+            ...gGuest,
+          });
+          persistGuestSessionForRoomCode(normalized, {
+            kind: "guest",
+            ...gGuest,
+          });
           setState({
             status: "joined",
             roomId: parsed.data.roomId,
@@ -372,6 +480,12 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
           if (errEv.type !== "error") return;
           const code = errEv.code;
           if (!reachedJoinedRef.current) {
+            if (TERMINAL_PROTOCOL_CODES_AFTER_JOINED.has(code)) {
+              const rid = guestResumeRef.current?.roomId;
+              guestResumeRef.current = null;
+              if (rid) clearPersistedRoomSession(rid);
+              clearGuestSessionForRoomCode(normalized);
+            }
             setTransport("fatal");
             setTransportErrorMessage(messageForProtocolErrorCode(code));
             setState({
@@ -383,6 +497,10 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
           }
           if (TERMINAL_PROTOCOL_CODES_AFTER_JOINED.has(code)) {
             reachedJoinedRef.current = false;
+            const rid = guestResumeRef.current?.roomId;
+            guestResumeRef.current = null;
+            if (rid) clearPersistedRoomSession(rid);
+            clearGuestSessionForRoomCode(normalized);
             setTransport("fatal");
             setTransportErrorMessage(messageForProtocolErrorCode(code));
             setState({
@@ -503,6 +621,26 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
     avatarPresetId,
   ]);
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  useEffect(() => {
+    if (state.status !== "joined") return;
+    const g = guestResumeRef.current;
+    if (!g || g.roomId !== state.roomId) return;
+    if (g.lastPhase === state.phase) return;
+    g.lastPhase = state.phase;
+    const pack = {
+      kind: "guest" as const,
+      roomId: g.roomId,
+      roomCode: state.roomCode,
+      playerId: g.playerId,
+      reconnectToken: g.reconnectToken,
+      displayName: g.displayName,
+      avatarPresetId: g.avatarPresetId,
+      lastPhase: state.phase,
+    };
+    persistRoomSession(pack);
+    persistGuestSessionForRoomCode(normalized, pack);
+  }, [state, normalized]);
 
   const chooseWord = useCallback((choiceIndex: 0 | 1 | 2) => {
     const w = wsRef.current;

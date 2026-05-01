@@ -15,12 +15,14 @@ export function messageForProtocolErrorCode(code: string): string {
     case "HOST_SESSION_LOST":
       return "This lobby is no longer on the game server (it may have closed or the server restarted). Create a new room.";
     case "ALREADY_CONNECTED":
-      return "This host session looks like it is already connected elsewhere. Close other tabs or try again.";
+      return "This session is already connected in another tab. Close the other tab or continue there.";
     case "ROOM_FULL":
       return "That room is full. Try again later or ask the host to make space.";
     // Epic 2+: when match is not in lobby — placeholder until server emits this code.
     case "JOIN_NOT_ALLOWED":
       return "That room is not accepting joins right now. The match may have already started.";
+    case "INVALID_SESSION":
+      return "Your session expired or doesn't match this room. Rejoin with the room code, or ask the host for a fresh invite.";
     case "BAD_NICKNAME":
       return "Enter a display name (letters, numbers, or symbols — no HTML).";
     case "NICKNAME_TOO_LONG":

@@ -85,13 +85,14 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
     avatarPresetId: avatarPresetIdSchema.optional(),
   }),
   /**
-   * Host-only: reclaim the same lobby after a transport drop (Story 1.7+).
-   * Requires the canonical `playerId` issued in the original `roomCreated`.
+   * Host or guest: reclaim the same room after transport loss or reload (Story 5.1 — FR25).
+   * Requires opaque `reconnectToken` from `roomCreated` / `roomJoined` plus canonical `playerId`.
    */
   z.object({
-    type: z.literal("reconnectHost"),
-    roomId: z.string(),
-    playerId: z.string(),
+    type: z.literal("resumeSession"),
+    roomId: z.string().min(1),
+    playerId: z.string().min(1),
+    reconnectToken: z.string().min(16),
     displayName: z.string(),
     avatarPresetId: avatarPresetIdSchema.optional(),
   }),
@@ -194,6 +195,8 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     /** Sanitized display name (plain text; never HTML). */
     displayName: z.string(),
     avatarPresetId: avatarPresetIdSchema,
+    /** Server-issued opaque reconnect credential (Story 5.1 — not derivable from playerId alone). */
+    reconnectToken: z.string().min(16),
   }),
   z.object({
     type: z.literal("roomJoined"),
@@ -204,6 +207,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     playerId: z.string(),
     displayName: z.string(),
     avatarPresetId: avatarPresetIdSchema,
+    reconnectToken: z.string().min(16),
   }),
   z.object({
     type: z.literal("lobbyRoster"),

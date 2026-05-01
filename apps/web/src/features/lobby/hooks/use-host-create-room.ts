@@ -21,7 +21,7 @@ import {
 import { missingGameWebSocketUrlUserMessage, resolveGameWebSocketUrl } from "@/lib/game-ws-url";
 import {
   serializeCreateRoomCommand,
-  serializeReconnectHostCommand,
+  serializeResumeSessionCommand,
   serializeStartMatchCommand,
   serializeChooseWordCommand,
   serializeReturnToLobbyCommand,
@@ -31,6 +31,13 @@ import {
   appendDrawingHintRows,
   type MatchHintFeedRow,
 } from "@/features/lobby/lib/drawing-hint-rows";
+import {
+  clearLastActiveHostRoom,
+  clearPersistedRoomSession,
+  loadLastActiveHostRoom,
+  persistLastActiveHostRoom,
+  persistRoomSession,
+} from "@/features/lobby/lib/persist-room-session";
 
 type ChatFeedEvent = Extract<
   ServerEvent,
@@ -111,16 +118,22 @@ const TERMINAL_PROTOCOL_CODES_AFTER_LOBBY = new Set([
   "BAD_PAYLOAD",
   "INTERNAL",
   "JOIN_NOT_ALLOWED",
+  "UNKNOWN_ROOM",
+  "ROOM_FULL",
   "HOST_SESSION_LOST",
   "HOST_RECLAIM_DENIED",
+  "INVALID_SESSION",
   "ALREADY_CONNECTED",
 ]);
 
 type HostResumeContext = {
   roomId: string;
+  roomCode: string;
   playerId: string;
+  reconnectToken: string;
   displayName: string;
   avatarPresetId: AvatarPresetId;
+  lastPhase: RoomPhase;
 };
 
 export function useHostCreateRoom(
@@ -162,8 +175,25 @@ export function useHostCreateRoom(
   }, []);
   /** Set when the socket closes after the host reached the lobby; drives “reconnecting” copy on retry. */
   const closedWhileInLobbyRef = useRef(false);
-  /** Latest successful `roomCreated` — used for `reconnectHost` after a transport drop. */
+  /** Latest successful handshake — Story 5.1 `resumeSession` after drop or reload. */
   const hostResumeContextRef = useRef<HostResumeContext | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onPageHide = () => {
+      if (!reachedLobbyRef.current || !hostResumeContextRef.current) return;
+      try {
+        sessionStorage.setItem(
+          "skribbl:intent-host-resume-room",
+          hostResumeContextRef.current.roomId,
+        );
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, []);
 
   /* eslint-disable react-hooks/set-state-in-effect -- WebSocket subscription: transport and lobby state track open/message/error/close. */
   useEffect(() => {
@@ -182,10 +212,45 @@ export function useHostCreateRoom(
     setTransportErrorMessage(undefined);
 
     const retryAfterLobbyDrop = closedWhileInLobbyRef.current;
-    const resume = retryAfterLobbyDrop ? hostResumeContextRef.current : null;
-    setConnectionReason(retryAfterLobbyDrop ? "after-drop" : "first");
-    setTransport(retryAfterLobbyDrop ? "reconnecting" : "connecting");
-    if (!retryAfterLobbyDrop) {
+    const intentRoomId =
+      typeof window !== "undefined"
+        ? sessionStorage.getItem("skribbl:intent-host-resume-room")
+        : null;
+    let resumeHostCtx = retryAfterLobbyDrop ? hostResumeContextRef.current : null;
+    let resumedFromCold = false;
+
+    if (!resumeHostCtx && intentRoomId) {
+      const persisted = loadLastActiveHostRoom();
+      if (
+        persisted &&
+        persisted.kind === "host" &&
+        persisted.roomId === intentRoomId &&
+        persisted.reconnectToken.length >= 16
+      ) {
+        resumeHostCtx = {
+          roomId: persisted.roomId,
+          roomCode: persisted.roomCode,
+          playerId: persisted.playerId,
+          reconnectToken: persisted.reconnectToken,
+          displayName: persisted.displayName,
+          avatarPresetId: persisted.avatarPresetId,
+          lastPhase: persisted.lastPhase,
+        };
+        hostResumeContextRef.current = resumeHostCtx;
+        try {
+          sessionStorage.removeItem("skribbl:intent-host-resume-room");
+        } catch {
+          /* ignore */
+        }
+        resumedFromCold = true;
+      }
+    }
+
+    const afterDropUx = retryAfterLobbyDrop || resumedFromCold;
+
+    setConnectionReason(afterDropUx ? "after-drop" : "first");
+    setTransport(afterDropUx ? "reconnecting" : "connecting");
+    if (!afterDropUx) {
       setState({ status: "connecting" });
     }
 
@@ -206,13 +271,14 @@ export function useHostCreateRoom(
       setTransport("live");
       setAwaitingHandshake(true);
       try {
-        if (resume) {
+        if (resumeHostCtx) {
           ws.send(
-            serializeReconnectHostCommand(
-              resume.roomId,
-              resume.playerId,
-              resume.displayName,
-              resume.avatarPresetId,
+            serializeResumeSessionCommand(
+              resumeHostCtx.roomId,
+              resumeHostCtx.playerId,
+              resumeHostCtx.reconnectToken,
+              resumeHostCtx.displayName,
+              resumeHostCtx.avatarPresetId,
             ),
           );
         } else {
@@ -245,10 +311,33 @@ export function useHostCreateRoom(
           setAwaitingHandshake(false);
           hostResumeContextRef.current = {
             roomId: parsed.data.roomId,
+            roomCode: parsed.data.roomCode,
             playerId: parsed.data.playerId,
+            reconnectToken: parsed.data.reconnectToken,
             displayName: parsed.data.displayName,
             avatarPresetId: parsed.data.avatarPresetId,
+            lastPhase: parsed.data.phase,
           };
+          persistRoomSession({
+            kind: "host",
+            roomId: parsed.data.roomId,
+            roomCode: parsed.data.roomCode,
+            playerId: parsed.data.playerId,
+            reconnectToken: parsed.data.reconnectToken,
+            displayName: parsed.data.displayName,
+            avatarPresetId: parsed.data.avatarPresetId,
+            lastPhase: parsed.data.phase,
+          });
+          persistLastActiveHostRoom({
+            kind: "host",
+            roomId: parsed.data.roomId,
+            roomCode: parsed.data.roomCode,
+            playerId: parsed.data.playerId,
+            reconnectToken: parsed.data.reconnectToken,
+            displayName: parsed.data.displayName,
+            avatarPresetId: parsed.data.avatarPresetId,
+            lastPhase: parsed.data.phase,
+          });
           setState({
             status: "lobby",
             roomId: parsed.data.roomId,
@@ -390,12 +479,18 @@ export function useHostCreateRoom(
           if (!reachedLobbyRef.current) {
             setAwaitingHandshake(false);
             if (
+              err.code === "UNKNOWN_ROOM" ||
+              err.code === "ROOM_FULL" ||
               err.code === "HOST_SESSION_LOST" ||
               err.code === "HOST_RECLAIM_DENIED" ||
-              err.code === "ALREADY_CONNECTED"
+              err.code === "ALREADY_CONNECTED" ||
+              err.code === "INVALID_SESSION"
             ) {
+              const rid = hostResumeContextRef.current?.roomId;
               hostResumeContextRef.current = null;
               closedWhileInLobbyRef.current = false;
+              if (rid) clearPersistedRoomSession(rid);
+              clearLastActiveHostRoom();
             }
             setTransport("fatal");
             setTransportErrorMessage(messageForProtocolErrorCode(err.code));
@@ -407,9 +502,12 @@ export function useHostCreateRoom(
           }
           if (TERMINAL_PROTOCOL_CODES_AFTER_LOBBY.has(err.code)) {
             setAwaitingHandshake(false);
+            const rid = hostResumeContextRef.current?.roomId;
             hostResumeContextRef.current = null;
             closedWhileInLobbyRef.current = false;
             reachedLobbyRef.current = false;
+            if (rid) clearPersistedRoomSession(rid);
+            clearLastActiveHostRoom();
             setTransport("fatal");
             setTransportErrorMessage(messageForProtocolErrorCode(err.code));
             setState({
@@ -527,6 +625,26 @@ export function useHostCreateRoom(
     };
   }, [wsUrl, shouldConnect, attemptId, displayName, avatarPresetId]);
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  useEffect(() => {
+    if (state.status !== "lobby") return;
+    const ctx = hostResumeContextRef.current;
+    if (!ctx || ctx.roomId !== state.roomId) return;
+    if (ctx.lastPhase === state.phase) return;
+    ctx.lastPhase = state.phase;
+    const pack = {
+      kind: "host" as const,
+      roomId: ctx.roomId,
+      roomCode: state.roomCode,
+      playerId: ctx.playerId,
+      reconnectToken: ctx.reconnectToken,
+      displayName: ctx.displayName,
+      avatarPresetId: ctx.avatarPresetId,
+      lastPhase: state.phase,
+    };
+    persistRoomSession(pack);
+    persistLastActiveHostRoom(pack);
+  }, [state]);
 
   const startMatch = useCallback(() => {
     const w = wsRef.current;

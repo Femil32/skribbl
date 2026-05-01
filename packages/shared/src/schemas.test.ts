@@ -144,7 +144,7 @@ describe("serverEventSchema", () => {
     expect(safeParseServerEvent({ type: "roomJoined" }).success).toBe(false);
   });
 
-  it("accepts roomCreated with identity", () => {
+  it("accepts roomCreated with identity + reconnectToken", () => {
     const result = serverEventSchema.safeParse({
       type: "roomCreated",
       roomId: "550e8400-e29b-41d4-a716-446655440000",
@@ -153,6 +153,7 @@ describe("serverEventSchema", () => {
       playerId: "660e8400-e29b-41d4-a716-446655440001",
       displayName: "Pat",
       avatarPresetId: "preset-1",
+      reconnectToken: "0123456789abcdef0123456789abcd",
     });
     expect(result.success).toBe(true);
   });
@@ -387,16 +388,17 @@ describe("serializeClientCommand", () => {
     expect(result.success).toBe(true);
   });
 
-  it("round-trips reconnectHost", () => {
+  it("round-trips resumeSession", () => {
     const line = serializeClientCommand({
-      type: "reconnectHost",
+      type: "resumeSession",
       roomId: "550e8400-e29b-41d4-a716-446655440000",
       playerId: "660e8400-e29b-41d4-a716-446655440001",
+      reconnectToken: "0123456789abcdef0123456789abcdef",
       displayName: "Pat",
       avatarPresetId: "preset-1",
     });
     const parsed = clientCommandSchema.safeParse(JSON.parse(line));
     expect(parsed.success).toBe(true);
-    if (parsed.success) expect(parsed.data.type).toBe("reconnectHost");
+    if (parsed.success) expect(parsed.data.type).toBe("resumeSession");
   });
 });

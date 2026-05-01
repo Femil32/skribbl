@@ -1,5 +1,5 @@
 import type { WebSocket } from "ws";
-import type { RoomPhase } from "@skribbl/shared";
+import type { AvatarPresetId, RoomPhase } from "@skribbl/shared";
 
 /**
  * In-memory room aggregate (Story 1.2 skeleton): code, capacity, lobby phase.
@@ -47,6 +47,18 @@ export class Room {
   readonly sockets = new Set<WebSocket>();
   hostSocket: WebSocket | null = null;
   readonly maxPlayers: number;
+
+  /**
+   * Opaque reconnect secret per seated `playerId` (Story 5.1 — FR25).
+   * Cleared when a lobby-phase guest disconnects voluntarily; survives host lobby drop + mid-match disconnects until room teardown.
+   */
+  readonly reconnectSecretsByPlayerId = new Map<string, string>();
+
+  /** Mid-/post-match disconnect: stable identity preserved until `resumeSession` (snapshot replay is Story 5.2). */
+  readonly offlineIdentityByPlayerId = new Map<
+    string,
+    { displayName: string; avatarPresetId: AvatarPresetId }
+  >();
 
   constructor(opts: { id: string; code: string; maxPlayers: number; hostPlayerId: string }) {
     this.id = opts.id;

@@ -138,6 +138,11 @@ export function handleClientCommand(
         sendProtocolError(ws, "INTERNAL", "Could not create session", roomManager);
         return;
       }
+      const reconnectToken = room.reconnectSecretsByPlayerId.get(session.playerId);
+      if (!reconnectToken) {
+        sendProtocolError(ws, "INTERNAL", "Could not create session", roomManager);
+        return;
+      }
       sendServerEvent(
         ws,
         {
@@ -148,6 +153,7 @@ export function handleClientCommand(
           playerId: session.playerId,
           displayName: session.displayName,
           avatarPresetId: session.avatarPresetId,
+          reconnectToken,
         },
         roomManager,
       );
@@ -194,6 +200,11 @@ export function handleClientCommand(
         sendProtocolError(ws, "INTERNAL", "Could not create session", roomManager);
         return;
       }
+      const reconnectToken = room.reconnectSecretsByPlayerId.get(session.playerId);
+      if (!reconnectToken) {
+        sendProtocolError(ws, "INTERNAL", "Could not create session", roomManager);
+        return;
+      }
       sendServerEvent(
         ws,
         {
@@ -205,13 +216,14 @@ export function handleClientCommand(
           playerId: session.playerId,
           displayName: session.displayName,
           avatarPresetId: session.avatarPresetId,
+          reconnectToken,
         },
         roomManager,
       );
       roomManager.broadcastLobbyRoster(room);
       return;
     }
-    case "reconnectHost": {
+    case "resumeSession": {
       const identity = parseLobbyPlayer(cmd);
       if (!identity.ok) {
         sendProtocolError(
@@ -226,49 +238,79 @@ export function handleClientCommand(
         );
         return;
       }
-      const outcome = roomManager.reconnectHost(ws, cmd.roomId, cmd.playerId, identity);
+      const outcome = roomManager.resumeSession(
+        ws,
+        cmd.roomId,
+        cmd.playerId,
+        cmd.reconnectToken,
+        identity,
+      );
       if (!outcome.ok) {
         const errorCode =
           outcome.reason === "UNKNOWN_ROOM"
-            ? "HOST_SESSION_LOST"
-            : outcome.reason === "NOT_HOST"
-              ? "HOST_RECLAIM_DENIED"
-              : outcome.reason;
+            ? "UNKNOWN_ROOM"
+            : outcome.reason === "INVALID_SESSION"
+              ? "INVALID_SESSION"
+              : outcome.reason === "ROOM_FULL"
+                ? "ROOM_FULL"
+                : "ALREADY_CONNECTED";
         sendProtocolError(
           ws,
           errorCode,
           outcome.reason === "UNKNOWN_ROOM"
-            ? "This lobby is no longer on the server. Create a new room."
-            : outcome.reason === "JOIN_NOT_ALLOWED"
-              ? "Game already started"
-              : outcome.reason === "NOT_HOST"
-                ? "Could not reclaim the host session. Create a new room."
-                : outcome.reason === "ROOM_FULL"
-                  ? "Room is full"
-                  : "This host session is already connected.",
+            ? "That room no longer exists on this server."
+            : outcome.reason === "INVALID_SESSION"
+              ? "This session is no longer valid. Rejoin with the room code or start a new room."
+              : outcome.reason === "ROOM_FULL"
+                ? "That room is full."
+                : "This session is already connected in another tab. Close the other tab or continue there.",
           roomManager,
         );
         return;
       }
-      const { room } = outcome;
+      const { room, resumeKind } = outcome;
       const session = roomManager.getLobbySession(ws);
       if (!session) {
         sendProtocolError(ws, "INTERNAL", "Could not create session", roomManager);
         return;
       }
-      sendServerEvent(
-        ws,
-        {
-          type: "roomCreated",
-          roomId: room.id,
-          roomCode: room.code,
-          phase: room.phase,
-          playerId: session.playerId,
-          displayName: session.displayName,
-          avatarPresetId: session.avatarPresetId,
-        },
-        roomManager,
-      );
+      const reconnectToken = room.reconnectSecretsByPlayerId.get(session.playerId);
+      if (!reconnectToken) {
+        sendProtocolError(ws, "INTERNAL", "Could not create session", roomManager);
+        return;
+      }
+      if (resumeKind === "host") {
+        sendServerEvent(
+          ws,
+          {
+            type: "roomCreated",
+            roomId: room.id,
+            roomCode: room.code,
+            phase: room.phase,
+            playerId: session.playerId,
+            displayName: session.displayName,
+            avatarPresetId: session.avatarPresetId,
+            reconnectToken,
+          },
+          roomManager,
+        );
+      } else {
+        sendServerEvent(
+          ws,
+          {
+            type: "roomJoined",
+            roomId: room.id,
+            roomCode: room.code,
+            phase: room.phase,
+            playerCount: room.playerCount,
+            playerId: session.playerId,
+            displayName: session.displayName,
+            avatarPresetId: session.avatarPresetId,
+            reconnectToken,
+          },
+          roomManager,
+        );
+      }
       roomManager.broadcastLobbyRoster(room);
       return;
     }

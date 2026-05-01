@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import pino from "pino";
 import {
   assertChatMessageLength,
@@ -55,12 +55,20 @@ export type JoinRoomFailureReason =
   | "ROOM_FULL"
   | "JOIN_NOT_ALLOWED";
 
-export type ReconnectHostFailureReason =
+/** Story 5.1 — tokenized resume (replaces reconnectHost lobby-only reclaim). */
+export type ResumeSessionFailureReason =
   | "UNKNOWN_ROOM"
-  | "JOIN_NOT_ALLOWED"
-  | "NOT_HOST"
-  | "ROOM_FULL"
-  | "ALREADY_CONNECTED";
+  | "INVALID_SESSION"
+  | "ALREADY_CONNECTED"
+  | "ROOM_FULL";
+
+function timingSafeTokenEqual(shared: string, secret: string): boolean {
+  if (typeof shared !== "string" || typeof secret !== "string") return false;
+  const a = Buffer.from(shared, "utf8");
+  const b = Buffer.from(secret, "utf8");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
 
 export type NewLobbyPlayer = Pick<
   LobbySessionIdentity,
@@ -673,6 +681,10 @@ export class RoomManager {
     return { ok: true };
   }
 
+  private mintReconnectSecret(): string {
+    return randomBytes(32).toString("base64url");
+  }
+
   /** Unique non-guessable code using crypto-grade randomness + collision retry. */
   private generateUniqueCode(): string {
     const alphabet = ROOM_CODE_ALPHABET;
@@ -690,6 +702,7 @@ export class RoomManager {
   }
 
   leaveSocketRoom(ws: WebSocket): void {
+    const identity = this.socketLobbyIdentity.get(ws);
     const roomId = this.socketToRoomId.get(ws);
     if (!roomId) {
       this.socketLobbyIdentity.delete(ws);
@@ -702,6 +715,24 @@ export class RoomManager {
         const next = room.sockets.values().next().value as WebSocket | undefined;
         room.hostSocket = next ?? null;
       }
+
+      if (identity) {
+        const inLobbyOnly = room.phase === "lobby";
+        const isCanonicalHost = identity.playerId === room.hostPlayerId;
+        /** Lobby-phase guest dropout: revoke token (they must `joinRoom` again for a new slot). */
+        if (inLobbyOnly && !isCanonicalHost) {
+          room.reconnectSecretsByPlayerId.delete(identity.playerId);
+          room.offlineIdentityByPlayerId.delete(identity.playerId);
+        }
+        /** Any non-lobby phase (including `matchEnded`): keep seat bound for FR25 reconnect. */
+        if (!inLobbyOnly) {
+          room.offlineIdentityByPlayerId.set(identity.playerId, {
+            displayName: identity.displayName,
+            avatarPresetId: identity.avatarPresetId,
+          });
+        }
+      }
+
       const survivors = room.sockets.size;
       if (survivors === 0) {
         this.clearMatchTimers(room.id);
@@ -739,38 +770,88 @@ export class RoomManager {
     this.roomsByCode.set(code, room);
     this.roomsById.set(room.id, room);
     this.socketToRoomId.set(ws, room.id);
+    room.reconnectSecretsByPlayerId.set(playerId, this.mintReconnectSecret());
     return room;
   }
 
-  reconnectHost(
+  /**
+   * Unified host + guest reattach after transport loss or reload (Story 5.1 — FR25).
+   * Validates opaque `reconnectToken` server-side before binding the socket — supersedes old `roomId + playerId` host-only trust model.
+   *
+   * Duplicate-tab policy: `resumeSession_rejects_duplicate_tab_already_connected` — first socket stays; a second presenting the same credential gets `ALREADY_CONNECTED` (no migration / replacement).
+   */
+  resumeSession(
     ws: WebSocket,
     roomId: string,
     expectedPlayerId: string,
-    player: NewLobbyPlayer,
-  ): { ok: true; room: Room } | { ok: false; reason: ReconnectHostFailureReason } {
+    reconnectToken: string,
+    playerFromWire: NewLobbyPlayer,
+  ):
+    | { ok: true; room: Room; resumeKind: "host" | "guest" }
+    | { ok: false; reason: ResumeSessionFailureReason } {
     const room = this.roomsById.get(roomId);
     if (!room) return { ok: false, reason: "UNKNOWN_ROOM" };
-    if (room.phase !== "lobby") return { ok: false, reason: "JOIN_NOT_ALLOWED" };
-    if (room.hostPlayerId !== expectedPlayerId) return { ok: false, reason: "NOT_HOST" };
+
+    if (typeof reconnectToken !== "string" || reconnectToken.length < 16) {
+      return { ok: false, reason: "INVALID_SESSION" };
+    }
 
     for (const s of room.sockets) {
       const id = this.socketLobbyIdentity.get(s);
       if (id?.playerId === expectedPlayerId) return { ok: false, reason: "ALREADY_CONNECTED" };
     }
 
-    if (!room.hasCapacity()) return { ok: false, reason: "ROOM_FULL" };
+    const expectedSecret = room.reconnectSecretsByPlayerId.get(expectedPlayerId);
+    if (
+      expectedSecret === undefined ||
+      !timingSafeTokenEqual(reconnectToken, expectedSecret)
+    ) {
+      return { ok: false, reason: "INVALID_SESSION" };
+    }
+
+    const hasOfflineSeat = room.offlineIdentityByPlayerId.has(expectedPlayerId);
+    const hostLobbyReattach =
+      room.phase === "lobby" &&
+      expectedPlayerId === room.hostPlayerId &&
+      !hasOfflineSeat;
+
+    if (!hasOfflineSeat && !hostLobbyReattach) {
+      return { ok: false, reason: "INVALID_SESSION" };
+    }
+
+    if (!hasOfflineSeat && !room.hasCapacity()) {
+      return { ok: false, reason: "ROOM_FULL" };
+    }
 
     this.leaveSocketRoom(ws);
 
-    this.socketLobbyIdentity.set(ws, {
-      playerId: expectedPlayerId,
-      displayName: player.displayName,
-      avatarPresetId: player.avatarPresetId,
-    });
+    const offline = room.offlineIdentityByPlayerId.get(expectedPlayerId);
+    if (offline) {
+      room.offlineIdentityByPlayerId.delete(expectedPlayerId);
+    }
+
+    const sessionIdentity: LobbySessionIdentity = offline
+      ? {
+          playerId: expectedPlayerId,
+          displayName: offline.displayName,
+          avatarPresetId: offline.avatarPresetId,
+        }
+      : {
+          playerId: expectedPlayerId,
+          displayName: playerFromWire.displayName,
+          avatarPresetId: playerFromWire.avatarPresetId,
+        };
+
+    this.socketLobbyIdentity.set(ws, sessionIdentity);
     room.sockets.add(ws);
-    room.hostSocket = ws;
+    if (sessionIdentity.playerId === room.hostPlayerId) {
+      room.hostSocket = ws;
+    }
     this.socketToRoomId.set(ws, room.id);
-    return { ok: true, room };
+
+    const resumeKind: "host" | "guest" =
+      expectedPlayerId === room.hostPlayerId ? "host" : "guest";
+    return { ok: true, room, resumeKind };
   }
 
   /**
@@ -916,6 +997,7 @@ export class RoomManager {
     });
     room.sockets.add(ws);
     this.socketToRoomId.set(ws, room.id);
+    room.reconnectSecretsByPlayerId.set(playerId, this.mintReconnectSecret());
     return { ok: true, room };
   }
 

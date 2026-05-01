@@ -26,19 +26,21 @@ export function serializeCreateRoomCommand(
   });
 }
 
-/** Host reclaim after transport drop — same `playerId` from the original `roomCreated`. */
-export function serializeReconnectHostCommand(
+/** Host or guest reclaim after reload / disconnect — opaque `reconnectToken` from `roomCreated` / `roomJoined` (Story 5.1). */
+export function serializeResumeSessionCommand(
   roomId: string,
   playerId: string,
+  reconnectToken: string,
   displayName: string,
-  avatarPresetId: AvatarPresetId,
+  avatarPresetId?: AvatarPresetId,
 ): string {
   return serializeClientCommand({
-    type: "reconnectHost",
+    type: "resumeSession",
     roomId,
     playerId,
+    reconnectToken,
     displayName,
-    avatarPresetId,
+    ...(avatarPresetId !== undefined ? { avatarPresetId } : {}),
   });
 }
 

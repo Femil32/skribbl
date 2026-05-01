@@ -544,18 +544,21 @@ describe("handleClientCommand + RoomManager", () => {
     expect(r?.players.some((p) => p.displayName === "Hosty" && p.isHost)).toBe(true);
   });
 
-  it("reconnectHost reclaims lobby when the room still exists", () => {
+  it("resumeSession reclaims lobby when the room still exists", () => {
     const rm = new RoomManager(8, integrationWordBank());
     const host = captureWs();
     const guest = captureWs();
 
     handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
-    const created = parseServerEvent(JSON.parse(host.sent[0]!));
-    if (created.type !== "roomCreated") throw new Error("unexpected");
+    const createdEv = host.sent
+      .map((line) => parseServerEvent(JSON.parse(line)))
+      .find((e) => e.type === "roomCreated");
+    if (!createdEv || createdEv.type !== "roomCreated") throw new Error("unexpected");
+    expect(createdEv.reconnectToken.length).toBeGreaterThanOrEqual(16);
 
     handleClientCommand(
       guest.ws,
-      { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+      { type: "joinRoom", roomCode: createdEv.roomCode, ...guestIdentity },
       rm,
     );
 
@@ -565,9 +568,10 @@ describe("handleClientCommand + RoomManager", () => {
     handleClientCommand(
       host2.ws,
       {
-        type: "reconnectHost",
-        roomId: created.roomId,
-        playerId: created.playerId,
+        type: "resumeSession",
+        roomId: createdEv.roomId,
+        playerId: createdEv.playerId,
+        reconnectToken: createdEv.reconnectToken,
         displayName: "Hosty",
         avatarPresetId: "preset-1",
       },
@@ -577,28 +581,30 @@ describe("handleClientCommand + RoomManager", () => {
     const reclaim = parseServerEvent(JSON.parse(host2.sent[0]!));
     expect(reclaim.type).toBe("roomCreated");
     if (reclaim.type === "roomCreated") {
-      expect(reclaim.roomId).toBe(created.roomId);
-      expect(reclaim.playerId).toBe(created.playerId);
+      expect(reclaim.roomId).toBe(createdEv.roomId);
+      expect(reclaim.playerId).toBe(createdEv.playerId);
     }
     const r = lastLobbyRoster(host2.sent);
     expect(r?.players.length).toBe(2);
   });
 
-  it("reconnectHost after room dissolved yields HOST_SESSION_LOST", () => {
+  it("resumeSession after room dissolved yields UNKNOWN_ROOM", () => {
     const rm = new RoomManager(8, integrationWordBank());
     const host = captureWs();
     handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
     const created = parseServerEvent(JSON.parse(host.sent[0]!));
     if (created.type !== "roomCreated") throw new Error("unexpected");
+    const staleToken = created.reconnectToken;
     rm.leaveSocketRoom(host.ws);
 
     const host2 = captureWs();
     handleClientCommand(
       host2.ws,
       {
-        type: "reconnectHost",
+        type: "resumeSession",
         roomId: created.roomId,
         playerId: created.playerId,
+        reconnectToken: staleToken,
         displayName: "Hosty",
         avatarPresetId: "preset-1",
       },
@@ -606,7 +612,7 @@ describe("handleClientCommand + RoomManager", () => {
     );
     const ev = parseServerEvent(JSON.parse(host2.sent[0]!));
     expect(ev.type).toBe("error");
-    if (ev.type === "error") expect(ev.code).toBe("HOST_SESSION_LOST");
+    if (ev.type === "error") expect(ev.code).toBe("UNKNOWN_ROOM");
   });
 
   it("choosingWord: drawer receives wordChoiceOffer only; chooseWord enters drawing early", () => {
