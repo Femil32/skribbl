@@ -1,6 +1,6 @@
 # Story 4.2: Guess adjudication — exact match & spoiler-safe broadcasts
 
-Status: done
+Status: review
 
 <!-- gds-create-story (2026-05-01). Ultimate context engine analysis completed — comprehensive developer guide created. Brownfield: core server + shared logic already landed in dc342eb; dev-story should verify AC, close gaps, extend tests. -->
 
@@ -122,7 +122,6 @@ _(none)_
 
 - **2026-05-01** — Story authored via `gds-create-story 4-2`; status `ready-for-dev`.
 - **2026-05-01** — Dev story complete: tests + audits; status `review`; sprint entry `4-2-guess-adjudication-exact-match-spoiler-safe-broadcasts` → `review`.
-- **2026-05-01** — Code review addressed (composer grapheme parity, `lineForCorrectGuess` trim, chat error mapping, secret sanitize before compare); status `done`; sprint → `done`.
 
 ---
 
