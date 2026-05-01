@@ -22,6 +22,11 @@ type MatchChatPanelProps = {
   disabled: boolean;
 };
 
+/** Banner visibility duration (full motion preference). */
+export const CORRECT_GUESS_BANNER_MS = 3600;
+/** Shorter dwell time when prefers-reduced-motion matches UX-DR14. */
+export const CORRECT_GUESS_BANNER_MS_REDUCED_MOTION = 2200;
+
 /** Exported for unit tests — AC6: prefer server facts only (revealedWord vs censoredAnnouncement). */
 export function lineForCorrectGuess(
   ev: Extract<MatchChatFeedEvent, { type: "chatCorrectGuess" }>,
@@ -38,11 +43,20 @@ export function MatchChatPanel({ localPlayerId, feed, onSend, disabled }: MatchC
 
   useEffect(() => {
     const last = feed[feed.length - 1];
-    if (!last || last.type !== "chatCorrectGuess") return;
+    if (!last || last.type !== "chatCorrectGuess") {
+      /* eslint-disable-next-line react-hooks/set-state-in-effect -- drop celebration when feed focus moves past the latest correct guess */
+      setPulseBanner(null);
+      return;
+    }
     const text = lineForCorrectGuess(last);
+    /* eslint-disable-next-line react-hooks/set-state-in-effect -- banner mirrors newest chatCorrectGuess in feed snapshot */
     setPulseBanner(text);
-    const id = window.setTimeout(() => setPulseBanner(null), 3600);
-    return () => window.clearTimeout(id);
+    const prefersReduced =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const ms = prefersReduced ? CORRECT_GUESS_BANNER_MS_REDUCED_MOTION : CORRECT_GUESS_BANNER_MS;
+    const hideId = window.setTimeout(() => setPulseBanner(null), ms);
+    return () => window.clearTimeout(hideId);
   }, [feed]);
 
   useEffect(() => {
@@ -74,11 +88,15 @@ export function MatchChatPanel({ localPlayerId, feed, onSend, disabled }: MatchC
       </h2>
       {pulseBanner ? (
         <div
-          className="shrink-0 px-3 py-2 text-sm bg-success/15 text-success border-b border-success/30 motion-safe:animate-pulse motion-reduce:animate-none"
+          data-testid="correct-guess-pulse-banner"
+          className="shrink-0 flex items-start gap-2 px-3 py-2 text-sm bg-success/15 text-success border-b border-success/30 motion-safe:animate-pulse motion-reduce:animate-none"
           role="status"
           aria-live="polite"
         >
-          {pulseBanner}
+          <span className="shrink-0 text-base leading-tight mt-px" aria-hidden="true">
+            ✓
+          </span>
+          <span className="min-w-0">{pulseBanner}</span>
         </div>
       ) : null}
       <ol
@@ -117,9 +135,13 @@ export function MatchChatPanel({ localPlayerId, feed, onSend, disabled }: MatchC
           return (
             <li
               key={`${ev.id}:${ev.ts}`}
-              className="text-sm text-success font-medium text-start break-words"
+              className="text-sm text-success font-medium text-start break-words flex gap-2 items-start"
+              data-chat-row="correctGuess"
             >
-              {lineForCorrectGuess(ev)}
+              <span className="shrink-0 mt-px" aria-hidden="true">
+                ✓
+              </span>
+              <span className="min-w-0">{lineForCorrectGuess(ev)}</span>
             </li>
           );
         })}

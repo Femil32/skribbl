@@ -1,5 +1,5 @@
 # generated: 2026-04-29T12:00:00Z
-# last_updated: 2026-05-01 (4-3 → done)
+# last_updated: 2026-05-01 — 4-4 done + pulse-banner tail fix; 4-2 in review
 # project: skribbl
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,8 +35,8 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: '2026-04-29T00:00:00Z'
-last_updated: '2026-05-01T23:59:00Z'
-# Epic 4: 4-1 done; 4-2 review; 4-3 done; 4-4 backlog.
+last_updated: '2026-05-01T12:00:00Z'
+# Epic 4: 4-1 done; 4-2 review; 4-3 done; 4-4 done (post-review UI fix landed).
 project: skribbl
 project_key: NOKEY
 tracking_system: file-system
@@ -76,7 +76,7 @@ development_status:
   4-1-chatpanel-composer-realtime-history: done
   4-2-guess-adjudication-exact-match-spoiler-safe-broadcasts: review
   4-3-score-awards-drawer-bonuses-wiring: done
-  4-4-correct-guess-fan-out-messaging-ux-beats: backlog
+  4-4-correct-guess-fan-out-messaging-ux-beats: done
   epic-4-retrospective: optional
 
   epic-5: backlog
