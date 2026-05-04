@@ -10,7 +10,6 @@ import {
   avatarPresets,
   countGraphemes,
   isMatchFlowPhase,
-  isRosterScoreVisiblePhase,
   isValidRoomCodeForJoin,
   normalizeRoomCode,
   sanitizeDisplayName,
@@ -360,7 +359,9 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                 <LobbyPlayerRoster
                   players={guestState.players}
                   localPlayerId={guestState.playerId}
-                  showScores={isRosterScoreVisiblePhase(guestState.phase)}
+                  maxPlayers={12}
+                  accent="#ff5a3c"
+                  isHost={false}
                 />
               </div>
               <div className="space-y-2">
