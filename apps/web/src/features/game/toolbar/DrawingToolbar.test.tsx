@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -158,7 +158,77 @@ describe("DrawingToolbar", () => {
     await user.click(screen.getByTestId("drawing-clear-confirm"));
 
     expect(sendJsonLine).toHaveBeenCalledTimes(1);
-    const raw = sendJsonLine.mock.calls[0]![0] as string;
-    expect(JSON.parse(raw)).toEqual({ type: "drawingCanvasClear", roomId: "rid-99" });
+    const raw = sendJsonLine.mock.calls[0]?.[0];
+    expect(raw).toBeDefined();
+    expect(JSON.parse(raw as string)).toEqual({ type: "drawingCanvasClear", roomId: "rid-99" });
+  });
+
+  it("clear dialog is a modal dialog with accessible name", async () => {
+    const user = userEvent.setup();
+    render(
+      <DrawingToolbar
+        phase="drawing"
+        isDrawer
+        roomId="r1"
+        sendJsonLine={() => {}}
+        activeTool="brush"
+        onActiveToolChange={() => {}}
+        brushColor="#0f172a"
+        brushWidthPx={4}
+        onBrushColorChange={() => {}}
+        onBrushWidthChange={() => {}}
+      />,
+    );
+
+    await user.click(screen.getByTestId("drawing-tool-clear"));
+    const dlg = screen.getByRole("dialog", { name: /clear the canvas/i });
+    expect(dlg.tagName.toLowerCase()).toBe("dialog");
+  });
+
+  it("focuses first actionable control in clear dialog when opened", async () => {
+    const user = userEvent.setup();
+    render(
+      <DrawingToolbar
+        phase="drawing"
+        isDrawer
+        roomId="r1"
+        sendJsonLine={() => {}}
+        activeTool="brush"
+        onActiveToolChange={() => {}}
+        brushColor="#0f172a"
+        brushWidthPx={4}
+        onBrushColorChange={() => {}}
+        onBrushWidthChange={() => {}}
+      />,
+    );
+
+    await user.click(screen.getByTestId("drawing-tool-clear"));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^cancel$/i })).toHaveFocus();
+    });
+  });
+
+  it("Escape closes clear dialog without sending clear command", async () => {
+    const user = userEvent.setup();
+    const sendJsonLine = vi.fn();
+    render(
+      <DrawingToolbar
+        phase="drawing"
+        isDrawer
+        roomId="r1"
+        sendJsonLine={sendJsonLine}
+        activeTool="brush"
+        onActiveToolChange={() => {}}
+        brushColor="#0f172a"
+        brushWidthPx={4}
+        onBrushColorChange={() => {}}
+        onBrushWidthChange={() => {}}
+      />,
+    );
+
+    await user.click(screen.getByTestId("drawing-tool-clear"));
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: /clear the canvas/i })).toBeNull();
+    expect(sendJsonLine).not.toHaveBeenCalled();
   });
 });

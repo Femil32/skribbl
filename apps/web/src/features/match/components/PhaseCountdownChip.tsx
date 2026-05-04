@@ -57,16 +57,11 @@ export function PhaseCountdownChip({
   const toneClass = tierToTimerTokenClass(tier);
   const pulseClass =
     tier === "critical" && !motionReduced ? "animate-pulse" : "";
-  const remainingSec = Math.ceil(rem / 1000);
-  const totalSec = Math.max(1, Math.ceil(baselineTotalMs / 1000));
 
   return (
     <span
       role="timer"
       aria-live="off"
-      aria-valuenow={remainingSec}
-      aria-valuemin={0}
-      aria-valuemax={totalSec}
       data-testid={testId}
       className={`inline-flex items-center rounded-md border border-base-300 bg-base-100/80 px-2 py-0.5 text-sm font-semibold tabular-nums ${toneClass} ${pulseClass}`}
     >

@@ -33,13 +33,15 @@ export function WordChoicePanel({
     <section
       className="rounded-box border border-primary/30 bg-base-200/80 px-4 py-4 shadow-sm"
       data-testid="word-choice-panel"
-      aria-label="Choose a word to draw"
+      aria-labelledby="word-choice-panel-title"
     >
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <h2 className="text-sm font-semibold text-base-content">Pick a word to draw</h2>
+        <h2 id="word-choice-panel-title" className="text-sm font-semibold text-base-content">
+          Pick a word to draw
+        </h2>
         {showDeadline ? (
           <div className="flex items-center gap-2">
-            <span className="text-xs font-medium uppercase tracking-wide text-base-content/65">
+            <span className="text-xs font-medium uppercase tracking-wide text-base-content/75">
               Time left
             </span>
             <PhaseCountdownChip
@@ -52,7 +54,7 @@ export function WordChoicePanel({
         ) : null}
       </div>
       {isLoading && !words ? (
-        <div className="flex items-center gap-2 text-sm text-base-content/70">
+        <div className="flex items-center gap-2 text-sm text-base-content/80">
           <span className="loading loading-spinner loading-sm text-primary" />
           Loading word choices…
         </div>
@@ -78,7 +80,7 @@ export function WordChoicePanel({
             {errorMessage}
           </p>
           {words ? (
-            <span className="text-xs text-base-content/60">
+            <span className="text-xs text-base-content/75">
               Tap a word above to try again.
             </span>
           ) : null}

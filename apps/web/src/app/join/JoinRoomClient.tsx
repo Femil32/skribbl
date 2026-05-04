@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { FormEvent, useCallback, useState } from "react";
+import { type FormEvent, useCallback, useId, useState } from "react";
 import type { AvatarPresetId } from "@skribbl/shared";
 import {
   DEFAULT_AVATAR_PRESET_ID,
@@ -24,6 +24,7 @@ import { ScoreboardSummary } from "@/features/match/components/ScoreboardSummary
 import { MatchHintFeed } from "@/features/match/components/MatchHintFeed";
 import { WordChoicePanel } from "@/features/match/components/WordChoicePanel";
 import { MatchChatPanel } from "@/features/match/components/MatchChatPanel";
+import { MatchSkipToChatLink } from "@/features/match/components/MatchSkipToChatLink";
 
 const formatHintId = "join-room-code-format-hint";
 const protocolErrId = "join-room-protocol-error";
@@ -71,6 +72,9 @@ type JoinRoomClientProps = {
  * sent after display name + optional avatar preset are chosen (Story 1.5).
  */
 export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
+  const roomCodeInputId = useId();
+  const nicknameInputId = useId();
+
   const searchParams = useSearchParams();
   const codeFromRouter = searchParams.get("code");
   const effectiveQueryRaw =
@@ -91,7 +95,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
     return urlNormalized;
   });
 
-  const raw = urlCodeValid ? urlNormalized! : typedRaw;
+  const raw = urlCodeValid && urlNormalized !== null ? urlNormalized : typedRaw;
 
   const [manualCommitted, setManualCommitted] = useState(false);
   const [joinGeneration, setJoinGeneration] = useState(0);
@@ -216,6 +220,9 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
   if (guestState.status === "joined") {
     return (
       <div className="min-h-screen flex flex-col bg-base-200">
+        {isMatchFlowPhase(guestState.phase) || guestState.phase === "matchEnded" ? (
+          <MatchSkipToChatLink />
+        ) : null}
         <LobbyConnectionBanner
           transport={guestTransport}
           reason={guestConnectionReason}
@@ -266,6 +273,16 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                   </>
                 )}
               </p>
+              <div className="space-y-2 text-left w-full max-w-md mx-auto">
+                <span className="text-sm font-medium text-base-content/70">
+                  Players ({String(guestState.players.length)})
+                </span>
+                <LobbyPlayerRoster
+                  players={guestState.players}
+                  localPlayerId={guestState.playerId}
+                  showScores={isRosterScoreVisiblePhase(guestState.phase)}
+                />
+              </div>
               {isMatchFlowPhase(guestState.phase) || guestState.phase === "matchEnded" ? (
                 <PhaseBar
                   phase={guestState.phase}
@@ -351,16 +368,6 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                 </p>
               )}
 
-              <div className="space-y-2 text-left w-full max-w-md mx-auto">
-                <span className="text-sm font-medium text-base-content/70">
-                  Players ({String(guestState.players.length)})
-                </span>
-                <LobbyPlayerRoster
-                  players={guestState.players}
-                  localPlayerId={guestState.playerId}
-                  showScores={isRosterScoreVisiblePhase(guestState.phase)}
-                />
-              </div>
               <div className="space-y-2">
                 <span className="text-sm font-medium text-base-content/70">
                   Room code
@@ -421,7 +428,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                   <input
                     type="text"
                     name="roomCode"
-                    id="join-room-code-input"
+                    id={roomCodeInputId}
                     className="input input-bordered w-full font-mono"
                     value={raw}
                     onChange={(e) => setTypedRaw(e.target.value)}
@@ -450,7 +457,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                   <input
                     type="text"
                     name="nickname"
-                    id="join-room-nickname"
+                    id={nicknameInputId}
                     className="input input-bordered w-full"
                     value={nicknameRaw}
                     onChange={(e) => setNicknameRaw(e.target.value)}
@@ -474,12 +481,10 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                   </p>
                 ) : null}
 
-                <div className="form-control w-full">
-                  <span className="label-text font-medium mb-2">Avatar</span>
+                <fieldset className="form-control w-full border-0 p-0 min-w-0">
+                  <legend className="label-text font-medium mb-2">Avatar</legend>
                   <div
                     className="flex flex-wrap gap-2 justify-center sm:justify-start"
-                    role="group"
-                    aria-label="Avatar preset"
                     aria-describedby={ariaAvatarPreset || undefined}
                   >
                     {avatarPresets.map((p) => (
@@ -500,7 +505,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                       </button>
                     ))}
                   </div>
-                </div>
+                </fieldset>
 
                 {protocolErrorMsg ? (
                   <p id={protocolErrId} className="sr-only">

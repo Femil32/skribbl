@@ -67,6 +67,8 @@ export function MatchDrawingColumn({
 
   return (
     <div
+      role="region"
+      aria-label="Match drawing"
       className="flex w-full flex-col gap-2"
       data-testid="match-drawing-column"
     >
@@ -83,7 +85,7 @@ export function MatchDrawingColumn({
         onBrushWidthChange={onBrushWidthChange}
       />
       {phase === "drawing" && !isDrawer ? (
-        <p className="text-xs text-base-content/60" role="note">
+        <p className="text-xs text-base-content/75" role="note">
           Only the drawer can use color and brush controls. You can still watch the sketch.
         </p>
       ) : null}

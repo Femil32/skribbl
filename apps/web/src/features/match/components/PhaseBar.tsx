@@ -56,7 +56,11 @@ export function PhaseBar({
 }: PhaseBarProps) {
   if (phase === "matchEnded") {
     return (
-      <div className="rounded-box border border-base-300 bg-base-200 px-4 py-3 shadow-sm">
+      <div
+        role="region"
+        aria-label="Match status"
+        className="rounded-box border border-base-300 bg-base-200 px-4 py-3 shadow-sm"
+      >
         <div role="status" aria-live="polite" className="text-sm font-medium text-base-content/80">
           Match complete
         </div>
@@ -83,7 +87,11 @@ export function PhaseBar({
   if (!hasMainRow && !hasScoreStrip) return null;
 
   return (
-    <div className="rounded-box border border-base-300 bg-base-200 px-4 py-3 flex flex-col gap-y-3 shadow-sm">
+    <div
+      role="region"
+      aria-label="Match status"
+      className="rounded-box border border-base-300 bg-base-200 px-4 py-3 flex flex-col gap-y-3 shadow-sm"
+    >
       {hasMainRow ? (
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <div

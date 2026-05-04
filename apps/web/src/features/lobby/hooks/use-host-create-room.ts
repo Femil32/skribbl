@@ -153,6 +153,11 @@ export function useHostCreateRoom(
     }
   }, []);
 
+  /** Set when the socket closes after the host reached the lobby; drives “reconnecting” copy on retry. */
+  const closedWhileInLobbyRef = useRef(false);
+  /** Latest successful `roomCreated` — used for `reconnectHost` after a transport drop. */
+  const hostResumeContextRef = useRef<HostResumeContext | null>(null);
+
   const sendChat = useCallback((text: string) => {
     const w = wsRef.current;
     if (!w || w.readyState !== WebSocket.OPEN) return;
@@ -164,17 +169,18 @@ export function useHostCreateRoom(
       /* ignore */
     }
   }, []);
-  /** Set when the socket closes after the host reached the lobby; drives “reconnecting” copy on retry. */
-  const closedWhileInLobbyRef = useRef(false);
-  /** Latest successful `roomCreated` — used for `reconnectHost` after a transport drop. */
-  const hostResumeContextRef = useRef<HostResumeContext | null>(null);
 
-  /* eslint-disable react-hooks/set-state-in-effect -- WebSocket subscription: transport and lobby state track open/message/error/close. */
   useEffect(() => {
     if (!shouldConnect) {
       reachedLobbyRef.current = false;
       closedWhileInLobbyRef.current = false;
       hostResumeContextRef.current = null;
+    }
+  }, [shouldConnect]);
+
+  /* eslint-disable react-hooks/set-state-in-effect -- WebSocket subscription: transport and lobby state track open/message/error/close. */
+  useEffect(() => {
+    if (!shouldConnect) {
       return;
     }
 

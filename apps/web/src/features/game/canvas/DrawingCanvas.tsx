@@ -28,6 +28,8 @@ import {
   drawStrokePolylineOnContext,
 } from "./stroke-draw";
 
+/** Canvas is pointer-primary for MVP: painting uses pointer capture; full keyboard drawing is out of scope (Story 6.4). */
+
 export type DrawingCanvasMode = "drawing" | "read-only" | "syncing";
 
 export type DrawingActiveTool = "brush" | "eraser" | "fill";
@@ -174,6 +176,7 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
 
     const flushStrokeBatchNow = useCallback(
       (_reason: "interval" | "pointer-up" | "visibility" | "transport-off") => {
+        void _reason;
         cancelFlushTimer();
 
         const canvasEl = canvasRef.current;

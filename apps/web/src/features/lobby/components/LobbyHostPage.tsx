@@ -11,7 +11,7 @@ import {
   sanitizeDisplayName,
 } from "@skribbl/shared";
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useId, useState } from "react";
 import { useHostCreateRoom } from "@/features/lobby/hooks/use-host-create-room";
 import { LobbyConnectionBanner } from "@/features/lobby/components/LobbyConnectionBanner";
 import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster";
@@ -21,6 +21,7 @@ import { ScoreboardSummary } from "@/features/match/components/ScoreboardSummary
 import { MatchHintFeed } from "@/features/match/components/MatchHintFeed";
 import { WordChoicePanel } from "@/features/match/components/WordChoicePanel";
 import { MatchChatPanel } from "@/features/match/components/MatchChatPanel";
+import { MatchSkipToChatLink } from "@/features/match/components/MatchSkipToChatLink";
 import {
   buildRoomInviteUrl,
   resolvePublicWebOrigin,
@@ -53,10 +54,12 @@ function clipboardFailureMessage(err: unknown): string {
   return "Copy is not available in this browser. You can select and copy the text below.";
 }
 
-const nicknameHintId = "host-lobby-nickname-hint";
-const nicknameErrId = "host-lobby-nickname-error";
-
 export function LobbyHostPage() {
+  const nicknameInputId = useId();
+  const nicknameHintId = `${nicknameInputId}-hint`;
+  const nicknameErrId = `${nicknameInputId}-err`;
+  const startMinPlayersHintId = useId();
+
   const [nicknameRaw, setNicknameRaw] = useState("");
   const [avatarId, setAvatarId] = useState<AvatarPresetId>(
     DEFAULT_AVATAR_PRESET_ID,
@@ -154,7 +157,7 @@ export function LobbyHostPage() {
                 <span className="label-text font-medium">Display name</span>
                 <input
                   type="text"
-                  id="host-lobby-nickname"
+                  id={nicknameInputId}
                   name="nickname"
                   className="input input-bordered w-full"
                   value={nicknameRaw}
@@ -174,13 +177,9 @@ export function LobbyHostPage() {
                 </p>
               ) : null}
 
-              <div className="form-control w-full">
-                <span className="label-text font-medium mb-2">Avatar</span>
-                <div
-                  className="flex flex-wrap gap-2 justify-center sm:justify-start"
-                  role="group"
-                  aria-label="Avatar preset"
-                >
+              <fieldset className="form-control w-full border-0 p-0 min-w-0">
+                <legend className="label-text font-medium mb-2">Avatar</legend>
+                <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
                   {avatarPresets.map((p) => (
                     <button
                       key={p.id}
@@ -199,7 +198,7 @@ export function LobbyHostPage() {
                     </button>
                   ))}
                 </div>
-              </div>
+              </fieldset>
 
               <div className="card-actions justify-end">
                 <Link href="/" className="btn btn-ghost">
@@ -313,6 +312,9 @@ export function LobbyHostPage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-base-200">
+      {isMatchFlowPhase(state.phase) || state.phase === "matchEnded" ? (
+        <MatchSkipToChatLink />
+      ) : null}
       <LobbyConnectionBanner
         transport={transport}
         reason={connectionReason}
@@ -376,6 +378,9 @@ export function LobbyHostPage() {
                   : undefined
               }
               aria-busy={state.isStartPending}
+              aria-describedby={
+                !minPlayersOk && state.phase === "lobby" ? startMinPlayersHintId : undefined
+              }
             >
               {state.isStartPending ? (
                 <>
@@ -389,7 +394,7 @@ export function LobbyHostPage() {
             {!minPlayersOk && state.phase === "lobby" ? (
               <p
                 className="text-sm text-base-content/70 text-center"
-                id="start-hint-min-players"
+                id={startMinPlayersHintId}
               >
                 Need at least two players in the room to start.
               </p>

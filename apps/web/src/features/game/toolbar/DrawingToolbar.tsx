@@ -2,7 +2,7 @@
 
 import type { RoomPhase } from "@skribbl/shared";
 import { normalizeClientStrokeColor, serializeClientCommand } from "@skribbl/shared";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DrawingActiveTool } from "@/features/game/canvas/DrawingCanvas";
 
 export const DRAWING_COLOR_PRESETS = [
@@ -48,7 +48,27 @@ export function DrawingToolbar({
   onBrushColorChange,
   onBrushWidthChange,
 }: DrawingToolbarProps) {
-  const [clearModalOpen, setClearModalOpen] = useState(false);
+  const [userRequestedClearConfirm, setUserRequestedClearConfirm] = useState(false);
+  const clearDialogOpen =
+    userRequestedClearConfirm && phase === "drawing" && isDrawer;
+  const clearDialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const d = clearDialogRef.current;
+    if (!d) return;
+    function onDialogClose() {
+      setUserRequestedClearConfirm(false);
+    }
+    d.addEventListener("close", onDialogClose);
+    if (clearDialogOpen) {
+      if (!d.open) d.showModal();
+    } else if (d.open) {
+      d.close();
+    }
+    return () => {
+      d.removeEventListener("close", onDialogClose);
+    };
+  }, [clearDialogOpen]);
 
   if (phase !== "drawing" || !isDrawer) return null;
 
@@ -97,57 +117,49 @@ export function DrawingToolbar({
             data-testid="drawing-tool-clear"
             className="btn join-item btn-sm btn-outline btn-error"
             aria-label="Clear canvas"
-            onClick={() => setClearModalOpen(true)}
+            onClick={() => setUserRequestedClearConfirm(true)}
           >
             Clear
           </button>
         </div>
       </div>
 
-      {clearModalOpen ? (
-        <div
-          className="modal modal-open"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="clear-canvas-title"
-        >
-          <div className="modal-box">
-            <h3 id="clear-canvas-title" className="text-lg font-bold">
-              Clear the canvas?
-            </h3>
-            <p className="py-3 text-sm opacity-80">
-              This removes the whole drawing for everyone in the room.
-            </p>
-            <div className="modal-action">
-              <button type="button" className="btn btn-ghost" onClick={() => setClearModalOpen(false)}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn-error"
-                data-testid="drawing-clear-confirm"
-                onClick={() => {
-                  sendJsonLine(
-                    serializeClientCommand({
-                      type: "drawingCanvasClear",
-                      roomId,
-                    }),
-                  );
-                  setClearModalOpen(false);
-                }}
-              >
-                Clear for everyone
-              </button>
-            </div>
-          </div>
+      <dialog
+        ref={clearDialogRef}
+        className="max-w-lg w-[min(100%,32rem)] rounded-box border border-base-300 bg-base-100 p-6 text-base-content shadow-2xl backdrop:bg-neutral-950/50"
+        aria-labelledby="clear-canvas-title"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) setUserRequestedClearConfirm(false);
+        }}
+      >
+        <h3 id="clear-canvas-title" className="text-lg font-bold">
+          Clear the canvas?
+        </h3>
+        <p className="py-3 text-sm text-base-content/80">
+          This removes the whole drawing for everyone in the room.
+        </p>
+        <div className="flex flex-wrap justify-end gap-2 pt-2">
+          <button type="button" className="btn btn-ghost" onClick={() => setUserRequestedClearConfirm(false)}>
+            Cancel
+          </button>
           <button
             type="button"
-            className="modal-backdrop bg-transparent"
-            aria-label="Dismiss clear dialog"
-            onClick={() => setClearModalOpen(false)}
-          />
+            className="btn btn-error"
+            data-testid="drawing-clear-confirm"
+            onClick={() => {
+              sendJsonLine(
+                serializeClientCommand({
+                  type: "drawingCanvasClear",
+                  roomId,
+                }),
+              );
+              setUserRequestedClearConfirm(false);
+            }}
+          >
+            Clear for everyone
+          </button>
         </div>
-      ) : null}
+      </dialog>
 
       <div className="flex flex-wrap items-center gap-2">
         <span id="drawing-toolbar-colors" className="sr-only">

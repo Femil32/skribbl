@@ -49,7 +49,6 @@ export function MatchChatPanel({ localPlayerId, feed, onSend, disabled }: MatchC
       return;
     }
     const text = lineForCorrectGuess(last);
-    /* eslint-disable-next-line react-hooks/set-state-in-effect -- banner mirrors newest chatCorrectGuess in feed snapshot */
     setPulseBanner(text);
     const prefersReduced =
       typeof window !== "undefined" &&
@@ -79,7 +78,7 @@ export function MatchChatPanel({ localPlayerId, feed, onSend, disabled }: MatchC
     trimmedDraft === "" || assertChatMessageLength(sanitizeChatMessage(trimmedDraft)).ok;
 
   return (
-    <section
+    <aside
       aria-labelledby="match-chat-heading"
       className="flex flex-col min-h-[200px] max-h-[min(50vh,360px)] lg:max-h-[min(64vh,520px)] border border-base-300 rounded-box bg-base-200/40"
     >
@@ -103,7 +102,6 @@ export function MatchChatPanel({ localPlayerId, feed, onSend, disabled }: MatchC
         ref={listRef}
         className="flex-1 overflow-y-auto p-2 space-y-2 list-none min-h-0"
         role="log"
-        aria-live="polite"
         aria-relevant="additions"
       >
         {feed.map((ev) => {
@@ -125,7 +123,7 @@ export function MatchChatPanel({ localPlayerId, feed, onSend, disabled }: MatchC
             return (
               <li
                 key={`${ev.id}:${ev.ts}`}
-                className="text-xs text-base-content/75 italic text-start break-words"
+                className="text-xs text-base-content/80 italic text-start break-words"
               >
                 <span className="font-medium not-italic">System · </span>
                 {ev.text}
@@ -181,6 +179,6 @@ export function MatchChatPanel({ localPlayerId, feed, onSend, disabled }: MatchC
           </p>
         ) : null}
       </form>
-    </section>
+    </aside>
   );
 }

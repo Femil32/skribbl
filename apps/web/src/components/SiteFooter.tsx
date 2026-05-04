@@ -50,7 +50,7 @@ export function SiteFooter() {
           <Link href="/" className="link link-hover link-primary">
             Skribbl
           </Link>
-          <span className="text-base-content/70 font-normal">
+          <span className="text-base-content/80 font-normal">
             {" "}
             — real-time draw & guess (MVP)
           </span>
@@ -58,7 +58,7 @@ export function SiteFooter() {
 
         {repoUrl ? (
           <p className="text-base-content/80">
-            <span className="text-base-content/70">Source </span>
+            <span className="text-base-content/80">Source </span>
             <a
               href={repoUrl}
               target="_blank"
@@ -72,7 +72,7 @@ export function SiteFooter() {
 
         {demoUrl ? (
           <p className="text-base-content/80">
-            <span className="text-base-content/70">Demo </span>
+            <span className="text-base-content/80">Demo </span>
             <a
               href={demoUrl}
               target="_blank"
@@ -86,7 +86,7 @@ export function SiteFooter() {
 
         {docsUrl ? (
           <p className="text-base-content/80">
-            <span className="text-base-content/70">Docs </span>
+            <span className="text-base-content/80">Docs </span>
             <a
               href={docsUrl}
               target="_blank"
@@ -100,7 +100,7 @@ export function SiteFooter() {
 
         {showHealthzRow ? (
           <p className="text-base-content/80 min-h-[1.25rem]">
-            <span className="text-base-content/70">Game server </span>
+            <span className="text-base-content/80">Game server </span>
             {healthzHref ? (
               <a
                 href={healthzHref}
