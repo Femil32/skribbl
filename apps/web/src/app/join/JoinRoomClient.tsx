@@ -331,6 +331,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                     feed={guestState.chatFeed}
                     onSend={guestSendChat}
                     disabled={guestTransport !== "live"}
+                    closeGuessHint={guestState.closeGuessHint}
                   />
                 </div>
               ) : guestState.phase === "matchEnded" ? (
@@ -340,6 +341,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                     feed={guestState.chatFeed}
                     onSend={guestSendChat}
                     disabled={guestTransport !== "live"}
+                    closeGuessHint={guestState.closeGuessHint}
                   />
                   <p className="text-sm text-base-content/70 mt-3">
                     Match finished — scores are above. Wait for the host to play again.

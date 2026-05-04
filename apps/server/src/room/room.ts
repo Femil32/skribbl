@@ -59,6 +59,14 @@ export class Room {
    */
   drawingPhaseAwardedGuesserIds: Set<string> | null = null;
 
+  /**
+   * Per-player rate limit for private close-guess hints (Story 7.1). Reset with each drawing phase.
+   */
+  drawingPhaseCloseGuessHintsByPlayerId: Map<
+    string,
+    { count: number; lastAtMs: number }
+  > | null = null;
+
   /** Match session totals keyed by stable `playerId` (Story 2.6). Cleared/`startMatch`. */
   scoresByPlayerId: Record<string, number> = {};
 

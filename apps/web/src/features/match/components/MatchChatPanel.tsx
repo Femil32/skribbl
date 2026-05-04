@@ -20,8 +20,13 @@ type MatchChatPanelProps = {
   feed: MatchChatFeedEvent[];
   onSend: (text: string) => void;
   disabled: boolean;
+  /** Ephemeral private proximity hint (Story 7.1); not part of chat log. */
+  closeGuessHint?: { message: string; id: string } | null;
 };
 
+/** Whisper banner for close-guess feedback (Story 7.1 / FR24). */
+export const CLOSE_GUESS_HINT_BANNER_MS = 3200;
+export const CLOSE_GUESS_HINT_BANNER_MS_REDUCED_MOTION = 2000;
 /** Banner visibility duration (full motion preference). */
 export const CORRECT_GUESS_BANNER_MS = 3600;
 /** Shorter dwell time when prefers-reduced-motion matches UX-DR14. */
@@ -36,10 +41,34 @@ export function lineForCorrectGuess(
   return ev.censoredAnnouncement;
 }
 
-export function MatchChatPanel({ localPlayerId, feed, onSend, disabled }: MatchChatPanelProps) {
+export function MatchChatPanel({
+  localPlayerId,
+  feed,
+  onSend,
+  disabled,
+  closeGuessHint = null,
+}: MatchChatPanelProps) {
   const listRef = useRef<HTMLOListElement>(null);
   const [draft, setDraft] = useState("");
   const [pulseBanner, setPulseBanner] = useState<string | null>(null);
+  const [closeHintBanner, setCloseHintBanner] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!closeGuessHint) {
+      /* eslint-disable-next-line react-hooks/set-state-in-effect -- sync ephemeral hint clearing with prop */
+      setCloseHintBanner(null);
+      return;
+    }
+    setCloseHintBanner(closeGuessHint.message);
+    const prefersReduced =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const ms = prefersReduced
+      ? CLOSE_GUESS_HINT_BANNER_MS_REDUCED_MOTION
+      : CLOSE_GUESS_HINT_BANNER_MS;
+    const hideId = window.setTimeout(() => setCloseHintBanner(null), ms);
+    return () => window.clearTimeout(hideId);
+  }, [closeGuessHint?.id, closeGuessHint?.message]);
 
   useEffect(() => {
     const last = feed[feed.length - 1];
@@ -85,6 +114,16 @@ export function MatchChatPanel({ localPlayerId, feed, onSend, disabled }: MatchC
       <h2 id="match-chat-heading" className="sr-only">
         Room chat
       </h2>
+      {closeHintBanner ? (
+        <div
+          data-testid="close-guess-hint"
+          className="shrink-0 px-3 py-2 text-sm bg-info/15 text-info border-b border-info/30 motion-safe:animate-pulse motion-reduce:animate-none"
+          role="status"
+          aria-live="polite"
+        >
+          {closeHintBanner}
+        </div>
+      ) : null}
       {pulseBanner ? (
         <div
           data-testid="correct-guess-pulse-banner"

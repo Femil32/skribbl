@@ -74,6 +74,7 @@ export type GuestJoinLobbyState =
       remoteCanvasCommits: CanvasReplayEvent[];
       drawingHintRows: MatchHintFeedRow[];
       chatFeed: ChatFeedEvent[];
+      closeGuessHint: { message: string; id: string } | null;
     }
   | {
       /** Server `error.code` when the failure came from an `error` event; omit for generic failures. */
@@ -282,6 +283,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
             remoteCanvasCommits: [],
             drawingHintRows: [],
             chatFeed: [],
+            closeGuessHint: null,
           });
           joinedRoomIdRef.current = parsed.data.roomId;
           setTransport("live");
@@ -335,6 +337,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
             let nextCommits = prev.remoteCanvasCommits;
             let drawingHintRows = prev.drawingHintRows;
             let chatFeed = prev.chatFeed;
+            let closeGuessHint = prev.closeGuessHint;
             const roundBump =
               prev.matchRoundIndex !== undefined &&
               mp.matchRoundIndex !== undefined &&
@@ -344,11 +347,14 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
               nextCommits = [];
               drawingHintRows = [];
               chatFeed = [];
+              closeGuessHint = null;
             } else if (roundBump) {
               nextCommits = [];
               drawingHintRows = [];
+              closeGuessHint = null;
             } else if (mp.phase !== "drawing") {
               drawingHintRows = [];
+              closeGuessHint = null;
             }
 
             return {
@@ -362,6 +368,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
               remoteCanvasCommits: nextCommits,
               drawingHintRows,
               chatFeed,
+              closeGuessHint,
             };
           });
           return;
@@ -502,6 +509,24 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
           });
           return;
         }
+        case "chatCloseGuessHint": {
+          const hint = parsed.data;
+          setState((prev) => {
+            if (prev.status !== "joined") return prev;
+            if (hint.roomId !== prev.roomId) return prev;
+            if (
+              prev.phase !== "drawing" ||
+              prev.matchRoundIndex !== hint.matchRoundIndex
+            ) {
+              return prev;
+            }
+            return {
+              ...prev,
+              closeGuessHint: { message: hint.message, id: hint.id },
+            };
+          });
+          return;
+        }
         case "roomHydrate": {
           const h = parsed.data;
           setState((prev) => {
@@ -515,6 +540,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
                 MAX_REMOTE_CANVAS_COMMITS_BUFFER,
               ),
               chatFeed: mergeChatFeedWithHydrateTail(prev.chatFeed, h.chatTail, MAX_CHAT_FEED),
+              closeGuessHint: null,
             };
           });
           return;

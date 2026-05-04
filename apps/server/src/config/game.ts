@@ -234,3 +234,149 @@ export function inboundWsMessageByteLength(raw: RawData): number {
   }
   return 0;
 }
+
+// --- Story 7.1: close-guess private hints (Growth / FR24) ---
+
+export const DEFAULT_CLOSE_GUESS_MIN_SECRET_LENGTH = 3;
+
+/** Inclusive max Levenshtein distance (after {@link normalizeGuessText}) for a hint. */
+export const DEFAULT_CLOSE_GUESS_MAX_EDIT_DISTANCE = 2;
+
+/** Guess counts as "very close" when distance is in [1, this], if ≤ max edit distance. */
+export const DEFAULT_CLOSE_GUESS_VERY_CLOSE_MAX_DISTANCE = 1;
+
+/** Reject proximity when |len(guess) − len(secret)| > this (after normalize). */
+export const DEFAULT_CLOSE_GUESS_MAX_LENGTH_DELTA = 2;
+
+export const DEFAULT_CLOSE_GUESS_MAX_HINTS_PER_DRAWING_PHASE = 5;
+
+export const DEFAULT_CLOSE_GUESS_HINT_COOLDOWN_MS = 2_000;
+
+export const DEFAULT_CLOSE_GUESS_MESSAGE_VERY_CLOSE = "You're very close!";
+
+export const DEFAULT_CLOSE_GUESS_MESSAGE_CLOSE = "You're close!";
+
+let didWarnInvalidCloseGuessMinSecret = false;
+let didWarnInvalidCloseGuessMaxEdit = false;
+let didWarnInvalidCloseGuessVeryClose = false;
+let didWarnInvalidCloseGuessLengthDelta = false;
+let didWarnInvalidCloseGuessMaxHints = false;
+let didWarnInvalidCloseGuessCooldown = false;
+
+export function resolveCloseGuessMinSecretLength(): number {
+  const raw = process.env.CLOSE_GUESS_MIN_SECRET_LENGTH;
+  if (!raw) return DEFAULT_CLOSE_GUESS_MIN_SECRET_LENGTH;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isFinite(n) && n >= 1 && n <= 32) return n;
+  if (!didWarnInvalidCloseGuessMinSecret) {
+    didWarnInvalidCloseGuessMinSecret = true;
+    console.warn(
+      `[game] CLOSE_GUESS_MIN_SECRET_LENGTH invalid (${JSON.stringify(raw)}); using ${DEFAULT_CLOSE_GUESS_MIN_SECRET_LENGTH}`,
+    );
+  }
+  return DEFAULT_CLOSE_GUESS_MIN_SECRET_LENGTH;
+}
+
+export function resolveCloseGuessMaxEditDistance(): number {
+  const raw = process.env.CLOSE_GUESS_MAX_EDIT_DISTANCE;
+  if (!raw) return DEFAULT_CLOSE_GUESS_MAX_EDIT_DISTANCE;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isFinite(n) && n >= 1 && n <= 5) return n;
+  if (!didWarnInvalidCloseGuessMaxEdit) {
+    didWarnInvalidCloseGuessMaxEdit = true;
+    console.warn(
+      `[game] CLOSE_GUESS_MAX_EDIT_DISTANCE invalid (${JSON.stringify(raw)}); using ${DEFAULT_CLOSE_GUESS_MAX_EDIT_DISTANCE}`,
+    );
+  }
+  return DEFAULT_CLOSE_GUESS_MAX_EDIT_DISTANCE;
+}
+
+export function resolveCloseGuessVeryCloseMaxDistance(): number {
+  const raw = process.env.CLOSE_GUESS_VERY_CLOSE_MAX_DISTANCE;
+  if (!raw) return DEFAULT_CLOSE_GUESS_VERY_CLOSE_MAX_DISTANCE;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isFinite(n) && n >= 1 && n <= 5) return n;
+  if (!didWarnInvalidCloseGuessVeryClose) {
+    didWarnInvalidCloseGuessVeryClose = true;
+    console.warn(
+      `[game] CLOSE_GUESS_VERY_CLOSE_MAX_DISTANCE invalid (${JSON.stringify(raw)}); using ${DEFAULT_CLOSE_GUESS_VERY_CLOSE_MAX_DISTANCE}`,
+    );
+  }
+  return DEFAULT_CLOSE_GUESS_VERY_CLOSE_MAX_DISTANCE;
+}
+
+export function resolveCloseGuessMaxLengthDelta(): number {
+  const raw = process.env.CLOSE_GUESS_MAX_LENGTH_DELTA;
+  if (!raw) return DEFAULT_CLOSE_GUESS_MAX_LENGTH_DELTA;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isFinite(n) && n >= 0 && n <= 20) return n;
+  if (!didWarnInvalidCloseGuessLengthDelta) {
+    didWarnInvalidCloseGuessLengthDelta = true;
+    console.warn(
+      `[game] CLOSE_GUESS_MAX_LENGTH_DELTA invalid (${JSON.stringify(raw)}); using ${DEFAULT_CLOSE_GUESS_MAX_LENGTH_DELTA}`,
+    );
+  }
+  return DEFAULT_CLOSE_GUESS_MAX_LENGTH_DELTA;
+}
+
+export function resolveCloseGuessMaxHintsPerDrawingPhase(): number {
+  const raw = process.env.CLOSE_GUESS_MAX_HINTS_PER_DRAWING_PHASE;
+  if (!raw) return DEFAULT_CLOSE_GUESS_MAX_HINTS_PER_DRAWING_PHASE;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isFinite(n) && n >= 0 && n <= 50) return n;
+  if (!didWarnInvalidCloseGuessMaxHints) {
+    didWarnInvalidCloseGuessMaxHints = true;
+    console.warn(
+      `[game] CLOSE_GUESS_MAX_HINTS_PER_DRAWING_PHASE invalid (${JSON.stringify(raw)}); using ${DEFAULT_CLOSE_GUESS_MAX_HINTS_PER_DRAWING_PHASE}`,
+    );
+  }
+  return DEFAULT_CLOSE_GUESS_MAX_HINTS_PER_DRAWING_PHASE;
+}
+
+export function resolveCloseGuessHintCooldownMs(): number {
+  const raw = process.env.CLOSE_GUESS_HINT_COOLDOWN_MS;
+  if (!raw) return DEFAULT_CLOSE_GUESS_HINT_COOLDOWN_MS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isFinite(n) && n >= 0 && n <= 120_000) return n;
+  if (!didWarnInvalidCloseGuessCooldown) {
+    didWarnInvalidCloseGuessCooldown = true;
+    console.warn(
+      `[game] CLOSE_GUESS_HINT_COOLDOWN_MS invalid (${JSON.stringify(raw)}); using ${DEFAULT_CLOSE_GUESS_HINT_COOLDOWN_MS}`,
+    );
+  }
+  return DEFAULT_CLOSE_GUESS_HINT_COOLDOWN_MS;
+}
+
+/** Optional structured log when `CLOSE_GUESS_HINT_LOG=1` (no message body or secret). */
+export function resolveCloseGuessHintLogEnabled(): boolean {
+  return process.env.CLOSE_GUESS_HINT_LOG?.trim() === "1";
+}
+
+export function resolveCloseGuessHintMessages(): {
+  veryClose: string;
+  close: string;
+} {
+  const veryClose =
+    process.env.CLOSE_GUESS_MESSAGE_VERY_CLOSE?.trim() || DEFAULT_CLOSE_GUESS_MESSAGE_VERY_CLOSE;
+  const close =
+    process.env.CLOSE_GUESS_MESSAGE_CLOSE?.trim() || DEFAULT_CLOSE_GUESS_MESSAGE_CLOSE;
+  return { veryClose: veryClose.slice(0, 120), close: close.slice(0, 120) };
+}
+
+/** Clamp very-close tier so it never exceeds max edit distance. */
+export function resolveCloseGuessHeuristicOptions(): {
+  minSecretLength: number;
+  maxLengthDelta: number;
+  maxEditDistance: number;
+  veryCloseMaxDistance: number;
+} {
+  const maxEdit = resolveCloseGuessMaxEditDistance();
+  let veryClose = resolveCloseGuessVeryCloseMaxDistance();
+  if (veryClose > maxEdit) veryClose = maxEdit;
+  return {
+    minSecretLength: resolveCloseGuessMinSecretLength(),
+    maxLengthDelta: resolveCloseGuessMaxLengthDelta(),
+    maxEditDistance: maxEdit,
+    veryCloseMaxDistance: veryClose,
+  };
+}

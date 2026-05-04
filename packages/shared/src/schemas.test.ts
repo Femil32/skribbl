@@ -344,6 +344,30 @@ describe("serverEventSchema", () => {
     ).toBe(true);
   });
 
+  it("accepts Story 7.1 chatCloseGuessHint", () => {
+    const result = serverEventSchema.safeParse({
+      type: "chatCloseGuessHint",
+      roomId: "r",
+      matchRoundIndex: 0,
+      message: "You're very close!",
+      id: "i-hint",
+      ts: 9,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects chatCloseGuessHint message over 120 chars", () => {
+    const result = serverEventSchema.safeParse({
+      type: "chatCloseGuessHint",
+      roomId: "r",
+      matchRoundIndex: 0,
+      message: "x".repeat(121),
+      id: "i-hint",
+      ts: 9,
+    });
+    expect(result.success).toBe(false);
+  });
+
   it("accepts Story 5.2 roomHydrate and canvasOpLogResync", () => {
     const stroke = {
       type: "drawingStrokeCommitted",

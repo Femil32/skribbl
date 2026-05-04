@@ -387,6 +387,18 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     censoredAnnouncement: z.string(),
   }),
   /**
+   * Private proximity hint to the submitting guesser only (Story 7.1 / FR24). Fixed spoiler-safe copy;
+   * never includes the secret or numeric distance.
+   */
+  z.object({
+    type: z.literal("chatCloseGuessHint"),
+    roomId: z.string(),
+    matchRoundIndex: z.number().int().nonnegative(),
+    message: z.string().min(1).max(120),
+    id: z.string(),
+    ts: z.number().int().nonnegative(),
+  }),
+  /**
    * Targeted hydrate after reconnect (Story 5.2): empty **`canvasCommits`** whenever **`phase`** is not
    * **`drawing`** (no stale ink from prior rounds — baseline is effectively seq 0 + replay subset).
    * **`drawingStrokeSeq`** is the authoritative watermark for that phase.
@@ -418,6 +430,7 @@ export type ServerEvent = z.infer<typeof serverEventSchema>;
 export type ChatPlayerMessageEvent = Extract<ServerEvent, { type: "chatPlayerMessage" }>;
 export type ChatSystemMessageEvent = Extract<ServerEvent, { type: "chatSystemMessage" }>;
 export type ChatCorrectGuessEvent = Extract<ServerEvent, { type: "chatCorrectGuess" }>;
+export type ChatCloseGuessHintEvent = Extract<ServerEvent, { type: "chatCloseGuessHint" }>;
 export type DrawingStrokeCommitted = Extract<ServerEvent, { type: "drawingStrokeCommitted" }>;
 export type DrawingHintTick = Extract<ServerEvent, { type: "drawingHintTick" }>;
 export type DrawingCanvasOpCommitted = Extract<

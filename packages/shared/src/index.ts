@@ -24,6 +24,7 @@ export {
   type CanvasReplayEvent,
   type DrawingStrokePoint,
   type ChatCorrectGuessEvent,
+  type ChatCloseGuessHintEvent,
   type ChatPlayerMessageEvent,
   type ChatSystemMessageEvent,
   MAX_HYDRATE_CHAT_TAIL,
@@ -38,6 +39,12 @@ export {
   normalizeGuessText,
   sanitizeChatMessage,
 } from "./chat-text.js";
+export {
+  evaluateCloseGuessTier,
+  levenshteinDistanceBounded,
+  type CloseGuessHeuristicOptions,
+  type CloseGuessTier,
+} from "./close-guess.js";
 export {
   HINT_MASK_CHAR,
   eligibleLetterIndices,

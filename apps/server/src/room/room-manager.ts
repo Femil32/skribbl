@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import pino from "pino";
 import {
+  evaluateCloseGuessTier,
   assertChatMessageLength,
   buildMaskedWord,
   clampGuessElapsedMs,
@@ -29,6 +30,11 @@ import {
   resolveGuesserScoreBracket,
   HINT_SCHEDULE_BEFORE_ROUND_END_MS,
   resolveHintCadenceMs,
+  resolveCloseGuessHeuristicOptions,
+  resolveCloseGuessHintCooldownMs,
+  resolveCloseGuessHintLogEnabled,
+  resolveCloseGuessHintMessages,
+  resolveCloseGuessMaxHintsPerDrawingPhase,
   resolveInterRoundGapMs,
   resolveMaxPlayers,
   resolveMatchStartHandshakeMs,
@@ -302,6 +308,7 @@ export class RoomManager {
     room.phase = "roundResult";
     room.drawingPhaseStartedAtMs = null;
     room.drawingPhaseAwardedGuesserIds = null;
+    room.drawingPhaseCloseGuessHintsByPlayerId = null;
     this.broadcastMatchPhase(room, undefined, drawerId, roundIndex);
     if (roundIndex + 1 < resolveRoundsPerMatch()) {
       const next = setTimeout(
@@ -331,6 +338,7 @@ export class RoomManager {
     room.canvasPhaseLog.reset();
     room.drawingPhaseStartedAtMs = Date.now();
     room.drawingPhaseAwardedGuesserIds = new Set();
+    room.drawingPhaseCloseGuessHintsByPlayerId = new Map();
     const roundMs = resolveRoundMs();
     const cadenceMs = resolveHintCadenceMs();
     const drawingEndsAt = Date.now() + roundMs;
@@ -437,6 +445,7 @@ export class RoomManager {
     room.roundSecretWord = null;
     room.drawingPhaseStartedAtMs = null;
     room.drawingPhaseAwardedGuesserIds = null;
+    room.drawingPhaseCloseGuessHintsByPlayerId = null;
 
     const roster = this.buildLobbyRosterPlayers(room);
     room.scoresByPlayerId = {};
@@ -691,6 +700,60 @@ export class RoomManager {
       }
 
       return award;
+    }
+
+    // Story 7.1 / AC3: only active match roster (non-drawer already excluded). Join is lobby-only today;
+    // this stays explicit for future mid-match roles. Skip Levenshtein when hints are off (rate cap 0).
+    if (
+      inDrawing &&
+      senderId !== drawerId &&
+      secret &&
+      normalizedSecret &&
+      normalizedSecret.length > 0 &&
+      !isExact &&
+      (room.matchPlayerOrder?.includes(senderId) ?? false)
+    ) {
+      const hintMap = room.drawingPhaseCloseGuessHintsByPlayerId;
+      const maxHints = resolveCloseGuessMaxHintsPerDrawingPhase();
+      if (hintMap && maxHints > 0) {
+        const tier = evaluateCloseGuessTier(
+          normalizedMsg,
+          normalizedSecret,
+          resolveCloseGuessHeuristicOptions(),
+        );
+        if (tier !== "none") {
+          const cooldownMs = resolveCloseGuessHintCooldownMs();
+          const now = Date.now();
+          const prev = hintMap.get(senderId) ?? { count: 0, lastAtMs: 0 };
+          const cooled = now - prev.lastAtMs >= cooldownMs;
+          const underCap = prev.count < maxHints;
+          if (cooled && underCap) {
+            hintMap.set(senderId, { count: prev.count + 1, lastAtMs: now });
+            const { veryClose, close } = resolveCloseGuessHintMessages();
+            const message = tier === "veryClose" ? veryClose : close;
+            const id = randomUUID();
+            this.sendEvent(ws, {
+              type: "chatCloseGuessHint",
+              roomId: room.id,
+              matchRoundIndex: room.matchRoundIndex,
+              message,
+              id,
+              ts: now,
+            });
+            if (resolveCloseGuessHintLogEnabled()) {
+              log.info(
+                {
+                  event: "close_guess_hint",
+                  roomId: room.id,
+                  matchRoundIndex: room.matchRoundIndex,
+                  playerId: senderId,
+                },
+                "Close guess hint sent",
+              );
+            }
+          }
+        }
+      }
     }
 
     this.broadcastPlayerChatWithPerRecipientText(room, senderId, senderName, sanitized, () => sanitized);

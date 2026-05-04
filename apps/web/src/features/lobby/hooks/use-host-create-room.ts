@@ -76,6 +76,8 @@ export type HostLobbyState =
       drawingHintRows: MatchHintFeedRow[];
       /** Live chat tail (Epic 4); cleared when returning to pre-match `lobby`. */
       chatFeed: ChatFeedEvent[];
+      /** Private proximity whisper (Story 7.1); not in chatFeed / hydrate. */
+      closeGuessHint: { message: string; id: string } | null;
     }
   | { status: "error"; message: string };
 
@@ -273,6 +275,7 @@ export function useHostCreateRoom(
             remoteCanvasCommits: [],
             drawingHintRows: [],
             chatFeed: [],
+            closeGuessHint: null,
           });
           setTransport("live");
           return;
@@ -324,6 +327,7 @@ export function useHostCreateRoom(
             let nextCommits = prev.remoteCanvasCommits;
             let drawingHintRows = prev.drawingHintRows;
             let chatFeed = prev.chatFeed;
+            let closeGuessHint = prev.closeGuessHint;
             const roundBump =
               prev.matchRoundIndex !== undefined &&
               mp.matchRoundIndex !== undefined &&
@@ -333,11 +337,14 @@ export function useHostCreateRoom(
               nextCommits = [];
               drawingHintRows = [];
               chatFeed = [];
+              closeGuessHint = null;
             } else if (roundBump) {
               nextCommits = [];
               drawingHintRows = [];
+              closeGuessHint = null;
             } else if (mp.phase !== "drawing") {
               drawingHintRows = [];
+              closeGuessHint = null;
             }
 
             return {
@@ -351,6 +358,7 @@ export function useHostCreateRoom(
               remoteCanvasCommits: nextCommits,
               drawingHintRows,
               chatFeed,
+              closeGuessHint,
               ...(mp.phase === "lobby" ? { isStartPending: false } : {}),
             };
           });
@@ -505,6 +513,24 @@ export function useHostCreateRoom(
           });
           return;
         }
+        case "chatCloseGuessHint": {
+          const hint = parsed.data;
+          setState((prev) => {
+            if (prev.status !== "lobby") return prev;
+            if (hint.roomId !== prev.roomId) return prev;
+            if (
+              prev.phase !== "drawing" ||
+              prev.matchRoundIndex !== hint.matchRoundIndex
+            ) {
+              return prev;
+            }
+            return {
+              ...prev,
+              closeGuessHint: { message: hint.message, id: hint.id },
+            };
+          });
+          return;
+        }
         case "roomHydrate": {
           const h = parsed.data;
           setState((prev) => {
@@ -518,6 +544,7 @@ export function useHostCreateRoom(
                 MAX_REMOTE_CANVAS_COMMITS_BUFFER,
               ),
               chatFeed: mergeChatFeedWithHydrateTail(prev.chatFeed, h.chatTail, MAX_CHAT_FEED),
+              closeGuessHint: null,
             };
           });
           return;

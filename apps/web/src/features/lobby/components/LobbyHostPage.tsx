@@ -458,6 +458,7 @@ export function LobbyHostPage() {
                   feed={state.chatFeed}
                   onSend={sendChat}
                   disabled={transport !== "live"}
+                  closeGuessHint={state.closeGuessHint}
                 />
               </div>
             ) : state.phase === "matchEnded" ? (
@@ -466,6 +467,7 @@ export function LobbyHostPage() {
                 feed={state.chatFeed}
                 onSend={sendChat}
                 disabled={transport !== "live"}
+                closeGuessHint={state.closeGuessHint}
               />
             ) : null}
           </div>

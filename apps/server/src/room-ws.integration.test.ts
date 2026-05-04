@@ -14,6 +14,7 @@ import {
   clampGuessElapsedMs,
   computeGuesserPoints,
   NICKNAME_MAX_GRAPHEMES,
+  normalizeGuessText,
   parseServerEvent,
 } from "@skribbl/shared";
 import { CanvasPhaseLog } from "./room/canvas-log.js";
@@ -2218,6 +2219,174 @@ describe("handleClientCommand + RoomManager", () => {
       ).toBe(true);
     } finally {
       verifySpy.mockRestore();
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
+
+  it("chatMessage near-miss: guesser receives chatCloseGuessHint; drawer does not (Story 7.1)", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.stubEnv("ROUND_MS", "80000");
+    vi.stubEnv("CLOSE_GUESS_HINT_COOLDOWN_MS", "0");
+    vi.useFakeTimers();
+    try {
+      const rm = new RoomManager(8, integrationWordBank());
+      const host = captureWs();
+      const guest = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        guest.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+      const guestJoined = parseServerEvent(JSON.parse(guest.sent[0]!));
+      if (guestJoined.type !== "roomJoined") throw new Error("unexpected");
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+      vi.advanceTimersByTime(resolveWordChoiceMs());
+
+      const room = rm.getRoomForSocket(host.ws);
+      expect(room).toBeDefined();
+      if (!room) throw new Error("unexpected");
+
+      const drawerId = room.currentDrawerPlayerId!;
+      const drawerCapt = drawerId === created.playerId ? host : guest;
+      const guesserCapt = drawerId === created.playerId ? guest : host;
+
+      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
+      expect(room.phase).toBe("drawing");
+      const secret = room.roundSecretWord;
+      expect(secret).toBeTruthy();
+      if (!secret) throw new Error("unexpected");
+
+      const near = secret.length >= 4 ? secret.slice(0, -1) : `${secret}z`;
+      expect(normalizeGuessText(near)).not.toBe(normalizeGuessText(secret));
+
+      handleClientCommand(
+        guesserCapt.ws,
+        {
+          type: "chatMessage",
+          roomId: room.id,
+          text: near,
+        } satisfies ClientCommand,
+        rm,
+      );
+
+      const guesserHints = guesserCapt.sent
+        .map((line) => parseServerEvent(JSON.parse(line)))
+        .filter((e) => e.type === "chatCloseGuessHint");
+      expect(guesserHints.length).toBeGreaterThanOrEqual(1);
+      const hint = guesserHints[guesserHints.length - 1]!;
+      if (hint.type !== "chatCloseGuessHint") throw new Error("unexpected");
+      expect(hint.roomId).toBe(room.id);
+      expect(hint.matchRoundIndex).toBe(room.matchRoundIndex);
+      expect(hint.message.length).toBeGreaterThan(0);
+
+      const drawerHints = drawerCapt.sent
+        .map((line) => parseServerEvent(JSON.parse(line)))
+        .filter((e) => e.type === "chatCloseGuessHint");
+      expect(drawerHints).toHaveLength(0);
+
+      const guesserChats = guesserCapt.sent
+        .map((line) => parseServerEvent(JSON.parse(line)))
+        .filter((e) => e.type === "chatPlayerMessage");
+      expect(guesserChats.length).toBeGreaterThan(0);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
+
+  it("chatMessage near-miss: other guesser receives no chatCloseGuessHint (Story 7.1 AC2)", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.stubEnv("ROUND_MS", "80000");
+    vi.stubEnv("CLOSE_GUESS_HINT_COOLDOWN_MS", "0");
+    vi.useFakeTimers();
+    try {
+      const rm = new RoomManager(8, integrationWordBank());
+      const host = captureWs();
+      const guest = captureWs();
+      const guest2 = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        guest.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+      handleClientCommand(
+        guest2.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity2 },
+        rm,
+      );
+
+      const gj1 = parseServerEvent(JSON.parse(guest.sent[0]!));
+      const gj2 = parseServerEvent(JSON.parse(guest2.sent[0]!));
+      if (gj1.type !== "roomJoined" || gj2.type !== "roomJoined") throw new Error("unexpected");
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+      vi.advanceTimersByTime(resolveWordChoiceMs());
+
+      const room = rm.getRoomForSocket(host.ws);
+      expect(room).toBeDefined();
+      if (!room) throw new Error("unexpected");
+
+      const drawerId = room.currentDrawerPlayerId!;
+      const socketsByPlayer = [
+        { id: created.playerId, cap: host },
+        { id: gj1.playerId, cap: guest },
+        { id: gj2.playerId, cap: guest2 },
+      ];
+      const drawerCapt = socketsByPlayer.find((x) => x.id === drawerId)!.cap;
+      const guesserCaps = socketsByPlayer.filter((x) => x.id !== drawerId).map((x) => x.cap);
+      expect(guesserCaps).toHaveLength(2);
+
+      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
+      expect(room.phase).toBe("drawing");
+      const secret = room.roundSecretWord;
+      expect(secret).toBeTruthy();
+      if (!secret) throw new Error("unexpected");
+
+      const near = secret.length >= 4 ? secret.slice(0, -1) : `${secret}z`;
+      expect(normalizeGuessText(near)).not.toBe(normalizeGuessText(secret));
+
+      const submittingGuesser = guesserCaps[0]!;
+      const otherGuesser = guesserCaps[1]!;
+
+      handleClientCommand(
+        submittingGuesser.ws,
+        {
+          type: "chatMessage",
+          roomId: room.id,
+          text: near,
+        } satisfies ClientCommand,
+        rm,
+      );
+
+      const submitterHints = submittingGuesser.sent
+        .map((line) => parseServerEvent(JSON.parse(line)))
+        .filter((e) => e.type === "chatCloseGuessHint");
+      expect(submitterHints.length).toBeGreaterThanOrEqual(1);
+
+      const witnessHints = otherGuesser.sent
+        .map((line) => parseServerEvent(JSON.parse(line)))
+        .filter((e) => e.type === "chatCloseGuessHint");
+      expect(witnessHints).toHaveLength(0);
+
+      const drawerHints = drawerCapt.sent
+        .map((line) => parseServerEvent(JSON.parse(line)))
+        .filter((e) => e.type === "chatCloseGuessHint");
+      expect(drawerHints).toHaveLength(0);
+    } finally {
       vi.unstubAllEnvs();
       vi.useRealTimers();
     }

@@ -1,6 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  CLOSE_GUESS_HINT_BANNER_MS_REDUCED_MOTION,
   CORRECT_GUESS_BANNER_MS,
   CORRECT_GUESS_BANNER_MS_REDUCED_MOTION,
   lineForCorrectGuess,
@@ -227,5 +228,42 @@ describe("MatchChatPanel — correct-guess UX (Story 4.4)", () => {
       );
       expect(screen.queryByTestId("correct-guess-pulse-banner")).not.toBeInTheDocument();
     });
+  });
+});
+
+describe("MatchChatPanel — close-guess whisper (Story 7.1)", () => {
+  const onSend = vi.fn();
+
+  beforeEach(() => {
+    stubPreferReducedMotion(false);
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    onSend.mockClear();
+  });
+
+  it("shows data-testid close-guess-hint from prop and respects reduced-motion dwell", () => {
+    vi.unstubAllGlobals();
+    stubPreferReducedMotion(true);
+
+    render(
+      <MatchChatPanel
+        localPlayerId="p1"
+        feed={[]}
+        onSend={onSend}
+        disabled={false}
+        closeGuessHint={{ message: "You're very close!", id: "h1" }}
+      />,
+    );
+    const hint = screen.getByTestId("close-guess-hint");
+    expect(hint).toHaveTextContent("You're very close!");
+    expect(hint.className).toMatch(/motion-safe:animate-pulse/);
+    expect(hint.className).toMatch(/motion-reduce:animate-none/);
+
+    act(() => vi.advanceTimersByTime(CLOSE_GUESS_HINT_BANNER_MS_REDUCED_MOTION));
+    expect(screen.queryByTestId("close-guess-hint")).not.toBeInTheDocument();
   });
 });
