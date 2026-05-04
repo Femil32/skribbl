@@ -1,19 +1,24 @@
 /*
- * Theme token map (Skribbl shell chrome) — source of truth: @plugin "daisyui/theme" blocks below.
+ * Skribbl Design System — globals.css
  *
- * | Token / utility        | Role |
- * |------------------------|------|
- * | primary, btn-primary   | Main CTAs, strong emphasis (drawer name, primary actions). |
- * | accent                 | Secondary emphasis / highlights paired with cyan family. |
- * | info (+ alert-info)    | Connecting / reconnecting connection banners. |
- * | success (+ alert-success) | Live / connected banner, positive toasts. |
- * | warning (+ alert-warning) | Retry-able disconnect / server unreachable. |
- * | error (+ alert-error)  | Blocking failures. |
- * | base-100/200/300, base-content | Panels, cards, chrome surfaces, body background/text. |
- * | text-timer-healthy/urgent/critical | Countdown chip urgency (cyan-range → amber → red). |
+ * Aesthetic: warm cream + ink, hand-drawn sticker vibe, chunky flat shadows.
+ * Fonts: Bricolage Grotesque (display/body) + DM Mono (code/numbers).
  *
- * Timer colors below follow prefers-color-scheme (aligned with Daisy prefersdark). If you add
- * manual data-theme toggles, mirror timer stops per theme or move them into daisyui/theme blocks.
+ * DaisyUI semantic role map:
+ * | Token       | Skribbl role                              |
+ * |-------------|-------------------------------------------|
+ * | primary     | Tomato — main CTA, active states          |
+ * | secondary   | Soft cream — secondary surfaces           |
+ * | accent      | Canary — highlights, podium gold          |
+ * | neutral     | Ink — borders, text, shadows              |
+ * | info        | Cornflower — info banners                 |
+ * | success     | Forest green — ready / correct            |
+ * | warning     | Amber — idle / retry                      |
+ * | error       | Danger red — blocking failures            |
+ * | base-100    | Warm cream bg (#fff7e8)                   |
+ * | base-200    | Panel (#fffdf6)                           |
+ * | base-300    | Panel2 / inputs (#fdf3d8)                 |
+ * | base-content| Ink (#1a1714)                             |
  */
 
 @import "tailwindcss";
@@ -28,42 +33,42 @@
   prefersdark: false;
   color-scheme: light;
 
-  --color-base-100: oklch(99% 0.008 228);
-  --color-base-200: oklch(96% 0.012 228);
-  --color-base-300: oklch(90% 0.02 228);
-  --color-base-content: oklch(22% 0.04 240);
+  --color-base-100: oklch(98% 0.022 85);
+  --color-base-200: oklch(99% 0.008 95);
+  --color-base-300: oklch(96% 0.04 88);
+  --color-base-content: oklch(13% 0.015 50);
 
-  --color-primary: oklch(52% 0.2 215);
-  --color-primary-content: oklch(98% 0.01 215);
+  --color-primary: oklch(65% 0.235 27);
+  --color-primary-content: oklch(13% 0.015 50);
 
-  --color-secondary: oklch(48% 0.06 250);
-  --color-secondary-content: oklch(98% 0.01 250);
+  --color-secondary: oklch(93% 0.05 85);
+  --color-secondary-content: oklch(13% 0.015 50);
 
-  --color-accent: oklch(58% 0.18 200);
-  --color-accent-content: oklch(98% 0.02 200);
+  --color-accent: oklch(87% 0.19 87);
+  --color-accent-content: oklch(13% 0.015 50);
 
-  --color-neutral: oklch(45% 0.04 240);
-  --color-neutral-content: oklch(98% 0.01 240);
+  --color-neutral: oklch(13% 0.015 50);
+  --color-neutral-content: oklch(99% 0.008 95);
 
-  --color-info: oklch(55% 0.14 230);
-  --color-info-content: oklch(98% 0.01 230);
+  --color-info: oklch(62% 0.14 255);
+  --color-info-content: oklch(99% 0.008 95);
 
-  --color-success: oklch(52% 0.14 155);
-  --color-success-content: oklch(98% 0.02 155);
+  --color-success: oklch(53% 0.15 150);
+  --color-success-content: oklch(99% 0.008 95);
 
-  --color-warning: oklch(78% 0.16 78);
-  --color-warning-content: oklch(22% 0.06 78);
+  --color-warning: oklch(64% 0.17 45);
+  --color-warning-content: oklch(13% 0.015 50);
 
-  --color-error: oklch(58% 0.22 25);
-  --color-error-content: oklch(98% 0.01 25);
+  --color-error: oklch(60% 0.24 28);
+  --color-error-content: oklch(13% 0.015 50);
 
-  --radius-selector: 1rem;
-  --radius-field: 0.25rem;
-  --radius-box: 0.5rem;
+  --radius-selector: 0.875rem;
+  --radius-field: 0.75rem;
+  --radius-box: 0.875rem;
   --size-selector: 0.25rem;
   --size-field: 0.25rem;
-  --border: 1px;
-  --depth: 1;
+  --border: 2.5px;
+  --depth: 0;
   --noise: 0;
 }
 
@@ -73,62 +78,177 @@
   prefersdark: true;
   color-scheme: dark;
 
-  --color-base-100: oklch(20% 0.03 250);
-  --color-base-200: oklch(24% 0.035 250);
-  --color-base-300: oklch(32% 0.04 250);
-  --color-base-content: oklch(94% 0.02 228);
+  --color-base-100: oklch(11% 0.01 50);
+  --color-base-200: oklch(14% 0.01 50);
+  --color-base-300: oklch(18% 0.01 50);
+  --color-base-content: oklch(95% 0.02 80);
 
-  --color-primary: oklch(72% 0.15 215);
-  --color-primary-content: oklch(16% 0.04 215);
+  --color-primary: oklch(68% 0.22 27);
+  --color-primary-content: oklch(13% 0.015 50);
 
-  --color-secondary: oklch(38% 0.06 250);
-  --color-secondary-content: oklch(94% 0.02 250);
+  --color-secondary: oklch(21% 0.01 50);
+  --color-secondary-content: oklch(95% 0.02 80);
 
-  --color-accent: oklch(68% 0.14 200);
-  --color-accent-content: oklch(16% 0.04 200);
+  --color-accent: oklch(87% 0.19 87);
+  --color-accent-content: oklch(13% 0.015 50);
 
-  --color-neutral: oklch(38% 0.04 240);
-  --color-neutral-content: oklch(94% 0.02 240);
+  --color-neutral: oklch(95% 0.02 80);
+  --color-neutral-content: oklch(13% 0.015 50);
 
-  --color-info: oklch(68% 0.12 230);
-  --color-info-content: oklch(16% 0.04 230);
+  --color-info: oklch(65% 0.13 255);
+  --color-info-content: oklch(13% 0.015 50);
 
-  --color-success: oklch(62% 0.14 155);
-  --color-success-content: oklch(16% 0.04 155);
+  --color-success: oklch(60% 0.15 150);
+  --color-success-content: oklch(13% 0.015 50);
 
-  --color-warning: oklch(78% 0.14 78);
-  --color-warning-content: oklch(22% 0.06 78);
+  --color-warning: oklch(72% 0.17 45);
+  --color-warning-content: oklch(13% 0.015 50);
 
-  --color-error: oklch(68% 0.2 25);
-  --color-error-content: oklch(98% 0.01 25);
+  --color-error: oklch(65% 0.22 28);
+  --color-error-content: oklch(13% 0.015 50);
 
-  --radius-selector: 1rem;
-  --radius-field: 0.25rem;
-  --radius-box: 0.5rem;
+  --radius-selector: 0.875rem;
+  --radius-field: 0.75rem;
+  --radius-box: 0.875rem;
   --size-selector: 0.25rem;
   --size-field: 0.25rem;
-  --border: 1px;
-  --depth: 1;
+  --border: 2.5px;
+  --depth: 0;
   --noise: 0;
 }
 
 @theme inline {
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-  /* Countdown urgency — cyan-range (healthy), amber (urgent), red (critical); dark tweaks in media block */
-  --color-timer-healthy: oklch(0.52 0.16 215);
-  --color-timer-urgent: oklch(0.72 0.16 78);
-  --color-timer-critical: oklch(0.55 0.22 27);
+  --font-sans: var(--font-bricolage);
+  --font-mono: var(--font-dm-mono);
+
+  /* === Skribbl brand palette === */
+  --color-tomato: #ff5a3c;
+  --color-canary: #ffd23f;
+  --color-mint: #3ddc97;
+  --color-cornflower: #5b8def;
+  --color-lavender: #c084fc;
+  --color-rose: #ff7ab6;
+
+  /* === Neutral surfaces (light) === */
+  --color-ink: #1a1714;
+  --color-cream: #fff7e8;
+  --color-sk-panel: #fffdf6;
+  --color-sk-panel2: #fdf3d8;
+  --color-sk-soft: #f6ead0;
+
+  /* === Neutral surfaces (dark) === */
+  --color-ink-light: #f5efe6;
+  --color-dark-bg: #181613;
+  --color-dark-panel: #221f1b;
+  --color-dark-panel2: #2a2622;
+  --color-dark-soft: #332e28;
+
+  /* === Semantic game colors === */
+  --color-game-success: #2a8f4a;
+  --color-game-warning: #d97a3a;
+  --color-game-danger: #ff3c3c;
+  --color-timer-warn: #ffd23f;
+
+  /* === Podium === */
+  --color-podium-gold: #ffd23f;
+  --color-podium-silver: #f6ead0;
+  --color-podium-bronze: #fb923c;
+
+  /* === Avatar palette (12 colors) === */
+  --color-av-coral: #ff6b6b;
+  --color-av-yellow: #ffd93d;
+  --color-av-green: #6bcb77;
+  --color-av-blue: #4d96ff;
+  --color-av-purple: #c084fc;
+  --color-av-orange: #fb923c;
+  --color-av-pink: #f472b6;
+  --color-av-cyan: #22d3ee;
+  --color-av-lime: #a3e635;
+  --color-av-gold: #facc15;
+  --color-av-rose: #fb7185;
+  --color-av-teal: #34d399;
+
+  /* === Timer urgency === */
+  --color-timer-healthy: #ff5a3c;
+  --color-timer-urgent: #ffd23f;
+  --color-timer-critical: #ff3c3c;
+
+  /* === Flat chunky shadows (zero blur) === */
+  --shadow-skribbl-sm: 3px 4px 0 0 #1a1714;
+  --shadow-skribbl-md: 4px 5px 0 0 #1a1714;
+  --shadow-skribbl-lg: 5px 6px 0 0 #1a1714;
+  --shadow-skribbl-xl: 6px 7px 0 0 #1a1714;
+  --shadow-skribbl-2xl: 6px 8px 0 0 #1a1714;
+  --shadow-skribbl-pressed: 1px 2px 0 0 #1a1714;
+
+  /* === Corner radii === */
+  --radius-skribbl-xs: 6px;
+  --radius-skribbl-sm: 10px;
+  --radius-skribbl-md: 12px;
+  --radius-skribbl-lg: 14px;
+  --radius-skribbl-xl: 18px;
+  --radius-skribbl-2xl: 22px;
+  --radius-skribbl-pill: 9999px;
+
+  /* === Drawing palette (18 colors) === */
+  --draw-ink: #1a1714;
+  --draw-white: #ffffff;
+  --draw-tomato: #ff5a3c;
+  --draw-canary: #ffd23f;
+  --draw-mint: #3ddc97;
+  --draw-cornflower: #5b8def;
+  --draw-lavender: #c084fc;
+  --draw-rose: #ff7ab6;
+  --draw-orange: #fb923c;
+  --draw-emerald: #34d399;
+  --draw-violet: #a78bfa;
+  --draw-red: #f87171;
+  --draw-amber: #fbbf24;
+  --draw-sky: #60a5fa;
+  --draw-lime: #4ade80;
+  --draw-fuchsia: #e879f9;
+  --draw-sunset: #f97316;
+  --draw-teal: #2dd4bf;
+}
+
+/* === Global base === */
+body {
+  font-family: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* === Dot-grid background pattern === */
+.bg-dot-grid {
+  background-image: radial-gradient(rgba(26, 23, 20, 0.07) 1.2px, transparent 1.5px);
+  background-size: 22px 22px;
 }
 
 @media (prefers-color-scheme: dark) {
-  @theme inline {
-    --color-timer-healthy: oklch(0.76 0.13 215);
-    --color-timer-urgent: oklch(0.82 0.14 78);
-    --color-timer-critical: oklch(0.72 0.2 27);
+  .bg-dot-grid {
+    background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1.2px, transparent 1.5px);
+    background-size: 22px 22px;
   }
 }
 
-body {
-  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+/* === Label utility (11px caps + tracking) === */
+.text-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
 }
+
+/* === Press-down interaction === */
+.press-down {
+  transition: transform 80ms ease, box-shadow 80ms ease;
+}
+.press-down:active {
+  transform: translate(2px, 2px);
+  box-shadow: var(--shadow-skribbl-pressed) !important;
+}
+
+/* === Sticker tilt variants === */
+.tilt-n1 { transform: rotate(-1deg); }
+.tilt-n2 { transform: rotate(-2deg); }
+.tilt-p1 { transform: rotate(1deg); }
+.tilt-p05 { transform: rotate(0.5deg); }
