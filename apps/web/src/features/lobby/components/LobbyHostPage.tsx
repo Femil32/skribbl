@@ -379,7 +379,7 @@ export function LobbyHostPage() {
             >
               {state.isStartPending ? (
                 <>
-                  <span className="loading loading-spinner loading-sm" />
+                  <span className="loading loading-spinner loading-sm motion-reduce:!animate-none" />
                   Starting…
                 </>
               ) : (

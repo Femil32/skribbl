@@ -142,6 +142,11 @@ export function useHostCreateRoom(
 
   const reachedLobbyRef = useRef(false);
   const wsRef = useRef<WebSocket | null>(null);
+  const stateSnapshotRef = useRef<HostLobbyState>(state);
+
+  useEffect(() => {
+    stateSnapshotRef.current = state;
+  }, [state]);
 
   const sendGameJsonLine = useCallback((raw: string) => {
     const w = wsRef.current;
@@ -156,10 +161,10 @@ export function useHostCreateRoom(
   const sendChat = useCallback((text: string) => {
     const w = wsRef.current;
     if (!w || w.readyState !== WebSocket.OPEN) return;
-    const rid = hostResumeContextRef.current?.roomId;
-    if (!rid) return;
+    const snap = stateSnapshotRef.current;
+    if (snap.status !== "lobby") return;
     try {
-      w.send(serializeChatMessageCommand(rid, text));
+      w.send(serializeChatMessageCommand(snap.roomId, text));
     } catch {
       /* ignore */
     }

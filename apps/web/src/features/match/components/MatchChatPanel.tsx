@@ -49,7 +49,6 @@ export function MatchChatPanel({ localPlayerId, feed, onSend, disabled }: MatchC
       return;
     }
     const text = lineForCorrectGuess(last);
-    /* eslint-disable-next-line react-hooks/set-state-in-effect -- banner mirrors newest chatCorrectGuess in feed snapshot */
     setPulseBanner(text);
     const prefersReduced =
       typeof window !== "undefined" &&

@@ -10,9 +10,10 @@ describe("GamePage", () => {
     expect(screen.getByTestId("chat-region")).toBeTruthy();
   });
 
-  it("uses header, main, and aside landmarks", () => {
+  it("uses header, main, and aside landmarks with PhaseBar carrying phase-bar inside banner", () => {
     render(<GamePage />);
-    expect(screen.getByTestId("phase-bar").tagName).toBe("HEADER");
+    const banner = screen.getByRole("banner");
+    expect(within(banner).getByTestId("phase-bar")).toBeTruthy();
     expect(screen.getByTestId("canvas-region").tagName).toBe("MAIN");
     expect(screen.getByTestId("chat-region").tagName).toBe("ASIDE");
   });
@@ -38,6 +39,7 @@ describe("GamePage", () => {
     const main = screen.getByTestId("canvas-region");
     const aside = screen.getByTestId("chat-region");
     expect(within(main).getByRole("img", { name: /drawing surface/i })).toBeTruthy();
+    expect(within(main).getByTestId("drawing-canvas")).toBeTruthy();
     expect(within(main).getByTestId("drawing-toolbar")).toBeTruthy();
     expect(within(aside).getByText("Chat area")).toBeTruthy();
   });

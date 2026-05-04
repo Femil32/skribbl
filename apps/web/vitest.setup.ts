@@ -8,6 +8,27 @@ globalThis.ResizeObserver = class ResizeObserver {
   disconnect(): void {}
 };
 
+// jsdom exposes no matchMedia — required by PhaseBar / PhaseCountdownChip in Vitest.
+Object.defineProperty(window, "matchMedia", {
+  writable: true,
+  configurable: true,
+  value(query: string) {
+    void query;
+    return {
+      matches: false,
+      media: typeof query === "string" ? query : String(query ?? ""),
+      onchange: null,
+      addListener: (): void => {},
+      removeListener: (): void => {},
+      addEventListener(): void {},
+      removeEventListener(): void {},
+      dispatchEvent(): boolean {
+        return true;
+      },
+    };
+  },
+});
+
 // jsdom has no usable CanvasRenderingContext2D — minimal stub for components that resize + transform.
 vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
   function mockGetContext(this: HTMLCanvasElement, ...args: Parameters<HTMLCanvasElement["getContext"]>) {

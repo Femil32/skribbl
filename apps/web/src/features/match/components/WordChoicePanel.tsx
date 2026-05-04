@@ -53,7 +53,7 @@ export function WordChoicePanel({
       </div>
       {isLoading && !words ? (
         <div className="flex items-center gap-2 text-sm text-base-content/70">
-          <span className="loading loading-spinner loading-sm text-primary" />
+          <span className="loading loading-spinner loading-sm text-primary motion-reduce:!animate-none" />
           Loading word choices…
         </div>
       ) : null}

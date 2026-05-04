@@ -173,7 +173,8 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
     }, []);
 
     const flushStrokeBatchNow = useCallback(
-      (_reason: "interval" | "pointer-up" | "visibility" | "transport-off") => {
+      (reason: "interval" | "pointer-up" | "visibility" | "transport-off") => {
+        void reason;
         cancelFlushTimer();
 
         const canvasEl = canvasRef.current;
@@ -530,6 +531,7 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
       <div
         ref={wrapperRef}
         className={`flex min-h-0 min-w-0 flex-1 flex-col ${className}`.trim()}
+        data-testid="drawing-canvas"
       >
         <canvas
           ref={canvasRef}

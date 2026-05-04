@@ -43,6 +43,7 @@ describe("DrawingCanvas", () => {
     const canvas = screen.getByRole("img", { name: /sketching board/i });
     expect(canvas.tagName).toBe("CANVAS");
     expect(canvas.getAttribute("aria-label")).toBe("Sketching board");
+    expect(canvas.parentElement?.getAttribute("data-testid")).toBe("drawing-canvas");
   });
 
   it("sets backing store from CSS box and mocked devicePixelRatio when ResizeObserver runs", () => {

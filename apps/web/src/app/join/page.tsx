@@ -17,7 +17,7 @@ export default async function JoinPage({ searchParams }: JoinPageProps) {
       fallback={
         <div className="min-h-screen flex flex-col items-center justify-center bg-base-200 p-8">
           <span
-            className="loading loading-spinner loading-lg text-primary"
+            className="loading loading-spinner loading-lg text-primary motion-reduce:!animate-none"
             aria-label="Loading"
           />
         </div>
