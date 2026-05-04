@@ -34,7 +34,11 @@ pnpm dev:web
 
 **Split hosting:** set **`NEXT_PUBLIC_WS_URL`** in `apps/web` to the public WebSocket URL (e.g. `wss://ws.example.com`) when the WS host differs from the Next origin.
 
+For production demos, set **`NEXT_PUBLIC_REPO_URL`** (and optionally **`NEXT_PUBLIC_DEMO_URL`** / **`NEXT_PUBLIC_DOCS_URL`**) in `apps/web`—see `apps/web/.env.example`; without **`NEXT_PUBLIC_REPO_URL`**, header/footer repo links stay hidden so you never ship fake **`href`s**. The footer surfaces a **Probe `/healthz`** link derived from the WS URL (same host/port as the game server).
+
 Optional demo ping from the browser: set `NEXT_PUBLIC_ENABLE_WS_DEMO=1` and `NEXT_PUBLIC_WS_URL` (dev only).
+
+**Game server logs:** set **`LOG_LEVEL=debug`** on `@skribbl/server` to emit structured **`pino`** lines for **`GET /healthz`** probes (default **`info`** keeps production quiet).
 
 ## Checks
 
