@@ -1,21 +1,21 @@
 ---
 status: all_fixed
 phase: 5-1
-findings_in_scope: 4
-fixed: 4
+findings_in_scope: 7
+fixed: 7
 skipped: 0
-iteration: 1
+iteration: 2
 ---
 
 # Phase 5-1: Code Review Fix Report
 
 **Fixed at:** 2026-05-05
 **Source review:** _bmad-output/implementation-artifacts/5-1-REVIEW.md
-**Iteration:** 1
+**Iteration:** 2 (iteration 1 fixed WR-01–WR-04; iteration 2 fixed IN-01–IN-03)
 
 **Summary:**
-- Findings in scope: 4
-- Fixed: 4
+- Findings in scope: 7
+- Fixed: 7
 - Skipped: 0
 
 ## Fixed Issues
@@ -52,6 +52,31 @@ iteration: 1
 
 ---
 
+---
+
+### IN-01: Pre-game chat renders user-controlled text without explicit escaping note
+
+**Files modified:** `apps/web/src/features/lobby/components/LobbyHostPage.tsx`
+**Applied fix:** Added comment at the chat message render site: `m.who and m.text are plain strings; React escapes them. Do NOT render via dangerouslySetInnerHTML.`
+
+---
+
+### IN-02: Array index used as `key` in pre-game chat list
+
+**Files modified:** `apps/web/src/features/lobby/components/LobbyHostPage.tsx`
+**Applied fix:** Added `id: string` field to `ChatMessage` type. All push sites (`setChatMessages` in the `roomCode` effect and `sendChatMessage`) now use `crypto.randomUUID()` for `id`. Both `key={i}` usages replaced with `key={m.id}`.
+
+---
+
+### IN-03: Integration test has no coverage for `reconnectPlayer` identity mismatch
+
+**Files modified:**
+- `apps/server/src/room/room-manager.ts` — added `IDENTITY_MISMATCH` to `ReconnectPlayerFailureReason`; added identity validation in `reconnectPlayer` comparing claimed `displayName`/`avatarPresetId` against stashed values; renamed `_player` parameter to `player`
+- `apps/server/src/protocol/handlers/handle-client-command.ts` — added `IDENTITY_MISMATCH` error message branch
+- `apps/server/src/room-ws.integration.test.ts` — added test `"IDENTITY_MISMATCH: reconnectPlayer with wrong displayName yields IDENTITY_MISMATCH"` (63 tests pass)
+
+---
+
 _Fixed: 2026-05-05_
 _Fixer: Claude (gsd-code-fixer)_
-_Iteration: 1_
+_Iteration: 2_

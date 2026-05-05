@@ -59,7 +59,7 @@ function clipboardFailureMessage(err: unknown): string {
   return "Copy is not available in this browser. You can select and copy the text below.";
 }
 
-type ChatMessage = { who: string; text: string; system?: boolean };
+type ChatMessage = { id: string; who: string; text: string; system?: boolean };
 
 const nicknameHintId = "host-lobby-nickname-hint";
 const nicknameErrId = "host-lobby-nickname-error";
@@ -138,7 +138,7 @@ export function LobbyHostPage() {
   useEffect(() => {
     if (state.status === "lobby" && state.roomCode && state.roomCode !== seededCode) {
       setSeededCode(state.roomCode);
-      setChatMessages([{ who: "system", text: `Room created · share the code: ${state.roomCode}`, system: true }]);
+      setChatMessages([{ id: crypto.randomUUID(), who: "system", text: `Room created · share the code: ${state.roomCode}`, system: true }]);
     }
   }, [state.status === "lobby" ? state.roomCode : null, seededCode]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -466,7 +466,7 @@ export function LobbyHostPage() {
 
   const sendChatMessage = () => {
     if (!chatDraft.trim()) return;
-    setChatMessages((prev) => [...prev, { who: state.displayName, text: chatDraft.trim() }]);
+    setChatMessages((prev) => [...prev, { id: crypto.randomUUID(), who: state.displayName, text: chatDraft.trim() }]);
     setChatDraft("");
   };
 
@@ -867,11 +867,12 @@ export function LobbyHostPage() {
               lineHeight: 1.45,
             }}
           >
-            {chatMessages.map((m, i) =>
+            {/* m.who and m.text are plain strings; React escapes them. Do NOT render via dangerouslySetInnerHTML. */}
+            {chatMessages.map((m) =>
               m.system ? (
                 // System messages in monospace, centred with dashed border
                 <div
-                  key={i}
+                  key={m.id}
                   style={{
                     fontFamily: DR.font.mono,
                     fontSize: 11,
@@ -886,7 +887,7 @@ export function LobbyHostPage() {
                   {m.text}
                 </div>
               ) : (
-                <div key={i} style={{ display: "flex", gap: 8 }}>
+                <div key={m.id} style={{ display: "flex", gap: 8 }}>
                   <span
                     style={{
                       fontWeight: 800,

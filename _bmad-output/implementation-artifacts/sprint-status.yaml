@@ -35,12 +35,12 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: '2026-04-29T00:00:00Z'
-last_updated: '2026-05-05T12:00:00Z'
+last_updated: '2026-05-05T18:05:00Z'
 # Epic 1: all stories done; epic in-progress (retro pending).
 # Epic 2: all stories done; 2.6 split into 2-6a (done) + 2-6b (done, was story 4-3 integration).
 # Epic 3: all stories done.
 # Epic 4: 4-1 done; 4-2 review; 4-3 done (merged into 2-6b scope); 4-4 done.
-# Epic 5: 5-3 done; 5-2 done; 5-1 ready-for-dev.
+# Epic 5: all stories done.
 # Epic 6: 6-1 done; 6-2 done; 6-3 done; 6-4 backlog; 6-5 done.
 # Epic 7: done.
 # Epic 8: backlog — Redis persistence layer, not yet started.
@@ -91,7 +91,7 @@ development_status:
   epic-4-retrospective: optional
 
   epic-5: in-progress
-  5-1-session-tokens-reconnect-handshake: review
+  5-1-session-tokens-reconnect-handshake: done
   5-2-snapshot-op-replay-hydration: done
   5-3-presence-decay-ui-muted-roster-rows: done
   epic-5-retrospective: optional

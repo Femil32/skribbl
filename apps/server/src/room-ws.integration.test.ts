@@ -2477,6 +2477,53 @@ describe("handleClientCommand + RoomManager", () => {
     expect(rm.getLobbySession(host.ws)).not.toBeNull();
   });
 
+  it("IDENTITY_MISMATCH: reconnectPlayer with wrong displayName yields IDENTITY_MISMATCH", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.useFakeTimers();
+    try {
+      const rm = new RoomManager(8, integrationWordBank());
+      const host = captureWs();
+      const guest = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        guest.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+      const joined = parseServerEvent(JSON.parse(guest.sent[0]!));
+      if (joined.type !== "roomJoined") throw new Error("unexpected");
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+
+      rm.leaveSocketRoom(guest.ws);
+
+      const impostor = captureWs();
+      handleClientCommand(
+        impostor.ws,
+        {
+          type: "reconnectPlayer",
+          roomId: joined.roomId,
+          playerId: joined.playerId,
+          displayName: "Impostor",
+          avatarPresetId: joined.avatarPresetId,
+        },
+        rm,
+      );
+
+      const ev = parseServerEvent(JSON.parse(impostor.sent[0]!));
+      expect(ev.type).toBe("error");
+      if (ev.type === "error") expect(ev.code).toBe("IDENTITY_MISMATCH");
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
+
   it("NO_STASHED_SESSION: lobby-phase guest reconnectPlayer yields NO_STASHED_SESSION", () => {
     const rm = new RoomManager(8, integrationWordBank());
     const host = captureWs();

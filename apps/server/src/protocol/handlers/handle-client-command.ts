@@ -307,9 +307,11 @@ export function handleClientCommand(
               ? "Use the host reconnect flow for your host session."
               : outcome.reason === "NO_STASHED_SESSION"
                 ? "Reconnect window expired — this seat is no longer resumable."
-                : outcome.reason === "ROOM_FULL"
-                  ? "Room is full"
-                  : "You are already connected in another tab.",
+                : outcome.reason === "IDENTITY_MISMATCH"
+                  ? "Identity does not match the original session."
+                  : outcome.reason === "ROOM_FULL"
+                    ? "Room is full"
+                    : "You are already connected in another tab.",
           roomManager,
         );
         return;

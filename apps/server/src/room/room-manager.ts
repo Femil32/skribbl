@@ -79,7 +79,8 @@ export type ReconnectPlayerFailureReason =
   | "ROOM_FULL"
   | "NO_STASHED_SESSION"
   | "ALREADY_CONNECTED"
-  | "HOST_USE_RECONNECT_HOST";
+  | "HOST_USE_RECONNECT_HOST"
+  | "IDENTITY_MISMATCH";
 
 export type NewLobbyPlayer = Pick<
   LobbySessionIdentity,
@@ -1029,7 +1030,7 @@ export class RoomManager {
     ws: WebSocket,
     roomId: string,
     expectedPlayerId: string,
-    _player: NewLobbyPlayer,
+    player: NewLobbyPlayer,
   ): { ok: true; room: Room } | { ok: false; reason: ReconnectPlayerFailureReason } {
     const room = this.roomsById.get(roomId);
     if (!room) return { ok: false, reason: "UNKNOWN_ROOM" };
@@ -1038,6 +1039,12 @@ export class RoomManager {
     }
     const stashed = room.awaitingReconnect.get(expectedPlayerId);
     if (!stashed) return { ok: false, reason: "NO_STASHED_SESSION" };
+    if (
+      stashed.displayName !== player.displayName ||
+      stashed.avatarPresetId !== player.avatarPresetId
+    ) {
+      return { ok: false, reason: "IDENTITY_MISMATCH" };
+    }
 
     for (const s of room.sockets) {
       const id = this.socketLobbyIdentity.get(s);
