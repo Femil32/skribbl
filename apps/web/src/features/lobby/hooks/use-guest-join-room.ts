@@ -148,6 +148,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
   const closedWhileJoinedRef = useRef(false);
   const wsRef = useRef<WebSocket | null>(null);
   const joinedRoomIdRef = useRef<string | null>(null);
+  const frozenIdentityRef = useRef<{ displayName: string; avatarPresetId: AvatarPresetId } | null>(null);
   /** True when the current connect attempt is a page-reload reconnect from sessionStorage. */
   const pageReloadReconnectRef = useRef(false);
   const guestResumeContextRef = useRef<{
@@ -291,6 +292,10 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
             roomId: parsed.data.roomId,
             playerId: parsed.data.playerId,
             roomCode: parsed.data.roomCode,
+            displayName: parsed.data.displayName,
+            avatarPresetId: parsed.data.avatarPresetId,
+          };
+          frozenIdentityRef.current = {
             displayName: parsed.data.displayName,
             avatarPresetId: parsed.data.avatarPresetId,
           };
@@ -496,6 +501,8 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
             });
             return;
           }
+          // Unknown post-join error — surface as a banner message without clearing state.
+          setTransportErrorMessage(messageForProtocolErrorCode(code));
           return;
         }
         case "drawingHintTick": {
@@ -631,8 +638,6 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
     connectionAttemptId,
     normalized,
     wsUrl,
-    displayName,
-    avatarPresetId,
   ]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
