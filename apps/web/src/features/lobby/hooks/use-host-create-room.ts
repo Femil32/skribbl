@@ -371,6 +371,7 @@ export function useHostCreateRoom(
               drawingHintRows = [];
               chatFeed = [];
               closeGuessHint = null;
+              clearSession(); // clear only once server confirms lobby reset
             } else if (roundBump) {
               nextCommits = [];
               drawingHintRows = [];
@@ -626,7 +627,7 @@ export function useHostCreateRoom(
       wsRef.current = null;
       ws.close();
     };
-  }, [wsUrl, shouldConnect, attemptId, displayName, avatarPresetId]);
+  }, [wsUrl, shouldConnect, attemptId]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const startMatch = useCallback(() => {
@@ -668,7 +669,6 @@ export function useHostCreateRoom(
     if (!w || w.readyState !== WebSocket.OPEN) return;
     try {
       w.send(serializeReturnToLobbyCommand());
-      clearSession();
     } catch {
       /* ignore */
     }
