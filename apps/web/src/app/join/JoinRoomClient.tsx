@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { FormEvent, useCallback, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import type { AvatarPresetId } from "@skribbl/shared";
 import {
   DEFAULT_AVATAR_PRESET_ID,
@@ -23,6 +23,7 @@ import { ScoreboardSummary } from "@/features/match/components/ScoreboardSummary
 import { MatchHintFeed } from "@/features/match/components/MatchHintFeed";
 import { WordChoicePanel } from "@/features/match/components/WordChoicePanel";
 import { MatchChatPanel } from "@/features/match/components/MatchChatPanel";
+import { loadSession } from "@/features/lobby/lib/session-storage";
 
 const formatHintId = "join-room-code-format-hint";
 const protocolErrId = "join-room-protocol-error";
@@ -140,6 +141,32 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
   const bumpGuestConnection = () => {
     setJoinGeneration((n) => n + 1);
   };
+
+  // Track whether the current attempt is a page-reload reconnect so we can detect fallback.
+  const [isPageReloadReconnect, setIsPageReloadReconnect] = useState(false);
+
+  // Auto-reconnect on page reload: if a guest session exists matching the URL code, pre-fill and connect.
+  useEffect(() => {
+    const session = loadSession();
+    if (session?.role === "guest" && urlNormalized && session.roomCode === urlNormalized) {
+      setNicknameRaw(session.displayName);
+      setAvatarId(session.avatarPresetId);
+      setManualCommitted(true);
+      setIsPageReloadReconnect(true);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // NO_STASHED_SESSION fallback: lobby-phase guest falls back to normal joinRoom.
+  useEffect(() => {
+    if (
+      isPageReloadReconnect &&
+      guestState.status === "error" &&
+      guestState.protocolCode === "NO_STASHED_SESSION"
+    ) {
+      setIsPageReloadReconnect(false);
+      setJoinGeneration((n) => n + 1);
+    }
+  }, [isPageReloadReconnect, guestState]);
 
   const reloadFullPage = useCallback(() => {
     if (typeof window !== "undefined") window.location.reload();
@@ -386,6 +413,16 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (protocolCode === "ALREADY_CONNECTED") {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-base-200 p-8">
+        <div role="alert" className="alert alert-warning w-full max-w-lg">
+          <span>Already open in another tab — close this tab or the other one.</span>
         </div>
       </div>
     );

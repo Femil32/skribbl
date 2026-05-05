@@ -37,6 +37,11 @@ import {
   mergeCanvasReplayBySeq,
   mergeChatFeedWithHydrateTail,
 } from "@/features/lobby/lib/hydrate-merge";
+import {
+  clearSession,
+  loadSession,
+  saveSession,
+} from "@/features/lobby/lib/session-storage";
 
 type ChatFeedEvent = Extract<
   ServerEvent,
@@ -143,6 +148,8 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
   const closedWhileJoinedRef = useRef(false);
   const wsRef = useRef<WebSocket | null>(null);
   const joinedRoomIdRef = useRef<string | null>(null);
+  /** True when the current connect attempt is a page-reload reconnect from sessionStorage. */
+  const pageReloadReconnectRef = useRef(false);
   const guestResumeContextRef = useRef<{
     roomId: string;
     playerId: string;
@@ -191,6 +198,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
       closedWhileJoinedRef.current = false;
       joinedRoomIdRef.current = null;
       guestResumeContextRef.current = null;
+      pageReloadReconnectRef.current = false;
       return;
     }
 
@@ -206,8 +214,25 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
     setTransportErrorMessage(undefined);
 
     const retryAfterJoinedDrop = closedWhileJoinedRef.current;
+
+    // On fresh page-load (not transport-drop): check sessionStorage for saved guest session.
+    if (!retryAfterJoinedDrop && !pageReloadReconnectRef.current) {
+      const stored = loadSession();
+      if (stored?.role === "guest" && stored.roomCode === normalized) {
+        guestResumeContextRef.current = {
+          roomId: stored.roomId,
+          playerId: stored.playerId,
+          roomCode: stored.roomCode,
+          displayName: stored.displayName,
+          avatarPresetId: stored.avatarPresetId,
+        };
+        pageReloadReconnectRef.current = true;
+      }
+    }
+
+    const isReconnecting = retryAfterJoinedDrop || pageReloadReconnectRef.current;
     setConnectionReason(retryAfterJoinedDrop ? "after-drop" : "first");
-    setTransport(retryAfterJoinedDrop ? "reconnecting" : "connecting");
+    setTransport(isReconnecting && guestResumeContextRef.current ? "reconnecting" : "connecting");
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -224,7 +249,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
     ws.addEventListener("open", () => {
       setTransport("live");
       try {
-        const resume = retryAfterJoinedDrop ? guestResumeContextRef.current : null;
+        const resume = isReconnecting ? guestResumeContextRef.current : null;
         if (resume) {
           ws.send(
             serializeReconnectPlayerCommand(
@@ -261,6 +286,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
         case "roomJoined":
           reachedJoinedRef.current = true;
           closedWhileJoinedRef.current = false;
+          pageReloadReconnectRef.current = false;
           guestResumeContextRef.current = {
             roomId: parsed.data.roomId,
             playerId: parsed.data.playerId,
@@ -268,6 +294,14 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
             displayName: parsed.data.displayName,
             avatarPresetId: parsed.data.avatarPresetId,
           };
+          saveSession({
+            roomId: parsed.data.roomId,
+            roomCode: parsed.data.roomCode,
+            playerId: parsed.data.playerId,
+            displayName: parsed.data.displayName,
+            avatarPresetId: parsed.data.avatarPresetId,
+            role: "guest",
+          });
           setState({
             status: "joined",
             roomId: parsed.data.roomId,
@@ -415,6 +449,13 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
           if (errEv.type !== "error") return;
           const code = errEv.code;
           if (!reachedJoinedRef.current) {
+            pageReloadReconnectRef.current = false;
+            // NO_STASHED_SESSION: lobby-phase guest — keep session, page falls back to joinRoom.
+            // ALREADY_CONNECTED: keep session — other tab may close.
+            if (code !== "NO_STASHED_SESSION" && code !== "ALREADY_CONNECTED") {
+              clearSession();
+              guestResumeContextRef.current = null;
+            }
             setTransport("fatal");
             setTransportErrorMessage(messageForProtocolErrorCode(code));
             setState({
@@ -426,6 +467,9 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
           }
           if (TERMINAL_PROTOCOL_CODES_AFTER_JOINED.has(code)) {
             reachedJoinedRef.current = false;
+            if (code !== "ALREADY_CONNECTED") {
+              clearSession();
+            }
             setTransport("fatal");
             setTransportErrorMessage(messageForProtocolErrorCode(code));
             setState({

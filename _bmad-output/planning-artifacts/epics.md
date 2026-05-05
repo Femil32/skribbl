@@ -4,6 +4,10 @@ stepsCompleted:
   - step-02-epics-approved
   - step-03-stories-generated
   - step-04-validated
+  - step-01-epic8-requirements-extracted
+  - step-02-epic8-approved
+  - step-03-epic8-stories-generated
+  - step-04-epic8-validated
 workflow_status: complete
 inputDocuments:
   - '_bmad-output/planning-artifacts/gdd.md'
@@ -254,6 +258,10 @@ So that mistyped invites recover gracefully (FR2, UX-DR12).
 **Then** inline errors explain invalid/full/wrong-phase reasons without blaming the player  
 **And** successful joins transition to lobby roster loading state.
 
+**Given** a player attempts to join via link or code  
+**When** the room is in match-active phase (game already started)  
+**Then** the server returns a structured error and the UI displays "Game already in progress" — join is blocked without exposing internal state.
+
 ### Story 1.5: Lobby identity — nickname & avatar presets
 
 As a participant,
@@ -310,7 +318,8 @@ So that nobody manipulates phase transitions locally (Additional reqs authority)
 **Given** lobby completed start handshake  
 **When** server advances phases (`choosing-word`, `drawing`, `round-result`, etc.)  
 **Then** transitions only originate server-side with typed broadcasts  
-**And** gameplay constants (`ROUND_MS`, etc.) load read-only from `config/game.ts`.
+**And** gameplay constants (`ROUND_MS`, etc.) load read-only from `config/game.ts`  
+**And** connected clients receive the typed phase-transition broadcast and can render the current phase label without additional round-trips.
 
 ### Story 2.2: Round-robin drawer rotation
 
@@ -364,7 +373,7 @@ So stalemates shrink (FR9, UX-DR18 hint rows).
 **Then** hint lines appear as system rows distinct from chat noise  
 **And** timing is reproducible across clients.
 
-### Story 2.6: Score rules & running totals
+### Story 2.6a: Score formula & pure scoring logic
 
 As players,
 I want scores to reflect guess speed and drawer assists,
@@ -372,10 +381,11 @@ So that competition feels fair (FR10).
 
 **Acceptance Criteria:**
 
-**Given** correct guess events from Epic 4 pipeline  
+**Given** a scoring function invoked with guess timestamp, round-start timestamp, and drawer identity  
 **When** scoring runs server-side  
 **Then** guesser points decrease with latency from round start per agreed formula  
-**And** drawer receives defined assist points; scores update roster + PhaseBar totals with tabular numerals (UX-DR5).
+**And** drawer receives defined assist points per defined rules  
+**And** the scoring function is unit-testable with mock inputs — no dependency on live chat pipeline required.
 
 ### Story 2.7: Match-end ScoreboardSummary
 
@@ -506,18 +516,23 @@ So fairness holds (FR20, FR21).
 **Then** guessers who already guessed see plaintext reveal rules honored  
 **And** players still guessing receive censored/obfuscated variants per FR21 policies.
 
-### Story 4.3: Score awards & drawer bonuses wiring
+### Story 4.3: ~~Score awards & drawer bonuses wiring~~ → merged into Story 2.6b
+
+> **Note:** This story has been merged into **Story 2.6b** (added to Epic 4) to fix a forward dependency identified during implementation readiness review. Story 2.6b covers live guess event → scoring function wiring with full ACs. Implement Story 2.6b in place of this story.
+
+### Story 2.6b: Wire live guess events to scoring (integration)
 
 As scoring-aware gameplay,
-I want FR22 hooks feeding Epic 2 totals,
-So points align with adjudicated guesses.
+I want correct guess events from the chat pipeline to feed the scoring functions defined in Story 2.6a,
+So that live scores update in real time when guesses resolve (FR10, FR22).
 
 **Acceptance Criteria:**
 
-**Given** validated correct guess events  
-**When** scoring executes  
+**Given** validated correct guess events from the chat adjudication pipeline (Story 4.2)  
+**When** scoring executes using the functions from Story 2.6a  
 **Then** guesser + drawer bonuses apply consistently with logged rationale for debugging (NFR-O2)  
-**And** running totals remain consistent with server-authoritative ledger state within the active session.
+**And** scores update roster + PhaseBar totals with tabular numerals (UX-DR5)  
+**And** running totals remain consistent with the server-authoritative ledger state within the active session.
 
 ### Story 4.4: Correct-guess fan-out messaging & UX beats
 
@@ -679,3 +694,210 @@ So frustration drops without widening MVP scope (FR24).
 | UX-DR1–UX-DR18 addressed across Epics 1–6 | Pass (Growth deferrals noted) |
 | Within-epic story order builds only on earlier stories | Pass — review during sprint planning if parallelization needed |
 | In-memory MVP — no upfront DB tables | Pass |
+
+---
+
+## Epic 8: Production Lobby — Persistence, Settings & Player Management
+
+Players experience reliable server-backed room state that survives restarts and reloads. The host controls match settings with real-time broadcast to all players. Players can chat before the match starts, vote to remove disruptive players, and reconnect seamlessly after a drop.
+
+**Requirements covered:** BK1–BK10
+
+### Story 8.0: Migrate room manager from in-memory Map to Redis-backed store
+
+As a developer implementing Epic 8,
+I want the room manager to use Redis as its backing store instead of an in-memory Map,
+So that all subsequent Epic 8 stories have a stable, Redis-backed foundation without duplicating migration logic across stories.
+
+**Acceptance Criteria:**
+
+**Given** the existing in-memory `RoomManager` (from Epics 1–7) uses a `Map<roomCode, Room>` structure  
+**When** this story is implemented  
+**Then** all room CRUD operations (`createRoom`, `getRoom`, `updateRoom`, `deleteRoom`) are backed by Redis while keeping the same TypeScript API surface — no changes required in existing protocol handlers  
+**And** the Redis client abstraction from Story 8.1 is defined here or as a prerequisite; this story may be implemented alongside 8.1 but must land before 8.2–8.5  
+**And** existing Vitest unit tests for room lifecycle still pass (with Redis mocked or using a test Redis instance)  
+**And** in-memory fallback is removed — Epic 8 explicitly requires persistent storage per BK3.
+
+### Story 8.1: Redis client abstraction + player token identity
+
+As a player,
+I want my identity and room membership to persist across page reloads and server restarts,
+So that refreshing my browser doesn't kick me out or erase my progress.
+
+**Acceptance Criteria:**
+
+**Given** a player visits the lobby for the first time
+**When** no `skribbl_pid` token exists in localStorage
+**Then** `POST /api/session` issues a `nanoid(21)` token, returns `{ token, playerId }`, and client stores both in localStorage
+
+**Given** the same player reloads the page
+**When** `skribbl_pid` token exists in localStorage
+**Then** the existing `{ token, playerId }` is reused — no new session issued
+
+**Given** the Node WS server restarts
+**When** a player with a valid token reconnects
+**Then** their identity resolves from Redis `player:{token}` hash and room membership is restored
+
+**Given** `REDIS_PROVIDER=upstash` env var is set
+**When** the server initializes its Redis client (`apps/server/lib/redis/client.ts`)
+**Then** `@upstash/redis` adapter is used; switching to `REDIS_PROVIDER=ioredis` uses `ioredis` adapter with no other code changes
+
+**Given** a room is created
+**When** host token is generated (`nanoid(21)`)
+**Then** `hostToken` is stored in Redis `room:{roomCode}` hash and returned to creator only — never broadcast to other clients
+
+**Given** a room has no activity for 30 minutes after creation (idle)
+**When** Redis TTL check fires
+**Then** room keys expire and clean up automatically; active rooms refresh to 2-hour TTL on any player join
+
+### Story 8.2: Lobby settings host broadcast
+
+As a host,
+I want changes I make to match settings (rounds, draw time, max players, word pack, hints, AFK skip, voice) to appear instantly for all players in the lobby,
+So that everyone sees the same configuration before the game starts.
+
+**Acceptance Criteria:**
+
+**Given** host emits `updateSettings` with a partial settings object
+**When** server receives the message
+**Then** `UpdateSettingsSchema` (Zod, `@skribbl/shared`) validates the payload — invalid fields rejected with `error { code: "VALIDATION_ERROR" }`
+
+**Given** sender's `playerId !== room.hostId`
+**When** `updateSettings` arrives
+**Then** server returns `error { code: "NOT_HOST" }` — room state unchanged
+
+**Given** valid host settings update
+**When** server merges partial settings into `room.settings` in Redis
+**Then** `settingsUpdated` broadcast reaches all connected room members within 100ms
+**And** late-joining players receive current `settings` object in their `joinRoom` response
+
+**Given** `startMatch` has already been emitted
+**When** host sends `updateSettings`
+**Then** server returns `error { code: "MATCH_IN_PROGRESS" }` — settings locked once match starts
+
+**Given** host sets `maxPlayers` below current player count
+**When** server validates the settings
+**Then** server rejects with `error { code: "VALIDATION_ERROR", detail: "maxPlayers below current count" }`
+
+**Given** `allowVoice` setting is updated
+**When** stored and broadcast
+**Then** server treats it as a UI flag only — no WebRTC signaling required server-side
+
+### Story 8.3: Pre-game lobby chat relay
+
+As a player waiting in the lobby,
+I want to send and receive text messages with other players before the match starts,
+So that we can coordinate and socialize while waiting for the host to start the game.
+
+**Acceptance Criteria:**
+
+**Given** a player in lobby phase emits `lobbyChat { roomCode, message }`
+**When** server receives the message
+**Then** `LobbyChatSchema` validates it — `message` max 200 chars, excess rejected with `error { code: "MESSAGE_TOO_LONG" }`
+
+**Given** sender is not a member of the specified room
+**When** `lobbyChat` arrives
+**Then** server returns `error { code: "NOT_IN_ROOM" }` — message not relayed
+
+**Given** a player sends more than 5 messages within 3 seconds
+**When** rate limit threshold is exceeded
+**Then** excess messages are dropped and sender receives `error { code: "RATE_LIMITED" }` — other players unaffected
+
+**Given** a valid `lobbyChat` message
+**When** server relays it
+**Then** `lobbyChatMessage { playerId, displayName, message, timestamp }` is broadcast to all room members including sender
+
+**Given** match phase has started (`startMatch` processed)
+**When** `lobbyChat` arrives
+**Then** server rejects with `error { code: "MATCH_IN_PROGRESS" }` — lobby chat gated to lobby phase only
+
+### Story 8.4: Vote-kick system
+
+As a player in a lobby with a disruptive participant,
+I want to initiate a vote to remove them,
+So that the group can eject bad actors without requiring host absolute removal power.
+
+**Acceptance Criteria:**
+
+**Given** a player emits `initiateVoteKick { roomCode, targetPlayerId }`
+**When** no active vote exists for this room
+**Then** `VoteKickState` is written to Redis with 30s TTL; initiator's vote auto-cast as `yes`; `voteKickStarted` broadcast to all room members including target
+
+**Given** a vote is already `PENDING` in the room
+**When** any player emits `initiateVoteKick`
+**Then** server returns `error { code: "VOTE_IN_PROGRESS" }` — second vote blocked
+
+**Given** a player emits `castVoteKick { roomCode, targetPlayerId, vote: "yes"|"no" }`
+**When** active vote exists and sender has not yet voted
+**Then** vote recorded; if `yes / eligible >= 0.55` → `voteKickResolved { outcome: "kicked" }` + `playerLeft { reason: "kicked" }` broadcast; target's WebSocket closed server-side after events are sent
+
+**Given** all eligible voters have cast votes but threshold not met
+**When** final vote arrives
+**Then** `voteKickResolved { outcome: "failed" }` broadcast; `voteKick` cleared from room state
+
+**Given** 30 seconds elapse without vote resolution
+**When** server polling job fires (every 30s, no keyspace notifications — Upstash free-tier compatible)
+**Then** expired vote detected; `voteKickResolved { outcome: "expired" }` broadcast; `room.voteKick` cleared
+
+**Given** target player disconnects while vote is `PENDING`
+**When** server processes the disconnect
+**Then** vote transitions to `CANCELLED`; `voteKickResolved { outcome: "failed" }` broadcast with reason `target_left`
+
+**Given** a voter disconnects mid-vote reducing the yes-reachable count below 55%
+**When** server recalculates eligible voters
+**Then** vote resolves as `failed` immediately
+
+**Given** player emits `castVoteKick` for the same target twice
+**When** server checks `voteKick.votes[playerId]`
+**Then** duplicate vote rejected with `error { code: "ALREADY_VOTED" }`
+
+### Story 8.5: Reconnect grace window + host promotion
+
+As a player who loses connection mid-lobby,
+I want a 30-second window to reconnect and rejoin my room automatically,
+So that brief network hiccups don't remove me from the game.
+
+**Acceptance Criteria:**
+
+**Given** a player's WebSocket disconnects
+**When** disconnect is detected server-side
+**Then** player marked `connected: false` in Redis; 30-second grace timer starts; `playerLeft` NOT broadcast yet — roster patch emits `connectionStatus: "disconnected"` for that player
+
+**Given** player reconnects within the 30-second grace window
+**When** client sends `identify { token, roomCode }` on WS connect
+**Then** server matches token to `player:{token}` in Redis, restores membership, sets `connected: true`, broadcasts `statePatch { players: [...] }`
+**And** rejoining player receives full room snapshot: current `settings`, player roster, active `voteKick` state if any
+
+**Given** 30 seconds elapse without reconnection
+**When** grace timer fires
+**Then** player removed from room; `playerLeft { reason: "disconnected" }` broadcast to remaining members
+**And** if removed player was host, next player by `joinedAt` ascending is promoted — `statePatch { hostId: newHostId }` broadcast
+
+**Given** host explicitly emits `leaveRoom { roomCode }`
+**When** server processes voluntary leave
+**Then** player removed immediately (no grace window); if host, next player promoted; `playerLeft { reason: "voluntary" }` + `statePatch { hostId }` broadcast
+
+**Given** room drops to zero connected players
+**When** last player leaves or all grace timers expire
+**Then** room keys deleted from Redis — no orphan state remains
+
+**Given** reconnecting player presents a token with no matching Redis session
+**When** `identify` is processed
+**Then** server returns `error { code: "TOKEN_MISMATCH" }` — client shown error, offered option to rejoin as new player
+
+---
+
+## Epic 8 coverage map
+
+| Requirement | Story | Coverage note |
+|---|---|---|
+| BK1 | 8.1 | Player token issued, stored localStorage, resolves from Redis |
+| BK2 | 8.1 | Host token issued at creation, stored Redis, never broadcast |
+| BK3 | 8.1 | Room state in Redis survives server restart |
+| BK4 | 8.2 | Settings synced via updateSettings + settingsUpdated broadcast |
+| BK5 | 8.3 | Pre-game chat relayed with rate limiting |
+| BK6 | 8.4 | Vote-kick full state machine, TTL expiry, edge cases |
+| BK7 | 8.5 | 30s grace window, identify handshake, snapshot on rejoin |
+| BK8 | 8.5 | Host promotion on voluntary leave and grace timeout |
+| BK9 | 8.1 | 30min idle TTL, 2h active TTL, self-cleaning |
+| BK10 | 8.2 | Settings locked (MATCH_IN_PROGRESS error) once startMatch fires |

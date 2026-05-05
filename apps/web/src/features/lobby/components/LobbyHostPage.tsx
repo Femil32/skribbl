@@ -22,6 +22,7 @@ import { MatchHintFeed } from "@/features/match/components/MatchHintFeed";
 import { WordChoicePanel } from "@/features/match/components/WordChoicePanel";
 import { MatchChatPanel } from "@/features/match/components/MatchChatPanel";
 import { buildRoomInviteUrl, resolvePublicWebOrigin } from "@/lib/invite-url";
+import { loadSession } from "@/features/lobby/lib/session-storage";
 import { DR, chunk, WORD_PACKS } from "@/features/lobby/design/tokens";
 import { useLobbySettingsStore } from "@/features/lobby/stores/lobby-settings-store";
 import { Stepper } from "@/features/lobby/components/primitives/Stepper";
@@ -152,6 +153,16 @@ export function LobbyHostPage() {
     allowVoice, setAllowVoice,
   } = useLobbySettingsStore();
 
+  // Auto-reconnect on page reload: if a host session exists in sessionStorage, pre-fill and connect.
+  useEffect(() => {
+    const session = loadSession();
+    if (session?.role === "host") {
+      setNicknameRaw(session.displayName);
+      setAvatarId(session.avatarPresetId);
+      setSubmitted(true);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleCreate = useCallback((e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setSubmitted(true);
@@ -276,6 +287,15 @@ export function LobbyHostPage() {
 
   // ─── Error state ─────────────────────────────────────────────────────────────
   if (state.status === "error") {
+    if (state.protocolCode === "ALREADY_CONNECTED") {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center bg-base-200 p-8">
+          <div role="alert" className="alert alert-warning w-full max-w-lg">
+            <span>Already open in another tab — close this tab or the other one.</span>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen flex flex-col bg-base-200">
         <LobbyConnectionBanner

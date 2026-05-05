@@ -35,6 +35,11 @@ import {
   mergeCanvasReplayBySeq,
   mergeChatFeedWithHydrateTail,
 } from "@/features/lobby/lib/hydrate-merge";
+import {
+  clearSession,
+  loadSession,
+  saveSession,
+} from "@/features/lobby/lib/session-storage";
 
 type ChatFeedEvent = Extract<
   ServerEvent,
@@ -79,7 +84,7 @@ export type HostLobbyState =
       /** Private proximity whisper (Story 7.1); not in chatFeed / hydrate. */
       closeGuessHint: { message: string; id: string } | null;
     }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; protocolCode?: string };
 
 export type UseHostCreateRoomParams = {
   /** After the user submits the lobby identity form, set true to open the socket and send `createRoom`. */
@@ -175,6 +180,8 @@ export function useHostCreateRoom(
   const closedWhileInLobbyRef = useRef(false);
   /** Latest successful `roomCreated` — used for `reconnectHost` after a transport drop. */
   const hostResumeContextRef = useRef<HostResumeContext | null>(null);
+  /** True when the current connect attempt is a page-reload reconnect from sessionStorage. */
+  const pageReloadReconnectRef = useRef(false);
 
   /* eslint-disable react-hooks/set-state-in-effect -- WebSocket subscription: transport and lobby state track open/message/error/close. */
   useEffect(() => {
@@ -182,6 +189,7 @@ export function useHostCreateRoom(
       reachedLobbyRef.current = false;
       closedWhileInLobbyRef.current = false;
       hostResumeContextRef.current = null;
+      pageReloadReconnectRef.current = false;
       return;
     }
 
@@ -193,10 +201,26 @@ export function useHostCreateRoom(
     setTransportErrorMessage(undefined);
 
     const retryAfterLobbyDrop = closedWhileInLobbyRef.current;
-    const resume = retryAfterLobbyDrop ? hostResumeContextRef.current : null;
+
+    // On fresh page-load (not transport-drop): check sessionStorage for saved host session.
+    if (!retryAfterLobbyDrop && !pageReloadReconnectRef.current) {
+      const stored = loadSession();
+      if (stored?.role === "host") {
+        hostResumeContextRef.current = {
+          roomId: stored.roomId,
+          playerId: stored.playerId,
+          displayName: stored.displayName,
+          avatarPresetId: stored.avatarPresetId,
+        };
+        pageReloadReconnectRef.current = true;
+      }
+    }
+
+    const isReconnecting = retryAfterLobbyDrop || pageReloadReconnectRef.current;
+    const resume = isReconnecting ? hostResumeContextRef.current : null;
     setConnectionReason(retryAfterLobbyDrop ? "after-drop" : "first");
-    setTransport(retryAfterLobbyDrop ? "reconnecting" : "connecting");
-    if (!retryAfterLobbyDrop) {
+    setTransport(isReconnecting && resume ? "reconnecting" : "connecting");
+    if (!retryAfterLobbyDrop && !pageReloadReconnectRef.current) {
       setState({ status: "connecting" });
     }
 
@@ -253,6 +277,7 @@ export function useHostCreateRoom(
         case "roomCreated":
           reachedLobbyRef.current = true;
           closedWhileInLobbyRef.current = false;
+          pageReloadReconnectRef.current = false;
           setAwaitingHandshake(false);
           hostResumeContextRef.current = {
             roomId: parsed.data.roomId,
@@ -260,6 +285,14 @@ export function useHostCreateRoom(
             displayName: parsed.data.displayName,
             avatarPresetId: parsed.data.avatarPresetId,
           };
+          saveSession({
+            roomId: parsed.data.roomId,
+            roomCode: parsed.data.roomCode,
+            playerId: parsed.data.playerId,
+            displayName: parsed.data.displayName,
+            avatarPresetId: parsed.data.avatarPresetId,
+            role: "host",
+          });
           setState({
             status: "lobby",
             roomId: parsed.data.roomId,
@@ -406,11 +439,12 @@ export function useHostCreateRoom(
           const err = parsed.data;
           if (!reachedLobbyRef.current) {
             setAwaitingHandshake(false);
-            if (
-              err.code === "HOST_SESSION_LOST" ||
-              err.code === "HOST_RECLAIM_DENIED" ||
-              err.code === "ALREADY_CONNECTED"
-            ) {
+            pageReloadReconnectRef.current = false;
+            if (err.code === "ALREADY_CONNECTED") {
+              // Keep session — other tab may close and allow reconnect here.
+              closedWhileInLobbyRef.current = false;
+            } else {
+              clearSession();
               hostResumeContextRef.current = null;
               closedWhileInLobbyRef.current = false;
             }
@@ -419,11 +453,15 @@ export function useHostCreateRoom(
             setState({
               status: "error",
               message: messageForProtocolErrorCode(err.code),
+              protocolCode: err.code,
             });
             return;
           }
           if (TERMINAL_PROTOCOL_CODES_AFTER_LOBBY.has(err.code)) {
             setAwaitingHandshake(false);
+            if (err.code !== "ALREADY_CONNECTED") {
+              clearSession();
+            }
             hostResumeContextRef.current = null;
             closedWhileInLobbyRef.current = false;
             reachedLobbyRef.current = false;
@@ -432,6 +470,7 @@ export function useHostCreateRoom(
             setState({
               status: "error",
               message: messageForProtocolErrorCode(err.code),
+              protocolCode: err.code,
             });
             return;
           }
@@ -629,6 +668,7 @@ export function useHostCreateRoom(
     if (!w || w.readyState !== WebSocket.OPEN) return;
     try {
       w.send(serializeReturnToLobbyCommand());
+      clearSession();
     } catch {
       /* ignore */
     }

@@ -1,5 +1,5 @@
 # generated: 2026-04-29T12:00:00Z
-# last_updated: 2026-05-04 — 7-1 done; epic-7 done (single story)
+# last_updated: 2026-05-05 — sprint-planning refresh; Epic 8 added; 2.6a/2.6b reconciled
 # project: skribbl
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,11 +35,15 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: '2026-04-29T00:00:00Z'
-last_updated: '2026-05-04T12:00:00Z'
-# Epic 4: 4-1 done; 4-2 review; 4-3 done; 4-4 done (post-review UI fix landed).
-# Epic 5: 5-3 done; 5-2 done; 5-1 backlog.
+last_updated: '2026-05-05T12:00:00Z'
+# Epic 1: all stories done; epic in-progress (retro pending).
+# Epic 2: all stories done; 2.6 split into 2-6a (done) + 2-6b (done, was story 4-3 integration).
+# Epic 3: all stories done.
+# Epic 4: 4-1 done; 4-2 review; 4-3 done (merged into 2-6b scope); 4-4 done.
+# Epic 5: 5-3 done; 5-2 done; 5-1 ready-for-dev.
 # Epic 6: 6-1 done; 6-2 done; 6-3 done; 6-4 backlog; 6-5 done.
-# Epic 7: 7-1 done (code review + follow-up fixes 2026-05-04).
+# Epic 7: done.
+# Epic 8: backlog — Redis persistence layer, not yet started.
 project: skribbl
 project_key: NOKEY
 tracking_system: file-system
@@ -62,7 +66,10 @@ development_status:
   2-3-word-bank-loading-drawer-wordchoicepanel: done
   2-4-drawing-phase-countdown-timer-driven-round-end: done
   2-5-progressive-letter-hints-cadence: done
-  2-6-score-rules-running-totals: done
+  # 2.6 was split per implementation-readiness-report-2026-05-05:
+  # 2-6a = pure scoring logic (was 2-6-score-rules-running-totals)
+  # 2-6b = wire live guess events to scoring (was story 4-3, now in Epic 4)
+  2-6a-score-formula-pure-scoring-logic: done
   2-7-match-end-scoreboardsummary: done
   epic-2-retrospective: optional
 
@@ -78,12 +85,13 @@ development_status:
   epic-4: in-progress
   4-1-chatpanel-composer-realtime-history: done
   4-2-guess-adjudication-exact-match-spoiler-safe-broadcasts: review
-  4-3-score-awards-drawer-bonuses-wiring: done
+  # Story 4.3 merged into 2.6b per implementation-readiness-report-2026-05-05
+  2-6b-wire-live-guess-events-to-scoring: done
   4-4-correct-guess-fan-out-messaging-ux-beats: done
   epic-4-retrospective: optional
 
   epic-5: in-progress
-  5-1-session-tokens-reconnect-handshake: backlog
+  5-1-session-tokens-reconnect-handshake: review
   5-2-snapshot-op-replay-hydration: done
   5-3-presence-decay-ui-muted-roster-rows: done
   epic-5-retrospective: optional
@@ -99,3 +107,12 @@ development_status:
   epic-7: done
   7-1-close-guess-proximity-feedback-growth: done
   epic-7-retrospective: optional
+
+  epic-8: backlog
+  8-0-migrate-room-manager-from-in-memory-map-to-redis-backed-store: backlog
+  8-1-redis-client-abstraction-player-token-identity: backlog
+  8-2-lobby-settings-host-broadcast: backlog
+  8-3-pre-game-lobby-chat-relay: backlog
+  8-4-vote-kick-system: backlog
+  8-5-reconnect-grace-window-host-promotion: backlog
+  epic-8-retrospective: optional

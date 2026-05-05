@@ -2391,4 +2391,127 @@ describe("handleClientCommand + RoomManager", () => {
       vi.useRealTimers();
     }
   });
+
+  it("page-reload reconnect: drop socket then reconnectPlayer with same playerId → roomJoined + roomHydrate", () => {
+    vi.stubEnv("ROUNDS_PER_MATCH", "1");
+    vi.useFakeTimers();
+    try {
+      const rm = new RoomManager(8, integrationWordBank());
+      const host = captureWs();
+      const guest = captureWs();
+
+      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+
+      handleClientCommand(
+        guest.ws,
+        { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+        rm,
+      );
+      const joined = parseServerEvent(JSON.parse(guest.sent[0]!));
+      if (joined.type !== "roomJoined") throw new Error("unexpected");
+
+      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
+
+      // Simulate page-reload: guest socket drops
+      rm.leaveSocketRoom(guest.ws);
+
+      // Guest reconnects with stored session identity
+      const guest2 = captureWs();
+      handleClientCommand(
+        guest2.ws,
+        {
+          type: "reconnectPlayer",
+          roomId: joined.roomId,
+          playerId: joined.playerId,
+          displayName: joined.displayName,
+          avatarPresetId: joined.avatarPresetId,
+        },
+        rm,
+      );
+
+      const reconnected = parseServerEvent(JSON.parse(guest2.sent[0]!));
+      expect(reconnected.type).toBe("roomJoined");
+      if (reconnected.type === "roomJoined") {
+        expect(reconnected.playerId).toBe(joined.playerId);
+      }
+      // Server sends roomHydrate automatically after successful reconnect
+      const hydrate = guest2.sent
+        .map((line) => parseServerEvent(JSON.parse(line)))
+        .find((e) => e.type === "roomHydrate");
+      expect(hydrate?.type).toBe("roomHydrate");
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  });
+
+  it("ALREADY_CONNECTED: second socket with same playerId gets ALREADY_CONNECTED error", () => {
+    const rm = new RoomManager(8, integrationWordBank());
+    const host = captureWs();
+
+    handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+    const created = parseServerEvent(JSON.parse(host.sent[0]!));
+    if (created.type !== "roomCreated") throw new Error("unexpected");
+
+    // Second socket tries to reconnect as host while first is still connected
+    const host2 = captureWs();
+    handleClientCommand(
+      host2.ws,
+      {
+        type: "reconnectHost",
+        roomId: created.roomId,
+        playerId: created.playerId,
+        displayName: created.displayName,
+        avatarPresetId: created.avatarPresetId,
+      },
+      rm,
+    );
+
+    const ev = parseServerEvent(JSON.parse(host2.sent[0]!));
+    expect(ev.type).toBe("error");
+    if (ev.type === "error") expect(ev.code).toBe("ALREADY_CONNECTED");
+    // Original session must remain undisturbed
+    expect(rm.getLobbySession(host.ws)).not.toBeNull();
+  });
+
+  it("NO_STASHED_SESSION: lobby-phase guest reconnectPlayer yields NO_STASHED_SESSION", () => {
+    const rm = new RoomManager(8, integrationWordBank());
+    const host = captureWs();
+    const guest = captureWs();
+
+    handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+    const created = parseServerEvent(JSON.parse(host.sent[0]!));
+    if (created.type !== "roomCreated") throw new Error("unexpected");
+
+    handleClientCommand(
+      guest.ws,
+      { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+      rm,
+    );
+    const joined = parseServerEvent(JSON.parse(guest.sent[0]!));
+    if (joined.type !== "roomJoined") throw new Error("unexpected");
+
+    // Guest drops while still in lobby phase (no stash populated)
+    rm.leaveSocketRoom(guest.ws);
+
+    const guest2 = captureWs();
+    handleClientCommand(
+      guest2.ws,
+      {
+        type: "reconnectPlayer",
+        roomId: joined.roomId,
+        playerId: joined.playerId,
+        displayName: joined.displayName,
+        avatarPresetId: joined.avatarPresetId,
+      },
+      rm,
+    );
+
+    const ev = parseServerEvent(JSON.parse(guest2.sent[0]!));
+    expect(ev.type).toBe("error");
+    if (ev.type === "error") expect(ev.code).toBe("NO_STASHED_SESSION");
+  });
 });
