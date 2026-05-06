@@ -63,7 +63,7 @@ export function WordChoicePanel({
             <button
               key={`${String(index)}-${label}`}
               type="button"
-              className="btn btn-outline btn-primary h-auto min-h-14 py-3 px-4 normal-case whitespace-normal"
+              className="btn btn-outline btn-primary h-auto min-h-14 py-3 px-4 normal-case whitespace-normal focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary"
               disabled={disabled}
               onClick={() => onPick(index as 0 | 1 | 2)}
             >

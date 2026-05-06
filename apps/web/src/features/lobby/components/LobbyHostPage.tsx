@@ -591,6 +591,7 @@ export function LobbyHostPage() {
           <button
             type="button"
             onClick={() => handleCopy("code", roomCode)}
+            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary"
             style={{
               display: "flex",
               alignItems: "center",
@@ -636,7 +637,8 @@ export function LobbyHostPage() {
       </header>
 
       {/* ── LEFT: players + settings ─────────────────────────────────────────── */}
-      <main
+      <section
+        aria-label="Players and game settings"
         style={{
           position: "relative",
           zIndex: 1,
@@ -747,6 +749,7 @@ export function LobbyHostPage() {
                     type="button"
                     onClick={() => isHost && setWordPack(wp.id)}
                     disabled={!isHost}
+                    className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-primary"
                     style={{
                       border: `2.5px solid ${C.line}`,
                       borderRadius: 12,
@@ -806,7 +809,7 @@ export function LobbyHostPage() {
             />
           </div>
         </section>
-      </main>
+      </section>
 
       {/* ── RIGHT: pre-game chat + start button ──────────────────────────────── */}
       <aside
@@ -929,6 +932,7 @@ export function LobbyHostPage() {
               onChange={(e) => setChatDraft(e.target.value)}
               placeholder="say hi…"
               aria-label="Chat message"
+              className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-primary"
               style={{
                 flex: 1,
                 padding: "10px 12px",
@@ -943,6 +947,7 @@ export function LobbyHostPage() {
             />
             <button
               type="submit"
+              className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-primary"
               style={{
                 border: `2.5px solid ${C.line}`,
                 borderRadius: 12,
@@ -961,7 +966,11 @@ export function LobbyHostPage() {
         </div>
 
         {/* Invite link (compact, below chat) */}
-        <div
+        <button
+          type="button"
+          onClick={() => handleCopy("link", inviteUrl)}
+          aria-label="Copy invite link"
+          className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-primary"
           style={{
             background: C.panel,
             border: `2px solid ${C.line}`,
@@ -971,12 +980,9 @@ export function LobbyHostPage() {
             alignItems: "center",
             gap: 10,
             cursor: "pointer",
+            width: "100%",
+            textAlign: "left",
           }}
-          onClick={() => handleCopy("link", inviteUrl)}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => e.key === "Enter" && handleCopy("link", inviteUrl)}
-          aria-label="Copy invite link"
         >
           <span
             style={{ fontSize: 11, fontWeight: 700, color: C.inkDim, letterSpacing: ".18em", textTransform: "uppercase", flexShrink: 0 }}
@@ -999,7 +1005,7 @@ export function LobbyHostPage() {
           <span style={{ fontSize: 11, color: toast === "Link copied" ? DR.semantic.success : C.inkDim, flexShrink: 0 }}>
             {toast === "Link copied" ? "✓" : "⧉"}
           </span>
-        </div>
+        </button>
 
         {/* START GAME button */}
         <button
@@ -1007,6 +1013,7 @@ export function LobbyHostPage() {
           onClick={() => startMatch()}
           disabled={!canStart || transport !== "live"}
           aria-busy={state.isStartPending}
+          className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary"
           style={{
             border: `3px solid ${C.line}`,
             borderRadius: 18,

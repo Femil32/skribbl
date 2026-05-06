@@ -1,6 +1,15 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
-import { afterEach, vi } from "vitest";
+import { configureAxe, toHaveNoViolations } from "jest-axe";
+import { afterEach, expect, vi } from "vitest";
+
+expect.extend(toHaveNoViolations);
+
+// Relax color-contrast rule globally — jsdom has no rendered styles so contrast
+// checks produce false positives. Test files that care can enable it selectively.
+export const axe = configureAxe({
+  rules: { "color-contrast": { enabled: false } },
+});
 
 globalThis.ResizeObserver = class ResizeObserver {
   observe(): void {}

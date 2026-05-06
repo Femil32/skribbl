@@ -12,8 +12,11 @@ export function Toggle({ label, value, setValue, disabled = false }: ToggleProps
   return (
     <button
       type="button"
+      role="switch"
+      aria-checked={value}
       onClick={() => !disabled && setValue(!value)}
       disabled={disabled}
+      className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-primary"
       style={{
         display: "flex",
         alignItems: "center",

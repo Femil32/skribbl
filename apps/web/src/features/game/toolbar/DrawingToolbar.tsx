@@ -2,7 +2,7 @@
 
 import type { RoomPhase } from "@skribbl/shared";
 import { normalizeClientStrokeColor, serializeClientCommand } from "@skribbl/shared";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DrawingActiveTool } from "@/features/game/canvas/DrawingCanvas";
 
 export const DRAWING_COLOR_PRESETS = [
@@ -49,6 +49,39 @@ export function DrawingToolbar({
   onBrushWidthChange,
 }: DrawingToolbarProps) {
   const [clearModalOpen, setClearModalOpen] = useState(false);
+  const clearTriggerRef = useRef<HTMLButtonElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!clearModalOpen) return;
+    const modal = modalRef.current;
+    if (!modal) return;
+    const focusable = modal.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    first?.focus();
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setClearModalOpen(false);
+        clearTriggerRef.current?.focus();
+        return;
+      }
+      if (e.key === "Tab") {
+        if (focusable.length === 0) { e.preventDefault(); return; }
+        if (e.shiftKey) {
+          if (document.activeElement === first) { e.preventDefault(); last?.focus(); }
+        } else {
+          if (document.activeElement === last) { e.preventDefault(); first?.focus(); }
+        }
+      }
+    }
+    modal.addEventListener("keydown", onKeyDown);
+    return () => modal.removeEventListener("keydown", onKeyDown);
+  }, [clearModalOpen]);
 
   if (phase !== "drawing" || !isDrawer) return null;
 
@@ -93,6 +126,7 @@ export function DrawingToolbar({
             );
           })}
           <button
+            ref={clearTriggerRef}
             type="button"
             data-testid="drawing-tool-clear"
             className="btn join-item btn-sm btn-outline btn-error"
@@ -106,6 +140,7 @@ export function DrawingToolbar({
 
       {clearModalOpen ? (
         <div
+          ref={modalRef}
           className="modal modal-open"
           role="dialog"
           aria-modal="true"
@@ -119,7 +154,11 @@ export function DrawingToolbar({
               This removes the whole drawing for everyone in the room.
             </p>
             <div className="modal-action">
-              <button type="button" className="btn btn-ghost" onClick={() => setClearModalOpen(false)}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => { setClearModalOpen(false); clearTriggerRef.current?.focus(); }}
+              >
                 Cancel
               </button>
               <button
@@ -142,9 +181,10 @@ export function DrawingToolbar({
           </div>
           <button
             type="button"
+            tabIndex={-1}
             className="modal-backdrop bg-transparent"
-            aria-label="Dismiss clear dialog"
-            onClick={() => setClearModalOpen(false)}
+            aria-hidden="true"
+            onClick={() => { setClearModalOpen(false); clearTriggerRef.current?.focus(); }}
           />
         </div>
       ) : null}

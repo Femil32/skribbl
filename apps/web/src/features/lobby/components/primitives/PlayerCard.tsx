@@ -91,6 +91,7 @@ export function PlayerCard({ player, index, isLocalPlayer, accent, onKick }: Pla
           type="button"
           onClick={onKick}
           aria-label={`Kick ${player.displayName}`}
+          className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-primary"
           style={{
             flexShrink: 0,
             width: 22,

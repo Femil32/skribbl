@@ -136,6 +136,58 @@ describe("DrawingToolbar", () => {
     expect(onTool).toHaveBeenCalledWith("eraser");
   });
 
+  it("Escape closes clear modal without sending command (AC #2 focus trap)", async () => {
+    const user = userEvent.setup();
+    const sendJsonLine = vi.fn();
+    render(
+      <DrawingToolbar
+        phase="drawing"
+        isDrawer
+        roomId="rid-esc"
+        sendJsonLine={sendJsonLine}
+        activeTool="brush"
+        onActiveToolChange={() => {}}
+        brushColor="#0f172a"
+        brushWidthPx={4}
+        onBrushColorChange={() => {}}
+        onBrushWidthChange={() => {}}
+      />,
+    );
+    await user.click(screen.getByTestId("drawing-tool-clear"));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(sendJsonLine).not.toHaveBeenCalled();
+  });
+
+  it("Tab cycles within clear modal without escaping (AC #2 focus trap)", async () => {
+    const user = userEvent.setup();
+    render(
+      <DrawingToolbar
+        phase="drawing"
+        isDrawer
+        roomId="rid-trap"
+        sendJsonLine={() => {}}
+        activeTool="brush"
+        onActiveToolChange={() => {}}
+        brushColor="#0f172a"
+        brushWidthPx={4}
+        onBrushColorChange={() => {}}
+        onBrushWidthChange={() => {}}
+      />,
+    );
+    await user.click(screen.getByTestId("drawing-tool-clear"));
+    const dialog = screen.getByRole("dialog");
+    const buttons = Array.from(dialog.querySelectorAll<HTMLButtonElement>("button"));
+    expect(buttons.length).toBeGreaterThanOrEqual(2);
+    // focus moves to first button on open
+    expect(document.activeElement).toBe(buttons[0]);
+    // Tab from last should wrap to first
+    buttons[buttons.length - 1]?.focus();
+    await user.keyboard("{Tab}");
+    expect(document.activeElement).toBe(buttons[0]);
+  });
+
   it("clear confirm sends wire command only (canvas clears on server replay)", async () => {
     const user = userEvent.setup();
     const sendJsonLine = vi.fn();

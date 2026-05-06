@@ -32,8 +32,14 @@ export default function RootLayout({
       className={`${bricolage.variable} ${dmMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-base-100 text-base-content font-sans">
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:p-2 focus:bg-base-100 focus:text-base-content"
+        >
+          Skip to main content
+        </a>
         <SiteHeader />
-        <main className="flex flex-1 flex-col">{children}</main>
+        <main id="main-content" className="flex flex-1 flex-col">{children}</main>
         <SiteFooter />
       </body>
     </html>

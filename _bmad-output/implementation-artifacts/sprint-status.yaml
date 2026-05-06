@@ -1,5 +1,5 @@
 # generated: 2026-04-29T12:00:00Z
-# last_updated: 2026-05-05 — sprint-planning refresh; Epic 8 added; 2.6a/2.6b reconciled
+# last_updated: 2026-05-06 — 6-4 done: all 15 review patches applied, 90/90 tests pass, typecheck clean
 # project: skribbl
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: '2026-04-29T00:00:00Z'
-last_updated: '2026-05-05T18:05:00Z'
+last_updated: '2026-05-06T00:00:00Z'
 # Epic 1: all stories done; epic in-progress (retro pending).
 # Epic 2: all stories done; 2.6 split into 2-6a (done) + 2-6b (done, was story 4-3 integration).
 # Epic 3: all stories done.
@@ -100,7 +100,7 @@ development_status:
   6-1-daisyui-theme-tokens-cyan-accent-semantics: done
   6-2-react-error-boundary-ws-down-ux: done
   6-3-landing-footer-portfolio-cues-healthz-pairing: done
-  6-4-accessibility-sweep-landmarks-keyboard-loops-contrast: backlog
+  6-4-accessibility-sweep-landmarks-keyboard-loops-contrast: done
   6-5-reduced-motion-variants-testids-responsive-qa: done
   epic-6-retrospective: optional
 

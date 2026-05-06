@@ -18,7 +18,7 @@ export function Toggle({ checked, onChange, label, disabled = false, className }
       onClick={() => !disabled && onChange(!checked)}
       disabled={disabled}
       className={cn(
-        "inline-flex items-center gap-2 text-xs font-bold rounded-full border-2 border-[#1a1714] px-2.5 py-1.5 cursor-pointer select-none transition-colors",
+        "inline-flex items-center gap-2 text-xs font-bold rounded-full border-2 border-[#1a1714] px-2.5 py-1.5 cursor-pointer select-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary",
         checked ? "bg-[#1a1714] text-[#fffdf6]" : "bg-transparent text-[#1a1714]",
         "disabled:opacity-55 disabled:cursor-not-allowed",
         className
