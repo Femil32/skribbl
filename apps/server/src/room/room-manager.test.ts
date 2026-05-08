@@ -8,9 +8,60 @@ import {
   ROOM_CODE_LENGTH,
 } from "./room-manager.js";
 import { createStaticWordBank } from "../words/word-bank.js";
+import type { RedisClient } from "../lib/redis/client.js";
 
 function testWordBank() {
   return createStaticWordBank(["alpha", "beta", "gamma", "delta"]);
+}
+
+function stubRedis(): RedisClient {
+  const hashes = new Map<string, Record<string, string>>();
+  const strings = new Map<string, string>();
+  const client: RedisClient = {
+    async hset(key, fields) {
+      hashes.set(key, { ...hashes.get(key), ...fields });
+    },
+    async hgetall(key) {
+      return hashes.get(key) ?? null;
+    },
+    async set(key, value) {
+      strings.set(key, value);
+    },
+    async get(key) {
+      return strings.get(key) ?? null;
+    },
+    async del(...keys) {
+      for (const k of keys) {
+        hashes.delete(k);
+        strings.delete(k);
+      }
+    },
+    async expire(_key, _seconds) {},
+    async ping() {
+      return "PONG";
+    },
+    pipeline() {
+      const ops: Array<() => void> = [];
+      const pipe = {
+        hset(key: string, fields: Record<string, string>) {
+          ops.push(() => { hashes.set(key, { ...hashes.get(key), ...fields }); });
+          return pipe;
+        },
+        set(key: string, value: string) {
+          ops.push(() => { strings.set(key, value); });
+          return pipe;
+        },
+        expire(_key: string, _seconds: number) { return pipe; },
+        del(...keys: string[]) {
+          ops.push(() => { for (const k of keys) { hashes.delete(k); strings.delete(k); } });
+          return pipe;
+        },
+        async exec() { for (const op of ops) op(); },
+      };
+      return pipe;
+    },
+  };
+  return client;
 }
 
 function stubSocket(): WebSocket {
@@ -37,7 +88,7 @@ describe("RoomManager", () => {
   });
 
   it("createRoom assigns unique codes", () => {
-    const m = new RoomManager(8, testWordBank());
+    const m = new RoomManager(8, testWordBank(), stubRedis());
     const a = stubSocket();
     const b = stubSocket();
     const r1 = m.createRoom(a, player("A"));
@@ -47,7 +98,7 @@ describe("RoomManager", () => {
   });
 
   it("joinRoom adds second socket and leaves prior room when switching", () => {
-    const m = new RoomManager(8, testWordBank());
+    const m = new RoomManager(8, testWordBank(), stubRedis());
     const ws1 = stubSocket();
     const ws2 = stubSocket();
     const roomA = m.createRoom(ws1, player("1"));
@@ -59,7 +110,7 @@ describe("RoomManager", () => {
   });
 
   it("returns UNKNOWN_ROOM for missing code", () => {
-    const m = new RoomManager(8, testWordBank());
+    const m = new RoomManager(8, testWordBank(), stubRedis());
     const ws = stubSocket();
     m.createRoom(stubSocket(), player("x"));
     expect(m.joinRoom(ws, "ZZZZZZ", player("y"))).toEqual({
@@ -69,7 +120,7 @@ describe("RoomManager", () => {
   });
 
   it("returns ROOM_FULL at capacity", () => {
-    const m = new RoomManager(2, testWordBank());
+    const m = new RoomManager(2, testWordBank(), stubRedis());
     const w1 = stubSocket();
     const w2 = stubSocket();
     const w3 = stubSocket();
@@ -82,7 +133,7 @@ describe("RoomManager", () => {
   });
 
   it("reconnectHost restores canonical host when socket was dropped", () => {
-    const m = new RoomManager(8, testWordBank());
+    const m = new RoomManager(8, testWordBank(), stubRedis());
     const h = stubSocket();
     const g = stubSocket();
     const room = m.createRoom(h, player("Hosta"));

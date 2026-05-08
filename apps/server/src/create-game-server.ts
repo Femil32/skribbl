@@ -8,6 +8,7 @@ import {
 } from "./config/game.js";
 import { RoomManager } from "./room/room-manager.js";
 import { createWordBankFromEnv } from "./words/word-bank.js";
+import { getRedisClient } from "./lib/redis/client.js";
 import {
   handleClientCommand,
   sendProtocolError,
@@ -15,8 +16,9 @@ import {
 
 const log = pino({ level: process.env.LOG_LEVEL ?? "info" });
 
-export function createGameServer() {
-  const roomManager = new RoomManager(undefined, createWordBankFromEnv());
+export async function createGameServer() {
+  const redis = await getRedisClient();
+  const roomManager = new RoomManager(undefined, createWordBankFromEnv(), redis);
 
   const server = http.createServer((req, res) => {
     if (req.method === "GET" && req.url?.split("?")[0] === "/healthz") {

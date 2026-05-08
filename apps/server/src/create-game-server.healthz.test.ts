@@ -1,6 +1,30 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { RedisClient } from "./lib/redis/client.js";
+
+vi.mock("./lib/redis/client.js", () => ({
+  getRedisClient: async (): Promise<RedisClient> => ({
+    async hset() {},
+    async hgetall() { return null; },
+    async set() {},
+    async get() { return null; },
+    async del() {},
+    async expire() {},
+    async ping() { return "PONG"; },
+    pipeline() {
+      const pipe = {
+        hset() { return pipe; },
+        set() { return pipe; },
+        expire() { return pipe; },
+        del() { return pipe; },
+        async exec() {},
+      };
+      return pipe;
+    },
+  }),
+}));
+
 import { createGameServer } from "./create-game-server.js";
 
 const REPO_WORDS_JSON = path.resolve(
@@ -8,28 +32,22 @@ const REPO_WORDS_JSON = path.resolve(
   "../../../data/words.json",
 );
 
-function listen(
-  server: ReturnType<typeof createGameServer>["server"],
-): Promise<number> {
-  return new Promise((resolve, reject) => {
-    server.listen(0, "127.0.0.1", () => {
-      const addr = server.address();
-      if (!addr || typeof addr === "string") {
-        reject(new Error("expected TCP port"));
-        return;
-      }
-      resolve(addr.port);
-    });
-    server.on("error", reject);
-  });
-}
-
 describe("GET /healthz", () => {
   it("returns 200 application/json with { ok: true }", async () => {
     const previousWordsPath = process.env.WORDS_PATH;
     process.env.WORDS_PATH = REPO_WORDS_JSON;
-    const { server } = createGameServer();
-    const port = await listen(server);
+    const { server } = await createGameServer();
+    const port = await new Promise<number>((resolve, reject) => {
+      server.listen(0, "127.0.0.1", () => {
+        const addr = server.address();
+        if (!addr || typeof addr === "string") {
+          reject(new Error("expected TCP port"));
+          return;
+        }
+        resolve(addr.port);
+      });
+      server.on("error", reject);
+    });
     try {
       const res = await fetch(`http://127.0.0.1:${port}/healthz`);
       expect(res.status).toBe(200);

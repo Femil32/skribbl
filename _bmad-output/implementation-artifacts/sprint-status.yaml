@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: '2026-04-29T00:00:00Z'
-last_updated: '2026-05-06T00:00:00Z'
+last_updated: '2026-05-08T14:11:00Z'
 # Epic 1: all stories done; epic in-progress (retro pending).
 # Epic 2: all stories done; 2.6 split into 2-6a (done) + 2-6b (done, was story 4-3 integration).
 # Epic 3: all stories done.
@@ -43,7 +43,7 @@ last_updated: '2026-05-06T00:00:00Z'
 # Epic 5: all stories done.
 # Epic 6: 6-1 done; 6-2 done; 6-3 done; 6-4 backlog; 6-5 done.
 # Epic 7: done.
-# Epic 8: backlog — Redis persistence layer, not yet started.
+# Epic 8: in-progress — 8-0 done (Redis RoomManager migration, 63/63 tests pass).
 project: skribbl
 project_key: NOKEY
 tracking_system: file-system
@@ -108,8 +108,8 @@ development_status:
   7-1-close-guess-proximity-feedback-growth: done
   epic-7-retrospective: optional
 
-  epic-8: backlog
-  8-0-migrate-room-manager-from-in-memory-map-to-redis-backed-store: backlog
+  epic-8: in-progress
+  8-0-migrate-room-manager-from-in-memory-map-to-redis-backed-store: done
   8-1-redis-client-abstraction-player-token-identity: backlog
   8-2-lobby-settings-host-broadcast: backlog
   8-3-pre-game-lobby-chat-relay: backlog

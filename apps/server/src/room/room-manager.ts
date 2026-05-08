@@ -43,6 +43,14 @@ import {
   resolveWordChoiceMs,
 } from "../config/game.js";
 import type { WordBank } from "../words/word-bank.js";
+import type { RedisClient } from "../lib/redis/client.js";
+import {
+  roomKey,
+  roomByIdKey,
+  serializeRoom,
+  ROOM_TTL_IDLE_S,
+  ROOM_TTL_ACTIVE_S,
+} from "../lib/redis/room-keys.js";
 import type { LobbySessionIdentity } from "./lobby-session.js";
 import { Room } from "./room.js";
 import {
@@ -88,8 +96,12 @@ export type NewLobbyPlayer = Pick<
 >;
 
 export class RoomManager {
-  private readonly roomsByCode = new Map<string, Room>();
-  private readonly roomsById = new Map<string, Room>();
+  // Redis-backed store: replaces in-memory roomsByCode / roomsById Maps.
+  // roomRuntimeByCode holds live Room objects (sockets, timers, volatile state).
+  // roomCodeById is a lightweight process-local reverse index (roomId → code).
+  private readonly roomRuntimeByCode = new Map<string, Room>();
+  private readonly roomCodeById = new Map<string, string>();
+
   private readonly socketToRoomId = new Map<WebSocket, string>();
   private readonly socketLobbyIdentity = new Map<WebSocket, LobbySessionIdentity>();
   /** Cleared when a room is destroyed or match chain reschedules. */
@@ -97,10 +109,59 @@ export class RoomManager {
 
   readonly maxPlayersPerRoom: number;
   private readonly wordBank: WordBank;
+  // Injectable Redis client — real code passes getRedisClient(); tests inject a stub.
+  private readonly redis: RedisClient;
 
-  constructor(maxPlayersPerRoom: number | undefined, wordBank: WordBank) {
+  constructor(maxPlayersPerRoom: number | undefined, wordBank: WordBank, redis: RedisClient) {
     this.maxPlayersPerRoom = maxPlayersPerRoom ?? resolveMaxPlayers();
     this.wordBank = wordBank;
+    this.redis = redis;
+  }
+
+  private getRoomById(id: string): Room | undefined {
+    const code = this.roomCodeById.get(id);
+    return code ? this.roomRuntimeByCode.get(code) : undefined;
+  }
+
+  // P-1+P-2: fire-and-forget via pipeline (hset+expire atomic per key) with error logging.
+  private writeRoomToRedis(room: Room, ttlSeconds: number = ROOM_TTL_ACTIVE_S): void {
+    const codeKey = roomKey(room.code);
+    const idKey = roomByIdKey(room.id);
+    const fields = serializeRoom({
+      id: room.id,
+      code: room.code,
+      hostPlayerId: room.hostPlayerId,
+      phase: room.phase,
+      maxPlayers: room.maxPlayers,
+      matchPlayerOrder: room.matchPlayerOrder,
+      matchRoundIndex: room.matchRoundIndex,
+      currentDrawerPlayerId: room.currentDrawerPlayerId,
+      roundWordOptions: room.roundWordOptions,
+      roundSecretWord: room.roundSecretWord,
+      drawingStrokeSeq: room.drawingStrokeSeq,
+      chatTranscriptFanoutRows: room.chatTranscriptFanoutRows,
+      drawingPhaseStartedAtMs: room.drawingPhaseStartedAtMs,
+      drawingPhaseAwardedGuesserIds: room.drawingPhaseAwardedGuesserIds,
+      scoresByPlayerId: room.scoresByPlayerId,
+    });
+    void this.redis
+      .pipeline()
+      .hset(codeKey, fields)
+      .expire(codeKey, ttlSeconds)
+      .set(idKey, room.code)
+      .expire(idKey, ttlSeconds)
+      .exec()
+      .catch((err: unknown) => {
+        log.error({ err, roomCode: room.code }, "Redis write failed for room");
+      });
+  }
+
+  private deleteRoomFromRedis(room: Room): void {
+    void this.redis
+      .del(roomKey(room.code), roomByIdKey(room.id))
+      .catch((err: unknown) => {
+        log.error({ err, roomCode: room.code }, "Redis delete failed for room");
+      });
   }
 
   /** Sorted by `playerId` (deterministic roster order — Story 1.6). */
@@ -246,7 +307,7 @@ export class RoomManager {
   }
 
   private clearMatchTimers(roomId: string): void {
-    const room = this.roomsById.get(roomId);
+    const room = this.getRoomById(roomId);
     if (room?.wordChoiceTimerHandle) {
       clearTimeout(room.wordChoiceTimerHandle);
       room.wordChoiceTimerHandle = null;
@@ -301,7 +362,7 @@ export class RoomManager {
     drawerId: string,
     roundIndex: number,
   ): void {
-    if (!this.roomsById.get(room.id) || room.phase !== "drawing") return;
+    if (!this.getRoomById(room.id) || room.phase !== "drawing") return;
 
     for (const t of timeouts) clearTimeout(t);
     timeouts.length = 0;
@@ -311,6 +372,7 @@ export class RoomManager {
     room.drawingPhaseAwardedGuesserIds = null;
     room.drawingPhaseCloseGuessHintsByPlayerId = null;
     this.broadcastMatchPhase(room, undefined, drawerId, roundIndex);
+    this.writeRoomToRedis(room, ROOM_TTL_ACTIVE_S);
     if (roundIndex + 1 < resolveRoundsPerMatch()) {
       const next = setTimeout(
         () => this.queueRoundStart(room, roundIndex + 1, 0, "roundResult", timeouts),
@@ -319,7 +381,7 @@ export class RoomManager {
       timeouts.push(next);
     } else {
       const endMatch = setTimeout(() => {
-        if (!this.roomsById.get(room.id) || room.phase !== "roundResult") return;
+        if (!this.getRoomById(room.id) || room.phase !== "roundResult") return;
         this.enterMatchEnded(room, roundIndex);
       }, resolveInterRoundGapMs());
       timeouts.push(endMatch);
@@ -340,6 +402,7 @@ export class RoomManager {
     room.drawingPhaseStartedAtMs = Date.now();
     room.drawingPhaseAwardedGuesserIds = new Set();
     room.drawingPhaseCloseGuessHintsByPlayerId = new Map();
+    this.writeRoomToRedis(room, ROOM_TTL_ACTIVE_S);
     const roundMs = resolveRoundMs();
     const cadenceMs = resolveHintCadenceMs();
     const drawingEndsAt = Date.now() + roundMs;
@@ -367,7 +430,7 @@ export class RoomManager {
       const revealPos = indices[hintIdx]!;
       const delayMs = cadenceMs * (hintIdx + 1);
       const hintTimer = setTimeout(() => {
-        if (!this.roomsById.get(roomSnapshotId) || room.phase !== "drawing") return;
+        if (!this.getRoomById(roomSnapshotId) || room.phase !== "drawing") return;
         if (room.matchRoundIndex !== roundIndex) return;
 
         revealedPositions.add(revealPos);
@@ -403,7 +466,7 @@ export class RoomManager {
     roundIndex: number,
   ): void {
     room.wordChoiceTimerHandle = null;
-    if (!this.roomsById.get(room.id)) return;
+    if (!this.getRoomById(room.id)) return;
     if (room.phase !== "choosingWord") return;
     const opts = room.roundWordOptions;
     if (!opts) return;
@@ -421,6 +484,7 @@ export class RoomManager {
     }
     this.broadcastMatchPhase(room, undefined, undefined, lastRoundIndex);
     this.broadcastLobbyRoster(room);
+    this.writeRoomToRedis(room, ROOM_TTL_ACTIVE_S);
   }
 
   /**
@@ -456,6 +520,7 @@ export class RoomManager {
 
     this.broadcastMatchPhase(room, undefined, undefined, undefined);
     this.broadcastLobbyRoster(room);
+    this.writeRoomToRedis(room, ROOM_TTL_ACTIVE_S);
     return { ok: true };
   }
 
@@ -471,7 +536,7 @@ export class RoomManager {
     if (!order || order.length === 0) return;
 
     const t = setTimeout(() => {
-      if (!this.roomsById.get(room.id)) return;
+      if (!this.getRoomById(room.id)) return;
       if (room.phase !== gatePhase) return;
 
       const drawerId = order[roundIndex % order.length]!;
@@ -480,6 +545,7 @@ export class RoomManager {
       room.roundWordOptions = this.wordBank.sampleThree();
       room.roundSecretWord = null;
       room.phase = "choosingWord";
+      this.writeRoomToRedis(room, ROOM_TTL_ACTIVE_S);
       const wordChoiceMs = resolveWordChoiceMs();
       const choiceDeadline = Date.now() + wordChoiceMs;
       this.broadcastMatchPhase(room, choiceDeadline, drawerId, roundIndex);
@@ -536,7 +602,7 @@ export class RoomManager {
     guesserPlayerId: string;
     occurredAtMs: number;
   }): { ok: true } | { ok: false; code: string } {
-    const room = this.roomsById.get(opts.roomId);
+    const room = this.getRoomById(opts.roomId);
     if (!room) return { ok: false, code: "UNKNOWN_ROOM" };
     if (room.phase !== "drawing") {
       return { ok: false, code: "WRONG_PHASE" };
@@ -594,6 +660,7 @@ export class RoomManager {
     );
 
     this.broadcastLobbyRoster(room);
+    this.writeRoomToRedis(room, ROOM_TTL_ACTIVE_S);
     return { ok: true };
   }
 
@@ -875,6 +942,7 @@ export class RoomManager {
     const drawerId = room.currentDrawerPlayerId;
     if (!drawerId) return { ok: false, code: "INTERNAL" };
     this.lockWordAndBeginDrawing(room, timeouts, drawerId, room.matchRoundIndex, word);
+    // P-4: lockWordAndBeginDrawing already calls writeRoomToRedis — no second write needed
     return { ok: true };
   }
 
@@ -903,6 +971,7 @@ export class RoomManager {
     };
     for (const sock of room.sockets) this.sendEvent(sock, payload);
     this.scheduleMatchFlow(room);
+    this.writeRoomToRedis(room, ROOM_TTL_ACTIVE_S);
     return { ok: true };
   }
 
@@ -917,7 +986,7 @@ export class RoomManager {
       for (let i = 0; i < len; i++) {
         code += alphabet[bytes[i]! % alphabet.length]!;
       }
-      if (!this.roomsByCode.has(code)) return code;
+      if (!this.roomRuntimeByCode.has(code)) return code;
     }
     throw new Error("ROOM_CODE_COLLISION_RETRY_EXHAUSTED");
   }
@@ -929,7 +998,7 @@ export class RoomManager {
       this.socketLobbyIdentity.delete(ws);
       return;
     }
-    const room = this.roomsById.get(roomId);
+    const room = this.getRoomById(roomId);
     if (room && identity && room.phase !== "lobby") {
       room.awaitingReconnect.set(identity.playerId, {
         playerId: identity.playerId,
@@ -946,8 +1015,9 @@ export class RoomManager {
       const survivors = room.sockets.size;
       if (survivors === 0) {
         this.clearMatchTimers(room.id);
-        this.roomsByCode.delete(room.code);
-        this.roomsById.delete(room.id);
+        this.roomRuntimeByCode.delete(room.code);
+        this.roomCodeById.delete(room.id);
+        this.deleteRoomFromRedis(room);
       } else {
         this.broadcastLobbyRoster(room);
       }
@@ -977,9 +1047,10 @@ export class RoomManager {
     });
     room.sockets.add(ws);
     room.hostSocket = ws;
-    this.roomsByCode.set(code, room);
-    this.roomsById.set(room.id, room);
+    this.roomRuntimeByCode.set(code, room);
+    this.roomCodeById.set(room.id, code);
     this.socketToRoomId.set(ws, room.id);
+    this.writeRoomToRedis(room, ROOM_TTL_IDLE_S);
     return room;
   }
 
@@ -989,7 +1060,7 @@ export class RoomManager {
     expectedPlayerId: string,
     player: NewLobbyPlayer,
   ): { ok: true; room: Room } | { ok: false; reason: ReconnectHostFailureReason } {
-    const room = this.roomsById.get(roomId);
+    const room = this.getRoomById(roomId);
     if (!room) return { ok: false, reason: "UNKNOWN_ROOM" };
     if (room.hostPlayerId !== expectedPlayerId) return { ok: false, reason: "NOT_HOST" };
 
@@ -1023,6 +1094,7 @@ export class RoomManager {
     room.sockets.add(ws);
     room.hostSocket = ws;
     this.socketToRoomId.set(ws, room.id);
+    this.writeRoomToRedis(room, ROOM_TTL_ACTIVE_S);
     return { ok: true, room };
   }
 
@@ -1032,7 +1104,7 @@ export class RoomManager {
     expectedPlayerId: string,
     player: NewLobbyPlayer,
   ): { ok: true; room: Room } | { ok: false; reason: ReconnectPlayerFailureReason } {
-    const room = this.roomsById.get(roomId);
+    const room = this.getRoomById(roomId);
     if (!room) return { ok: false, reason: "UNKNOWN_ROOM" };
     if (room.hostPlayerId === expectedPlayerId) {
       return { ok: false, reason: "HOST_USE_RECONNECT_HOST" };
@@ -1064,6 +1136,7 @@ export class RoomManager {
     });
     room.sockets.add(ws);
     this.socketToRoomId.set(ws, room.id);
+    this.writeRoomToRedis(room, ROOM_TTL_ACTIVE_S);
     return { ok: true, room };
   }
 
@@ -1199,7 +1272,7 @@ export class RoomManager {
   ):
     | { ok: true; room: Room }
     | { ok: false; reason: JoinRoomFailureReason } {
-    const room = this.roomsByCode.get(normalizedCode);
+    const room = this.roomRuntimeByCode.get(normalizedCode);
     if (!room) return { ok: false, reason: "UNKNOWN_ROOM" };
 
     const current = this.getRoomForSocket(ws);
@@ -1222,11 +1295,12 @@ export class RoomManager {
     });
     room.sockets.add(ws);
     this.socketToRoomId.set(ws, room.id);
+    this.writeRoomToRedis(room, ROOM_TTL_ACTIVE_S);
     return { ok: true, room };
   }
 
   getRoomForSocket(ws: WebSocket): Room | undefined {
     const id = this.socketToRoomId.get(ws);
-    return id ? this.roomsById.get(id) : undefined;
+    return id ? this.getRoomById(id) : undefined;
   }
 }

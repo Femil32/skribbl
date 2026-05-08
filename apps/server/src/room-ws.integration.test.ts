@@ -19,6 +19,7 @@ import {
 } from "@skribbl/shared";
 import { CanvasPhaseLog } from "./room/canvas-log.js";
 import { RoomManager } from "./room/room-manager.js";
+import type { RedisClient } from "./lib/redis/client.js";
 import { createStaticWordBank } from "./words/word-bank.js";
 import {
   resolveDrawerAssistPerCorrect,
@@ -58,12 +59,47 @@ function lastLobbyRoster(sent: string[]) {
   return undefined;
 }
 
+function stubRedis(): RedisClient {
+  const hashes = new Map<string, Record<string, string>>();
+  const strings = new Map<string, string>();
+  const client: RedisClient = {
+    async hset(key, fields) { hashes.set(key, { ...hashes.get(key), ...fields }); },
+    async hgetall(key) { return hashes.get(key) ?? null; },
+    async set(key, value) { strings.set(key, value); },
+    async get(key) { return strings.get(key) ?? null; },
+    async del(...keys) { for (const k of keys) { hashes.delete(k); strings.delete(k); } },
+    async expire() {},
+    async ping() { return "PONG"; },
+    pipeline() {
+      const ops: Array<() => void> = [];
+      const pipe = {
+        hset(key: string, fields: Record<string, string>) {
+          ops.push(() => { hashes.set(key, { ...hashes.get(key), ...fields }); });
+          return pipe;
+        },
+        set(key: string, value: string) {
+          ops.push(() => { strings.set(key, value); });
+          return pipe;
+        },
+        expire(_key: string, _seconds: number) { return pipe; },
+        del(...keys: string[]) {
+          ops.push(() => { for (const k of keys) { hashes.delete(k); strings.delete(k); } });
+          return pipe;
+        },
+        async exec() { for (const op of ops) op(); },
+      };
+      return pipe;
+    },
+  };
+  return client;
+}
+
 describe("handleClientCommand + RoomManager", () => {
   beforeEach(() => {
     logInfoMock.mockClear();
   });
   it("createRoom then joinRoom succeeds for second socket", () => {
-    const rm = new RoomManager(8, integrationWordBank());
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const a = captureWs();
     const b = captureWs();
 
@@ -90,7 +126,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("unknown room yields UNKNOWN_ROOM", () => {
-    const rm = new RoomManager(8, integrationWordBank());
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const { ws, sent } = captureWs();
     handleClientCommand(
       ws,
@@ -104,7 +140,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("malformed room code yields BAD_CODE", () => {
-    const rm = new RoomManager(8, integrationWordBank());
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const { ws, sent } = captureWs();
     handleClientCommand(
       ws,
@@ -118,7 +154,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("empty display name yields BAD_NICKNAME", () => {
-    const rm = new RoomManager(8, integrationWordBank());
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const { ws, sent } = captureWs();
     handleClientCommand(
       ws,
@@ -132,7 +168,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("ROOM_FULL yields stable error.code through handleClientCommand", () => {
-    const rm = new RoomManager(2, integrationWordBank());
+    const rm = new RoomManager(2, integrationWordBank(), stubRedis());
     const a = captureWs();
     const b = captureWs();
     const c = captureWs();
@@ -166,7 +202,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("INVALID_AVATAR when handler bypasses schema (unsupported preset string)", () => {
-    const rm = new RoomManager(8, integrationWordBank());
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const a = captureWs();
     handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
     const created = parseServerEvent(JSON.parse(a.sent[0]!));
@@ -191,7 +227,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("NICKNAME_TOO_LONG on createRoom", () => {
-    const rm = new RoomManager(8, integrationWordBank());
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const { ws, sent } = captureWs();
     const tooLong = "z".repeat(NICKNAME_MAX_GRAPHEMES + 1);
     handleClientCommand(
@@ -221,7 +257,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("lobby roster after create and join: host flagged, deterministic order by playerId", () => {
-    const rm = new RoomManager(8, integrationWordBank());
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const a = captureWs();
     const b = captureWs();
 
@@ -248,7 +284,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("startMatch: two players succeeds; emits matchStarting to both", () => {
-    const rm = new RoomManager(8, integrationWordBank());
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const a = captureWs();
     const b = captureWs();
 
@@ -281,7 +317,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const a = captureWs();
       const b = captureWs();
 
@@ -345,7 +381,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const a = captureWs();
       const b = captureWs();
 
@@ -388,7 +424,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const a = captureWs();
       const b = captureWs();
 
@@ -424,7 +460,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "2");
     vi.useFakeTimers();
     try {
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const a = captureWs();
       const b = captureWs();
 
@@ -463,7 +499,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("startMatch: non-host rejected with NOT_HOST", () => {
-    const rm = new RoomManager(8, integrationWordBank());
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const a = captureWs();
     const b = captureWs();
 
@@ -484,7 +520,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("startMatch: one player yields NOT_ENOUGH_PLAYERS", () => {
-    const rm = new RoomManager(8, integrationWordBank());
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const a = captureWs();
     handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
     handleClientCommand(a.ws, { type: "startMatch" }, rm);
@@ -494,7 +530,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("join after start yields JOIN_NOT_ALLOWED", () => {
-    const rm = new RoomManager(8, integrationWordBank());
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const a = captureWs();
     const b = captureWs();
     const c = captureWs();
@@ -527,7 +563,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("leaveSocketRoom broadcasts updated roster", () => {
-    const rm = new RoomManager(8, integrationWordBank());
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const a = captureWs();
     const b = captureWs();
 
@@ -548,7 +584,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("reconnectHost reclaims lobby when the room still exists", () => {
-    const rm = new RoomManager(8, integrationWordBank());
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const host = captureWs();
     const guest = captureWs();
 
@@ -588,7 +624,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("reconnectHost after room dissolved yields HOST_SESSION_LOST", () => {
-    const rm = new RoomManager(8, integrationWordBank());
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const host = captureWs();
     handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
     const created = parseServerEvent(JSON.parse(host.sent[0]!));
@@ -616,7 +652,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const host = captureWs();
       const guest = captureWs();
 
@@ -678,7 +714,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.stubEnv("ROUND_MS", "80000");
     vi.useFakeTimers();
     try {
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const host = captureWs();
       const guest = captureWs();
 
@@ -755,7 +791,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const host = captureWs();
       const guest = captureWs();
 
@@ -826,7 +862,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const host = captureWs();
       const guest = captureWs();
 
@@ -884,7 +920,7 @@ describe("handleClientCommand + RoomManager", () => {
         bracket.min,
       );
 
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const host = captureWs();
       const guest = captureWs();
 
@@ -971,7 +1007,7 @@ describe("handleClientCommand + RoomManager", () => {
       const assist = resolveDrawerAssistPerCorrect();
       const elapsedMs = roundMs / 2;
 
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const host = captureWs();
       const guest = captureWs();
 
@@ -1070,7 +1106,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.useFakeTimers();
     try {
       const assist = resolveDrawerAssistPerCorrect();
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const host = captureWs();
       const guest = captureWs();
       const guest2 = captureWs();
@@ -1180,7 +1216,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const host = captureWs();
       const guest = captureWs();
 
@@ -1231,7 +1267,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("lobby phase: drawer canvas clear yields WRONG_PHASE", () => {
-    const rm = new RoomManager(8, integrationWordBank());
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const host = captureWs();
     const guest = captureWs();
 
@@ -1264,7 +1300,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const host = captureWs();
       const guest = captureWs();
 
@@ -1317,7 +1353,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.stubEnv("HINT_CADENCE_MS", "2000");
     vi.useFakeTimers();
     try {
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const host = captureWs();
       const guest = captureWs();
 
@@ -1396,7 +1432,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.stubEnv("ROUND_MS", "80000");
     vi.useFakeTimers();
     try {
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const host = captureWs();
       const guest = captureWs();
 
@@ -1491,6 +1527,7 @@ describe("handleClientCommand + RoomManager", () => {
       const rm = new RoomManager(
         8,
         createStaticWordBank(["onlyone", "onlytwo", "onlythree"]),
+        stubRedis(),
       );
       const host = captureWs();
       const g1 = captureWs();
@@ -1596,7 +1633,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("lobby chat never emits chatCorrectGuess (no drawing-phase adjudication)", () => {
-    const rm = new RoomManager(8, integrationWordBank());
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const host = captureWs();
     const guest = captureWs();
 
@@ -1641,6 +1678,7 @@ describe("handleClientCommand + RoomManager", () => {
       const rm = new RoomManager(
         8,
         createStaticWordBank(["onlyone", "onlytwo", "onlythree"]),
+        stubRedis(),
       );
       const host = captureWs();
       const g1 = captureWs();
@@ -1762,6 +1800,7 @@ describe("handleClientCommand + RoomManager", () => {
       const rm = new RoomManager(
         8,
         createStaticWordBank(["onlyone", "onlytwo", "onlythree"]),
+        stubRedis(),
       );
       const host = captureWs();
       const g1 = captureWs();
@@ -1877,7 +1916,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const host = captureWs();
       const guest = captureWs();
 
@@ -1951,7 +1990,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const host = captureWs();
       const guesserCapt = captureWs();
       const idleCapt = captureWs();
@@ -2064,7 +2103,7 @@ describe("handleClientCommand + RoomManager", () => {
       return { ok: false as const, code: "CANVAS_OP_LOG_OVERFLOW" };
     });
     try {
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const host = captureWs();
       const guest = captureWs();
 
@@ -2145,7 +2184,7 @@ describe("handleClientCommand + RoomManager", () => {
       code: "CANVAS_OP_LOG_GAP",
     });
     try {
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const host = captureWs();
       const guest = captureWs();
 
@@ -2230,7 +2269,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.stubEnv("CLOSE_GUESS_HINT_COOLDOWN_MS", "0");
     vi.useFakeTimers();
     try {
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const host = captureWs();
       const guest = captureWs();
 
@@ -2308,7 +2347,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.stubEnv("CLOSE_GUESS_HINT_COOLDOWN_MS", "0");
     vi.useFakeTimers();
     try {
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const host = captureWs();
       const guest = captureWs();
       const guest2 = captureWs();
@@ -2396,7 +2435,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const host = captureWs();
       const guest = captureWs();
 
@@ -2449,7 +2488,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("ALREADY_CONNECTED: second socket with same playerId gets ALREADY_CONNECTED error", () => {
-    const rm = new RoomManager(8, integrationWordBank());
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const host = captureWs();
 
     handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
@@ -2481,7 +2520,7 @@ describe("handleClientCommand + RoomManager", () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
-      const rm = new RoomManager(8, integrationWordBank());
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
       const host = captureWs();
       const guest = captureWs();
 
@@ -2525,7 +2564,7 @@ describe("handleClientCommand + RoomManager", () => {
   });
 
   it("NO_STASHED_SESSION: lobby-phase guest reconnectPlayer yields NO_STASHED_SESSION", () => {
-    const rm = new RoomManager(8, integrationWordBank());
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const host = captureWs();
     const guest = captureWs();
 
