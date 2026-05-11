@@ -3,6 +3,12 @@ import { cleanup } from "@testing-library/react";
 import { configureAxe, toHaveNoViolations } from "jest-axe";
 import { afterEach, expect, vi } from "vitest";
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+  usePathname: () => "/",
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 expect.extend(toHaveNoViolations);
 
 // Relax color-contrast rule globally — jsdom has no rendered styles so contrast

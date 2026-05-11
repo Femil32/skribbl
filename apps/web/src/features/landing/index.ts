@@ -1,0 +1,11 @@
+export { default as LandingNav }        from './components/LandingNav';
+export { default as LandingHero }       from './components/LandingHero';
+export { default as LandingTicker }     from './components/LandingTicker';
+export { default as LandingHowItPlays } from './components/LandingHowItPlays';
+export { default as LandingWordPacks }  from './components/LandingWordPacks';
+export { default as LandingModes }      from './components/LandingModes';
+export { default as LandingFeatures }   from './components/LandingFeatures';
+export { default as LandingStats }      from './components/LandingStats';
+export { default as LandingQuotes }     from './components/LandingQuotes';
+export { default as LandingFinalCTA }   from './components/LandingFinalCTA';
+export { default as LandingFooter }     from './components/LandingFooter';
