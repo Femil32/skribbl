@@ -252,3 +252,8 @@ body {
 .tilt-n2 { transform: rotate(-2deg); }
 .tilt-p1 { transform: rotate(1deg); }
 .tilt-p05 { transform: rotate(0.5deg); }
+
+@keyframes ticker {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
