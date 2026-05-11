@@ -132,7 +132,7 @@ export function handleClientCommand(
         );
         return;
       }
-      const room = roomManager.createRoom(ws, identity);
+      const room = roomManager.createRoom(ws, { ...identity, token: cmd.token });
       const session = roomManager.getLobbySession(ws);
       if (!session) {
         sendProtocolError(ws, "INTERNAL", "Could not create session", roomManager);
@@ -148,6 +148,7 @@ export function handleClientCommand(
           playerId: session.playerId,
           displayName: session.displayName,
           avatarPresetId: session.avatarPresetId,
+          hostToken: room.hostToken,
         },
         roomManager,
       );
@@ -174,7 +175,7 @@ export function handleClientCommand(
         );
         return;
       }
-      const outcome = roomManager.joinRoom(ws, normalized, identity);
+      const outcome = roomManager.joinRoom(ws, normalized, { ...identity, token: cmd.token });
       if (!outcome.ok) {
         sendProtocolError(
           ws,
@@ -226,7 +227,7 @@ export function handleClientCommand(
         );
         return;
       }
-      const outcome = roomManager.reconnectHost(ws, cmd.roomId, cmd.playerId, identity);
+      const outcome = roomManager.reconnectHost(ws, cmd.roomId, cmd.playerId, { ...identity, token: cmd.token });
       if (!outcome.ok) {
         const errorCode =
           outcome.reason === "UNKNOWN_ROOM"
@@ -266,6 +267,7 @@ export function handleClientCommand(
           playerId: session.playerId,
           displayName: session.displayName,
           avatarPresetId: session.avatarPresetId,
+          hostToken: room.hostToken,
         },
         roomManager,
       );
@@ -288,7 +290,7 @@ export function handleClientCommand(
         );
         return;
       }
-      const outcome = roomManager.reconnectPlayer(ws, cmd.roomId, cmd.playerId, identity);
+      const outcome = roomManager.reconnectPlayer(ws, cmd.roomId, cmd.playerId, { ...identity, token: cmd.token });
       if (!outcome.ok) {
         const errorCode =
           outcome.reason === "UNKNOWN_ROOM"

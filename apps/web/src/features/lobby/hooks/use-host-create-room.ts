@@ -19,6 +19,7 @@ import {
   transportOpenFailedMessage,
 } from "@/features/lobby/lib/transport-user-messages";
 import { missingGameWebSocketUrlUserMessage, resolveGameWebSocketUrl } from "@/lib/game-ws-url";
+import { getOrCreatePlayerToken, wsUrlToHttpUrl } from "@/features/lobby/lib/player-token";
 import {
   serializeCreateRoomCommand,
   serializeReconnectHostCommand,
@@ -224,9 +225,16 @@ export function useHostCreateRoom(
       setState({ status: "connecting" });
     }
 
+    let closedByCleanup = false;
+
+    void (async () => {
+      // Best-effort: resolve player token before opening WS
+      const { token } = await getOrCreatePlayerToken(wsUrlToHttpUrl(wsUrl));
+
+      if (closedByCleanup) return;
+
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
-    let closedByCleanup = false;
 
     function fail(message: string) {
       setAwaitingHandshake(false);
@@ -248,10 +256,11 @@ export function useHostCreateRoom(
               resume.playerId,
               resume.displayName,
               resume.avatarPresetId,
+              token || undefined,
             ),
           );
         } else {
-          ws.send(serializeCreateRoomCommand(displayName, avatarPresetId));
+          ws.send(serializeCreateRoomCommand(displayName, avatarPresetId, token || undefined));
         }
       } catch {
         fail("Could not send request. Try again.");
@@ -621,11 +630,13 @@ export function useHostCreateRoom(
       }
       fail(transportCloseBeforeHandshakeMessage);
     });
+    })(); // end async IIFE
 
     return () => {
       closedByCleanup = true;
+      const w = wsRef.current;
       wsRef.current = null;
-      ws.close();
+      w?.close();
     };
   }, [wsUrl, shouldConnect, attemptId]);
   /* eslint-enable react-hooks/set-state-in-effect */

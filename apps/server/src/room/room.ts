@@ -12,6 +12,8 @@ export class Room {
   readonly code: string;
   /** Canonical host player id from the first `roomCreated` (Story 1.7 reconnect). */
   readonly hostPlayerId: string;
+  /** Persistent host identity token — generated once in createRoom, sent only in roomCreated. */
+  hostToken: string = "";
   phase: RoomPhase = "lobby";
   /** Deterministic player ids for round-robin (Story 2.2); set when the match flow starts. */
   matchPlayerOrder: string[] | null = null;

@@ -1,5 +1,5 @@
 # generated: 2026-04-29T12:00:00Z
-# last_updated: 2026-05-06 — 6-4 done: all 15 review patches applied, 90/90 tests pass, typecheck clean
+# last_updated: 2026-05-11 — 8-1 done: 7 review patches applied + D3 reconnect token wired, 273/273 tests pass
 # project: skribbl
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: '2026-04-29T00:00:00Z'
-last_updated: '2026-05-08T14:11:00Z'
+last_updated: '2026-05-08T14:30:00Z'
 # Epic 1: all stories done; epic in-progress (retro pending).
 # Epic 2: all stories done; 2.6 split into 2-6a (done) + 2-6b (done, was story 4-3 integration).
 # Epic 3: all stories done.
@@ -110,7 +110,7 @@ development_status:
 
   epic-8: in-progress
   8-0-migrate-room-manager-from-in-memory-map-to-redis-backed-store: done
-  8-1-redis-client-abstraction-player-token-identity: backlog
+  8-1-redis-client-abstraction-player-token-identity: done
   8-2-lobby-settings-host-broadcast: backlog
   8-3-pre-game-lobby-chat-relay: backlog
   8-4-vote-kick-system: backlog

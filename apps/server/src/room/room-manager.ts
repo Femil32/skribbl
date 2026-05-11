@@ -50,6 +50,9 @@ import {
   serializeRoom,
   ROOM_TTL_IDLE_S,
   ROOM_TTL_ACTIVE_S,
+  playerKey,
+  serializePlayer,
+  PLAYER_TTL_S,
 } from "../lib/redis/room-keys.js";
 import type { LobbySessionIdentity } from "./lobby-session.js";
 import { Room } from "./room.js";
@@ -131,6 +134,7 @@ export class RoomManager {
       id: room.id,
       code: room.code,
       hostPlayerId: room.hostPlayerId,
+      hostToken: room.hostToken,
       phase: room.phase,
       maxPlayers: room.maxPlayers,
       matchPlayerOrder: room.matchPlayerOrder,
@@ -1030,7 +1034,7 @@ export class RoomManager {
     return this.socketLobbyIdentity.get(ws);
   }
 
-  createRoom(ws: WebSocket, player: NewLobbyPlayer): Room {
+  createRoom(ws: WebSocket, player: NewLobbyPlayer & { token?: string }): Room {
     this.leaveSocketRoom(ws);
     const playerId = randomUUID();
     this.socketLobbyIdentity.set(ws, {
@@ -1039,18 +1043,35 @@ export class RoomManager {
       avatarPresetId: player.avatarPresetId,
     });
     const code = this.generateUniqueCode();
+    const hostToken = randomBytes(16).toString("base64url").slice(0, 21);
     const room = new Room({
       id: randomUUID(),
       code,
       maxPlayers: this.maxPlayersPerRoom,
       hostPlayerId: playerId,
     });
+    room.hostToken = hostToken;
     room.sockets.add(ws);
     room.hostSocket = ws;
     this.roomRuntimeByCode.set(code, room);
     this.roomCodeById.set(room.id, code);
     this.socketToRoomId.set(ws, room.id);
     this.writeRoomToRedis(room, ROOM_TTL_IDLE_S);
+    if (player.token) {
+      void this.redis
+        .pipeline()
+        .hset(playerKey(player.token), serializePlayer({
+          playerId,
+          displayName: player.displayName,
+          avatarPresetId: player.avatarPresetId,
+          updatedAt: new Date().toISOString(),
+        }))
+        .expire(playerKey(player.token), PLAYER_TTL_S)
+        .exec()
+        .catch((err: unknown) => {
+          log.error({ err, token: player.token }, "Redis player token upsert failed in createRoom");
+        });
+    }
     return room;
   }
 
@@ -1058,7 +1079,7 @@ export class RoomManager {
     ws: WebSocket,
     roomId: string,
     expectedPlayerId: string,
-    player: NewLobbyPlayer,
+    player: NewLobbyPlayer & { token?: string },
   ): { ok: true; room: Room } | { ok: false; reason: ReconnectHostFailureReason } {
     const room = this.getRoomById(roomId);
     if (!room) return { ok: false, reason: "UNKNOWN_ROOM" };
@@ -1086,6 +1107,11 @@ export class RoomManager {
     const displayName = stashedSession ? stashedSession.displayName : player.displayName;
     const avatarPresetId = stashedSession ? stashedSession.avatarPresetId : player.avatarPresetId;
 
+    // Legacy rooms (pre-8-1) may have an empty hostToken; generate one on reconnect.
+    if (!room.hostToken) {
+      room.hostToken = randomBytes(16).toString("base64url").slice(0, 21);
+    }
+
     this.socketLobbyIdentity.set(ws, {
       playerId: expectedPlayerId,
       displayName,
@@ -1095,6 +1121,21 @@ export class RoomManager {
     room.hostSocket = ws;
     this.socketToRoomId.set(ws, room.id);
     this.writeRoomToRedis(room, ROOM_TTL_ACTIVE_S);
+    if (player.token) {
+      void this.redis
+        .pipeline()
+        .hset(playerKey(player.token), serializePlayer({
+          playerId: expectedPlayerId,
+          displayName,
+          avatarPresetId,
+          updatedAt: new Date().toISOString(),
+        }))
+        .expire(playerKey(player.token), PLAYER_TTL_S)
+        .exec()
+        .catch((err: unknown) => {
+          log.error({ err, token: player.token }, "Redis player token upsert failed in reconnectHost");
+        });
+    }
     return { ok: true, room };
   }
 
@@ -1102,7 +1143,7 @@ export class RoomManager {
     ws: WebSocket,
     roomId: string,
     expectedPlayerId: string,
-    player: NewLobbyPlayer,
+    player: NewLobbyPlayer & { token?: string },
   ): { ok: true; room: Room } | { ok: false; reason: ReconnectPlayerFailureReason } {
     const room = this.getRoomById(roomId);
     if (!room) return { ok: false, reason: "UNKNOWN_ROOM" };
@@ -1137,6 +1178,21 @@ export class RoomManager {
     room.sockets.add(ws);
     this.socketToRoomId.set(ws, room.id);
     this.writeRoomToRedis(room, ROOM_TTL_ACTIVE_S);
+    if (player.token) {
+      void this.redis
+        .pipeline()
+        .hset(playerKey(player.token), serializePlayer({
+          playerId: expectedPlayerId,
+          displayName: stashed.displayName,
+          avatarPresetId: stashed.avatarPresetId,
+          updatedAt: new Date().toISOString(),
+        }))
+        .expire(playerKey(player.token), PLAYER_TTL_S)
+        .exec()
+        .catch((err: unknown) => {
+          log.error({ err, token: player.token }, "Redis player token upsert failed in reconnectPlayer");
+        });
+    }
     return { ok: true, room };
   }
 
@@ -1268,7 +1324,7 @@ export class RoomManager {
   joinRoom(
     ws: WebSocket,
     normalizedCode: string,
-    player: NewLobbyPlayer,
+    player: NewLobbyPlayer & { token?: string },
   ):
     | { ok: true; room: Room }
     | { ok: false; reason: JoinRoomFailureReason } {
@@ -1296,6 +1352,21 @@ export class RoomManager {
     room.sockets.add(ws);
     this.socketToRoomId.set(ws, room.id);
     this.writeRoomToRedis(room, ROOM_TTL_ACTIVE_S);
+    if (player.token) {
+      void this.redis
+        .pipeline()
+        .hset(playerKey(player.token), serializePlayer({
+          playerId,
+          displayName: player.displayName,
+          avatarPresetId: player.avatarPresetId,
+          updatedAt: new Date().toISOString(),
+        }))
+        .expire(playerKey(player.token), PLAYER_TTL_S)
+        .exec()
+        .catch((err: unknown) => {
+          log.error({ err, token: player.token }, "Redis player token upsert failed in joinRoom");
+        });
+    }
     return { ok: true, room };
   }
 

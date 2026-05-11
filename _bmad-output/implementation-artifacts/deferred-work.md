@@ -1,3 +1,9 @@
+## Deferred from: code review of 8-1-redis-client-abstraction-player-token-identity (2026-05-11)
+
+- Concurrent dual-tab `POST /api/session` calls can create duplicate player records — no `HSETNX` or mutex; requires atomic Redis conditional-set redesign. (`apps/server/src/create-game-server.ts`)
+- Effect dependency arrays missing `displayName`/`avatarPresetId` in `use-host-create-room.ts` and `use-guest-join-room.ts` — pre-existing pattern; stale closure risk on identity change without `attemptId` bump.
+- Token injection via crafted `localStorage` value (XSS prerequisite) — `handleSessionRequest` accepts arbitrary token strings from Redis key lookups without length/format validation; address in security hardening story.
+
 ## Deferred from: code review of 1-4-join-flow-ux-paste-friendly-code-entry (2026-04-29)
 
 - Duplicate normalization tests in `packages/shared/src/room-code.test.ts` and `apps/server/src/room/room-manager.test.ts` — consolidate when convenient to avoid parallel edits.

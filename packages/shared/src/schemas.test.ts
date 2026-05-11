@@ -144,7 +144,7 @@ describe("serverEventSchema", () => {
     expect(safeParseServerEvent({ type: "roomJoined" }).success).toBe(false);
   });
 
-  it("accepts roomCreated with identity", () => {
+  it("accepts roomCreated with identity and hostToken", () => {
     const result = serverEventSchema.safeParse({
       type: "roomCreated",
       roomId: "550e8400-e29b-41d4-a716-446655440000",
@@ -153,6 +153,48 @@ describe("serverEventSchema", () => {
       playerId: "660e8400-e29b-41d4-a716-446655440001",
       displayName: "Pat",
       avatarPresetId: "preset-1",
+      hostToken: "abc123defgh456ijklmn",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects roomCreated without hostToken", () => {
+    const result = serverEventSchema.safeParse({
+      type: "roomCreated",
+      roomId: "550e8400-e29b-41d4-a716-446655440000",
+      roomCode: "A2BCDE",
+      phase: "lobby",
+      playerId: "660e8400-e29b-41d4-a716-446655440001",
+      displayName: "Pat",
+      avatarPresetId: "preset-1",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts createRoom with optional token", () => {
+    const result = clientCommandSchema.safeParse({
+      type: "createRoom",
+      displayName: "Pat",
+      avatarPresetId: "preset-1",
+      token: "mytoken123456789abcd",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts createRoom without token", () => {
+    const result = clientCommandSchema.safeParse({
+      type: "createRoom",
+      displayName: "Pat",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts joinRoom with optional token", () => {
+    const result = clientCommandSchema.safeParse({
+      type: "joinRoom",
+      roomCode: "ABCDEF",
+      displayName: "Sam",
+      token: "mytoken123456789abcd",
     });
     expect(result.success).toBe(true);
   });

@@ -85,6 +85,7 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("createRoom"),
     displayName: z.string(),
     avatarPresetId: avatarPresetIdSchema.optional(),
+    token: z.string().min(1).optional(),
   }),
   /** Join an existing room by code (server normalizes casing / whitespace). */
   z.object({
@@ -92,6 +93,7 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
     roomCode: z.string(),
     displayName: z.string(),
     avatarPresetId: avatarPresetIdSchema.optional(),
+    token: z.string().min(1).optional(),
   }),
   /**
    * Host-only: reclaim the same lobby after a transport drop (Story 1.7+).
@@ -103,6 +105,7 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
     playerId: z.string(),
     displayName: z.string(),
     avatarPresetId: avatarPresetIdSchema.optional(),
+    token: z.string().min(1).optional(),
   }),
   /**
    * Reclaim a disconnected **non-host** seat after a transport drop during an active match phase
@@ -115,6 +118,7 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
     playerId: z.string(),
     displayName: z.string(),
     avatarPresetId: avatarPresetIdSchema.optional(),
+    token: z.string().min(1).optional(),
   }),
   /** Host-only: request transition from lobby to match handshake (Story 1.6+). */
   z.object({
@@ -284,6 +288,8 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     /** Sanitized display name (plain text; never HTML). */
     displayName: z.string(),
     avatarPresetId: avatarPresetIdSchema,
+    /** Host identity token — sent only to the creating WS, never broadcast. */
+    hostToken: z.string().min(1),
   }),
   z.object({
     type: z.literal("roomJoined"),

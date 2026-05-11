@@ -18,11 +18,13 @@ export function createPingCommand(ts = Date.now()): ClientCommand {
 export function serializeCreateRoomCommand(
   displayName: string,
   avatarPresetId?: AvatarPresetId,
+  token?: string,
 ): string {
   return serializeClientCommand({
     type: "createRoom",
     displayName,
     ...(avatarPresetId !== undefined ? { avatarPresetId } : {}),
+    ...(token ? { token } : {}),
   });
 }
 
@@ -32,6 +34,7 @@ export function serializeReconnectPlayerCommand(
   playerId: string,
   displayName: string,
   avatarPresetId: AvatarPresetId,
+  token?: string,
 ): string {
   return serializeClientCommand({
     type: "reconnectPlayer",
@@ -39,6 +42,7 @@ export function serializeReconnectPlayerCommand(
     playerId,
     displayName,
     avatarPresetId,
+    ...(token ? { token } : {}),
   });
 }
 
@@ -48,6 +52,7 @@ export function serializeReconnectHostCommand(
   playerId: string,
   displayName: string,
   avatarPresetId: AvatarPresetId,
+  token?: string,
 ): string {
   return serializeClientCommand({
     type: "reconnectHost",
@@ -55,6 +60,7 @@ export function serializeReconnectHostCommand(
     playerId,
     displayName,
     avatarPresetId,
+    ...(token ? { token } : {}),
   });
 }
 
@@ -63,12 +69,14 @@ export function serializeJoinRoomCommand(
   roomCode: string,
   displayName: string,
   avatarPresetId?: AvatarPresetId,
+  token?: string,
 ): string {
   return serializeClientCommand({
     type: "joinRoom",
     roomCode,
     displayName,
     ...(avatarPresetId !== undefined ? { avatarPresetId } : {}),
+    ...(token ? { token } : {}),
   });
 }
 
