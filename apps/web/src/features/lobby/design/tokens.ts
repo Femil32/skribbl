@@ -41,12 +41,14 @@ export function chunk(x = 4, y = 5, line = "#1a1714"): string {
   return `${x}px ${y}px 0 0 ${line}`;
 }
 
-// Avatar face colors keyed by preset ID (matches avatarPresets in @skribbl/shared)
+// Avatar face colors keyed by preset ID — matches the 6 design-system accent colors
 export const AVATAR_PRESET_COLORS: Record<string, string> = {
-  "preset-1": "#22d3ee", // Cyan
-  "preset-2": "#c084fc", // Violet
-  "preset-3": "#fbbf24", // Amber
-  "preset-4": "#fb7185", // Rose
+  "preset-1": "#ff5a3c", // Tomato
+  "preset-2": "#ffd23f", // Canary
+  "preset-3": "#3ddc97", // Mint
+  "preset-4": "#5b8def", // Cornflower
+  "preset-5": "#c084fc", // Lavender
+  "preset-6": "#ff7ab6", // Rose
 };
 
 // Word pack options for lobby settings UI

@@ -67,8 +67,7 @@ export default function LandingHero() {
             padding: '4px 10px', border: '2px solid #1a1714', borderRadius: 99,
             background: '#fffdf6', fontSize: 11, fontWeight: 800,
             letterSpacing: '.14em', textTransform: 'uppercase' as const,
-            transform: 'rotate(2deg)',
-          }}>★ 4.8 · 38k ratings</span>
+          }}>★ 4.8</span>
         </div>
 
         {/* headline */}

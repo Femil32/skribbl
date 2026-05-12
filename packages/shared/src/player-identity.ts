@@ -11,6 +11,8 @@ export const AVATAR_PRESET_IDS = [
   "preset-2",
   "preset-3",
   "preset-4",
+  "preset-5",
+  "preset-6",
 ] as const;
 
 export const avatarPresetIdSchema = z.enum(AVATAR_PRESET_IDS);
@@ -19,10 +21,12 @@ export const avatarPresets: ReadonlyArray<{
   id: (typeof AVATAR_PRESET_IDS)[number];
   label: string;
 }> = [
-  { id: "preset-1", label: "Cyan" },
-  { id: "preset-2", label: "Violet" },
-  { id: "preset-3", label: "Amber" },
-  { id: "preset-4", label: "Rose" },
+  { id: "preset-1", label: "Tomato"     },
+  { id: "preset-2", label: "Canary"     },
+  { id: "preset-3", label: "Mint"       },
+  { id: "preset-4", label: "Cornflower" },
+  { id: "preset-5", label: "Lavender"   },
+  { id: "preset-6", label: "Rose"       },
 ];
 
 export type AvatarPresetId = z.infer<typeof avatarPresetIdSchema>;

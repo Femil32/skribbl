@@ -38,7 +38,7 @@ export default function RootLayout({
         >
           Skip to main content
         </a>
-        <SiteHeader />
+        {/* <SiteHeader /> */}
         <main id="main-content" className="flex flex-1 flex-col">{children}</main>
         <SiteFooter />
       </body>

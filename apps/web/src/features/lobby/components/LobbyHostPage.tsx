@@ -4,7 +4,6 @@ import type { AvatarPresetId } from "@skribbl/shared";
 import {
   DEFAULT_AVATAR_PRESET_ID,
   NICKNAME_MAX_GRAPHEMES,
-  avatarPresets,
   countGraphemes,
   isMatchFlowPhase,
   isRosterScoreVisiblePhase,
@@ -28,6 +27,7 @@ import { useLobbySettingsStore } from "@/features/lobby/stores/lobby-settings-st
 import { Stepper } from "@/features/lobby/components/primitives/Stepper";
 import { Toggle } from "@/features/lobby/components/primitives/Toggle";
 import { SectionLabel } from "@/features/lobby/components/primitives/SectionLabel";
+import { CreateRoomForm } from "@/features/lobby/components/CreateRoomForm";
 
 // Default accent colour — tomato from the DR palette
 const ACCENT = DR.accent.tomato;
@@ -61,8 +61,6 @@ function clipboardFailureMessage(err: unknown): string {
 
 type ChatMessage = { id: string; who: string; text: string; system?: boolean };
 
-const nicknameHintId = "host-lobby-nickname-hint";
-const nicknameErrId = "host-lobby-nickname-error";
 
 export function LobbyHostPage() {
   const [nicknameRaw, setNicknameRaw] = useState("");
@@ -185,82 +183,16 @@ export function LobbyHostPage() {
       : nicknameTooLong
         ? `Use at most ${String(NICKNAME_MAX_GRAPHEMES)} characters.`
         : null;
-    const ariaNickname = [nicknameHintId, nickFieldError ? nicknameErrId : null]
-      .filter(Boolean)
-      .join(" ");
 
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-base-200 p-8">
-        <div className="card bg-base-100 shadow-xl w-full max-w-lg">
-          <div className="card-body gap-4">
-            <h1 className="card-title text-2xl">Create a room</h1>
-            <p className="text-base-content/80">
-              Choose how you appear in the lobby before we open your room.
-            </p>
-            <form className="flex flex-col gap-4" onSubmit={handleCreate} noValidate>
-              <label className="form-control w-full">
-                <span className="label-text font-medium">Display name</span>
-                <input
-                  type="text"
-                  id="host-lobby-nickname"
-                  name="nickname"
-                  className="input input-bordered w-full"
-                  value={nicknameRaw}
-                  onChange={(ev) => setNicknameRaw(ev.target.value)}
-                  autoComplete="username"
-                  maxLength={128}
-                  aria-invalid={Boolean(nickFieldError)}
-                  aria-describedby={ariaNickname || undefined}
-                />
-              </label>
-              <p id={nicknameHintId} className="text-sm text-base-content/70">
-                Plain text only — no HTML. Shown to everyone in the lobby.
-              </p>
-              {nickFieldError ? (
-                <p id={nicknameErrId} role="alert" className="text-sm text-warning">
-                  {nickFieldError}
-                </p>
-              ) : null}
-
-              <div className="form-control w-full">
-                <span className="label-text font-medium mb-2">Avatar</span>
-                <div
-                  className="flex flex-wrap gap-2 justify-center sm:justify-start"
-                  role="group"
-                  aria-label="Avatar preset"
-                >
-                  {avatarPresets.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      className={`btn btn-sm gap-2 ${
-                        avatarId === p.id ? "btn-primary" : "btn-outline btn-primary"
-                      }`}
-                      aria-pressed={avatarId === p.id}
-                      onClick={() => setAvatarId(p.id)}
-                    >
-                      <span
-                        className="inline-block size-6 rounded-full border border-base-300 bg-linear-to-br from-primary/30 to-secondary/40"
-                        aria-hidden
-                      />
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="card-actions justify-end">
-                <Link href="/" className="btn btn-ghost">
-                  Back home
-                </Link>
-                <button type="submit" className="btn btn-primary">
-                  Create room
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      </div>
+      <CreateRoomForm
+        nicknameRaw={nicknameRaw}
+        onNicknameChange={setNicknameRaw}
+        avatarId={avatarId}
+        onAvatarChange={setAvatarId}
+        error={nickFieldError}
+        onSubmit={handleCreate}
+      />
     );
   }
 

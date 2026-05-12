@@ -15,11 +15,6 @@ export function SiteHeader() {
 
   return (
     <header className="navbar border-b border-base-200 bg-base-100/80 px-4 py-2 backdrop-blur-sm">
-      <div className="flex-1">
-        <Link href="/" className="btn btn-ghost btn-sm text-base font-semibold">
-          Skribbl
-        </Link>
-      </div>
       {repoUrl ? (
         <div className="flex-none">
           <a
