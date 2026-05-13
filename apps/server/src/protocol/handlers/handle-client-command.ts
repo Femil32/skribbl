@@ -139,11 +139,11 @@ export function sendProtocolError(
   }
 }
 
-export function handleClientCommand(
+export async function handleClientCommand(
   ws: WebSocket,
   cmd: ClientCommand,
   roomManager: RoomManager,
-): void {
+): Promise<void> {
   switch (cmd.type) {
     case "ping":
       sendServerEvent(
@@ -243,7 +243,7 @@ export function handleClientCommand(
           roomId: room.id,
           roomCode: room.code,
           phase: room.phase,
-          playerCount: room.playerCount,
+          playerCount: roomManager.roomWirePlayerCount(room),
           playerId: session.playerId,
           displayName: session.displayName,
           avatarPresetId: session.avatarPresetId,
@@ -269,8 +269,17 @@ export function handleClientCommand(
         );
         return;
       }
-      const outcome = roomManager.reconnectHost(ws, cmd.roomId, cmd.playerId, { ...identity, token: cmd.token });
+      const outcome = await roomManager.reconnectHost(ws, cmd.roomId, cmd.playerId, { ...identity, token: cmd.token });
       if (!outcome.ok) {
+        if (outcome.reason === "TOKEN_MISMATCH") {
+          sendProtocolError(
+            ws,
+            "TOKEN_MISMATCH",
+            "Your session token does not match this seat. Close the tab and join the room again as a new player.",
+            roomManager,
+          );
+          return;
+        }
         const errorCode =
           outcome.reason === "UNKNOWN_ROOM"
             ? "HOST_SESSION_LOST"
@@ -333,8 +342,17 @@ export function handleClientCommand(
         );
         return;
       }
-      const outcome = roomManager.reconnectPlayer(ws, cmd.roomId, cmd.playerId, { ...identity, token: cmd.token });
+      const outcome = await roomManager.reconnectPlayer(ws, cmd.roomId, cmd.playerId, { ...identity, token: cmd.token });
       if (!outcome.ok) {
+        if (outcome.reason === "TOKEN_MISMATCH") {
+          sendProtocolError(
+            ws,
+            "TOKEN_MISMATCH",
+            "Your session token does not match this seat. Close the tab and join the room again as a new player.",
+            roomManager,
+          );
+          return;
+        }
         const errorCode =
           outcome.reason === "UNKNOWN_ROOM"
             ? "HOST_SESSION_LOST"
@@ -374,7 +392,7 @@ export function handleClientCommand(
           roomId: room.id,
           roomCode: room.code,
           phase: room.phase,
-          playerCount: room.playerCount,
+          playerCount: roomManager.roomWirePlayerCount(room),
           playerId: session.playerId,
           displayName: session.displayName,
           avatarPresetId: session.avatarPresetId,
@@ -516,6 +534,27 @@ export function handleClientCommand(
       const out = roomManager.applyCastVoteKick(ws, cmd.roomCode, cmd.targetPlayerId, cmd.vote);
       if (!out.ok)
         sendProtocolError(ws, out.code, voteKickErrorDetail(out.code), roomManager);
+      return;
+    }
+    case "leaveRoom": {
+      const normalized = normalizeRoomCode(cmd.roomCode);
+      if (!isValidRoomCodeForJoin(normalized)) {
+        sendProtocolError(ws, "BAD_CODE", "Invalid room code", roomManager);
+        return;
+      }
+      const out = roomManager.leaveRoom(ws, normalized);
+      if (!out.ok) {
+        sendProtocolError(
+          ws,
+          out.code,
+          out.code === "BAD_CODE"
+            ? "That room code does not match your lobby."
+            : out.code === "MATCH_IN_PROGRESS"
+              ? "You can only leave from the pre-match lobby."
+              : "You are not in that room.",
+          roomManager,
+        );
+      }
       return;
     }
     default: {

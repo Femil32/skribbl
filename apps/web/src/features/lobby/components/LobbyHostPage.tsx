@@ -149,6 +149,7 @@ export function LobbyHostPage() {
     sendGameJsonLine,
     sendChat,
     sendLobbyChat,
+    leaveLobby,
   } = useHostCreateRoom({
     shouldConnect,
     attemptId,
@@ -643,6 +644,30 @@ export function LobbyHostPage() {
               {toast === "Code copied" ? "✓ copied" : "⧉ copy"}
             </span>
           </button>
+          {state.phase === "lobby" ? (
+            <button
+              type="button"
+              onClick={() => leaveLobby()}
+              disabled={transport !== "live"}
+              className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary"
+              style={{
+                background: "transparent",
+                color: C.inkDim,
+                border: `2px solid ${C.line}`,
+                borderRadius: 12,
+                padding: "8px 12px",
+                fontFamily: DR.font.body,
+                fontSize: 12,
+                fontWeight: 700,
+                letterSpacing: ".06em",
+                textTransform: "uppercase",
+                cursor: transport === "live" ? "pointer" : "not-allowed",
+                opacity: transport === "live" ? 1 : 0.55,
+              }}
+            >
+              Leave lobby
+            </button>
+          ) : null}
           {copyError ? (
             <p style={{ fontSize: 12, color: DR.semantic.danger, margin: 0 }}>{copyError}</p>
           ) : null}

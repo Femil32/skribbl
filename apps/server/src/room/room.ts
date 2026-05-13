@@ -1,6 +1,6 @@
 import type { WebSocket } from "ws";
 import type { RoomPhase, RoomSettings, VoteKickPendingState } from "@skribbl/shared";
-import type { LobbySessionIdentity } from "./lobby-session.js";
+import type { ReconnectStash } from "./reconnect-stash.js";
 import { CanvasPhaseLog } from "./canvas-log.js";
 import type { ChatTranscriptFanoutRow } from "./chat-transcript.js";
 import { DEFAULT_ROOM_SETTINGS } from "../config/game.js";
@@ -12,8 +12,8 @@ export class Room {
   readonly id: string;
   readonly code: string;
   /**
-   * Canonical host player id. Promoted deterministically when the host leaves or is kicked during
-   * **lobby** (lexicographically smallest remaining `playerId`, Story 8.4).
+   * Canonical host player id. Promoted when the host leaves or is kicked during
+   * **lobby** by earliest **`joinedAtMs`** (Story 8.5).
    */
   hostPlayerId: string;
   /** Persistent host identity token — generated once in createRoom, sent only in roomCreated. */
@@ -48,11 +48,15 @@ export class Room {
   chatTranscriptFanoutRows: ChatTranscriptFanoutRow[] = [];
 
   /**
-   * Stashed lobby identities for sockets that disconnected during an active post-lobby phase (Story 5.2 late
-   * transport recovery). Lobby-phase drops do **not** populate this map (`reconnectHost` covers host lobby reclaim).
+   * Stashed identities for transport drops. Lobby-phase entries include **`graceExpiresAtMs`**
+   * (Story 8.5); match-phase entries omit it (Story 5.2 reclaim window until explicit removal).
    */
-  readonly awaitingReconnect: Map<string, LobbySessionIdentity> = new Map();
+  readonly awaitingReconnect: Map<string, ReconnectStash> = new Map();
 
+  /**
+   * Monotonic join time per **`playerId`** for host promotion (Story 8.5). Persisted in Redis.
+   */
+  readonly joinedAtByPlayerId = new Map<string, number>();
   /**
    * Monotonic/session clock ms when {@link phase} transitioned to `drawing` (Story 2.6).
    * Cleared when leaving `drawing` (timer-driven `roundResult` or future early guess).

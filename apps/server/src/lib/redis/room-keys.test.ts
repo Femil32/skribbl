@@ -30,9 +30,20 @@ function minimalPersistedRoom(extra: Partial<PersistedRoomFields> = {}): Persist
     drawingPhaseAwardedGuesserIds: null,
     scoresByPlayerId: {},
     settings: { ...DEFAULT_ROOM_SETTINGS },
+    joinedAtByPlayerId: {},
     ...extra,
   };
 }
+
+describe("joinedAtByPlayerId (Story 8.5)", () => {
+  it("round-trips join order map", () => {
+    const room = minimalPersistedRoom({
+      joinedAtByPlayerId: { a: 100, b: 200 },
+    });
+    const round = deserializeRoom(serializeRoom(room));
+    expect(round.joinedAtByPlayerId).toEqual({ a: 100, b: 200 });
+  });
+});
 
 describe("serializeRoom / deserializeRoom voteKick (Story 8.4)", () => {
   it("round-trips PENDING voteKick", () => {

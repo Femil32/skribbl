@@ -71,6 +71,8 @@ export function messageForProtocolErrorCode(code: string): string {
       return "Your seat timed out — rejoin manually if the room is still accepting players.";
     case "HOST_USE_RECONNECT_HOST":
       return "Reconnect using the host option for this seat.";
+    case "TOKEN_MISMATCH":
+      return "Your saved session does not match this seat. Use the join flow again with the room code to enter as a new player.";
     case "CANVAS_OP_LOG_GAP":
     case "CANVAS_OP_LOG_OVERFLOW":
       return "Drawing state fell out of sync. Wait for the next round — the canvas will refresh.";

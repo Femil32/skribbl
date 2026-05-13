@@ -7,6 +7,7 @@ import {
   isValidRoomCodeForJoin,
   ROOM_CODE_LENGTH,
 } from "./room-manager.js";
+import { playerKey } from "../lib/redis/room-keys.js";
 import { createStaticWordBank } from "../words/word-bank.js";
 import type { RedisClient } from "../lib/redis/client.js";
 
@@ -132,7 +133,7 @@ describe("RoomManager", () => {
     });
   });
 
-  it("reconnectHost restores canonical host when socket was dropped", () => {
+  it("reconnectHost restores canonical host when socket was dropped", async () => {
     const m = new RoomManager(8, testWordBank(), stubRedis());
     const h = stubSocket();
     const g = stubSocket();
@@ -144,11 +145,70 @@ describe("RoomManager", () => {
     m.leaveSocketRoom(h);
 
     const h2 = stubSocket();
-    const out = m.reconnectHost(h2, room.id, createdId, player("Hosta"));
+    const out = await m.reconnectHost(h2, room.id, createdId, player("Hosta"));
     expect(out.ok).toBe(true);
     if (!out.ok) throw new Error("unexpected");
     expect(out.room.hostSocket).toBe(h2);
     expect(m.getLobbySession(h2)?.playerId).toBe(createdId);
+  });
+
+  it("reconnectPlayer yields TOKEN_MISMATCH when Redis token maps to another playerId", async () => {
+    const redis = stubRedis();
+    const m = new RoomManager(8, testWordBank(), redis);
+    const h = stubSocket();
+    const g = stubSocket();
+    const room = m.createRoom(h, player("H"));
+    m.joinRoom(g, room.code, player("G"));
+    const gid = m.getLobbySession(g)!.playerId;
+    m.leaveSocketRoom(g);
+    await redis.hset(playerKey("bad-token"), {
+      playerId: "someone-else",
+      displayName: "",
+      avatarPresetId: "",
+      updatedAt: new Date().toISOString(),
+    });
+    const g2 = stubSocket();
+    const out = await m.reconnectPlayer(g2, room.id, gid, {
+      ...player("G"),
+      token: "bad-token",
+    });
+    expect(out).toEqual({ ok: false, reason: "TOKEN_MISMATCH" });
+  });
+
+  it("reconnectPlayer fails when lobby grace deadline has passed", async () => {
+    const m = new RoomManager(8, testWordBank(), stubRedis());
+    const h = stubSocket();
+    const g = stubSocket();
+    const room = m.createRoom(h, player("H"));
+    m.joinRoom(g, room.code, player("G"));
+    const gid = m.getLobbySession(g)!.playerId;
+    m.leaveSocketRoom(g);
+    const stash = room.awaitingReconnect.get(gid);
+    if (!stash?.graceExpiresAtMs) throw new Error("expected grace stash");
+    stash.graceExpiresAtMs = Date.now() - 1;
+    const g2 = stubSocket();
+    const out = await m.reconnectPlayer(g2, room.id, gid, player("G"));
+    expect(out).toEqual({ ok: false, reason: "NO_STASHED_SESSION" });
+  });
+
+  it("lobby grace timer evicts stash without relying on pollLobbyReconnectGrace", () => {
+    vi.useFakeTimers();
+    try {
+      const t0 = 50_000;
+      vi.setSystemTime(t0);
+      const m = new RoomManager(8, testWordBank(), stubRedis());
+      const h = stubSocket();
+      const g = stubSocket();
+      const room = m.createRoom(h, player("H"));
+      m.joinRoom(g, room.code, player("G"));
+      const gid = m.getLobbySession(g)!.playerId;
+      m.leaveSocketRoom(g);
+      expect(room.awaitingReconnect.has(gid)).toBe(true);
+      vi.advanceTimersByTime(30_000);
+      expect(room.awaitingReconnect.has(gid)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   describe("applyLobbyChat (Story 8.3)", () => {
@@ -466,7 +526,25 @@ describe("RoomManager", () => {
       });
     });
 
-    it("resolves failed target_left when target disconnects mid-vote", () => {
+    it("keeps vote pending when target is lobby-grace disconnected (Story 8.5)", () => {
+      const m = new RoomManager(8, testWordBank(), stubRedis());
+      const { ws: hostWs } = makeCapturingWs();
+      const keeperWs = stubSocket();
+      const tWs = stubSocket();
+
+      const room = m.createRoom(hostWs, player("H"));
+      m.joinRoom(keeperWs, room.code, player("K"));
+      m.joinRoom(tWs, room.code, player("T"));
+      const tid = m.getLobbySession(tWs)?.playerId;
+      if (!tid) throw new Error("expected target lobby session");
+
+      expect(m.applyInitiateVoteKick(hostWs, room.code, tid)).toEqual({ ok: true });
+      m.leaveSocketRoom(tWs);
+
+      expect(room.voteKick?.status).toBe("PENDING");
+    });
+
+    it("resolves failed target_left when vote target lobby grace expires", () => {
       const m = new RoomManager(8, testWordBank(), stubRedis());
       const { ws: hostWs, sent } = makeCapturingWs();
       const keeperWs = stubSocket();
@@ -480,6 +558,14 @@ describe("RoomManager", () => {
 
       expect(m.applyInitiateVoteKick(hostWs, room.code, tid)).toEqual({ ok: true });
       m.leaveSocketRoom(tWs);
+
+      expect(room.awaitingReconnect.has(tid)).toBe(true);
+      const st = room.awaitingReconnect.get(tid);
+      if (!st?.graceExpiresAtMs) throw new Error("expected lobby grace stash");
+      st.graceExpiresAtMs = Date.now() - 1;
+      m.pollLobbyReconnectGrace(Date.now());
+      expect(room.awaitingReconnect.has(tid)).toBe(false);
+      expect(room.voteKick).toBeUndefined();
 
       const resolved = [...sent]
         .map((line) => JSON.parse(line))

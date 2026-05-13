@@ -126,6 +126,10 @@ export const lobbyRosterPlayerSchema = z.object({
    * Default `connected` preserves older payloads.
    */
   connectionStatus: rosterConnectionStatusSchema.default("connected"),
+  /**
+   * Join order for host promotion (Story 8.5). Omitted → `0` (legacy clients / unknown).
+   */
+  joinedAtMs: z.number().int().nonnegative().default(0),
 });
 
 export type LobbyRosterPlayer = z.infer<typeof lobbyRosterPlayerSchema>;
@@ -271,6 +275,13 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
       vote: z.enum(["yes", "no"]),
     })
     .strict(),
+  /** Voluntary leave from lobby (Story 8.5) — room code normalized in server handler like `joinRoom`. */
+  z
+    .object({
+      type: z.literal("leaveRoom"),
+      roomCode: z.string(),
+    })
+    .strict(),
 ]);
 
 /** Persisted / hydrated vote-kick tally while `status === PENDING` (Story 8.4). */
@@ -288,7 +299,7 @@ export type VoteKickPendingState = z.infer<typeof voteKickPendingStateSchema>;
 export const voteKickResolvedReasonSchema = z.enum(["target_left"]);
 export type VoteKickResolvedReason = z.infer<typeof voteKickResolvedReasonSchema>;
 
-export const playerLeftReasonSchema = z.enum(["kicked"]);
+export const playerLeftReasonSchema = z.enum(["kicked", "disconnected", "voluntary"]);
 export type PlayerLeftReason = z.infer<typeof playerLeftReasonSchema>;
 
 const drawingCanvasOpPayloadSchema = z.discriminatedUnion("op", [
@@ -533,6 +544,10 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     drawerPlayerId: z.string().nullable().optional(),
     canvasCommits: z.array(canvasReplayEventWireSchema),
     chatTail: z.array(hydrateChatTailWireSchema),
+    /** Lobby snapshot extras (Story 8.5); omitted preserves older clients. */
+    roomCode: z.string().optional(),
+    settings: roomSettingsSchema.optional(),
+    voteKick: voteKickPendingStateSchema.optional(),
   }),
   /**
    * Canvas op seq integrity lost or overflow exceeded — reset local canvas replay state and await a
@@ -602,6 +617,7 @@ export type UpdateSettings = Extract<ClientCommand, { type: "updateSettings" }>;
 export type LobbyChatCommand = Extract<ClientCommand, { type: "lobbyChat" }>;
 export type InitiateVoteKickCommand = Extract<ClientCommand, { type: "initiateVoteKick" }>;
 export type CastVoteKickCommand = Extract<ClientCommand, { type: "castVoteKick" }>;
+export type LeaveRoomCommand = Extract<ClientCommand, { type: "leaveRoom" }>;
 export type VoteKickStartedEvent = Extract<ServerEvent, { type: "voteKickStarted" }>;
 export type VoteKickResolvedEvent = Extract<ServerEvent, { type: "voteKickResolved" }>;
 export type PlayerLeftEvent = Extract<ServerEvent, { type: "playerLeft" }>;

@@ -10,6 +10,7 @@ const samplePlayer = (partial: Partial<LobbyRosterPlayer>): LobbyRosterPlayer =>
   isHost: true,
   score: 0,
   connectionStatus: "connected",
+  joinedAtMs: 0,
   ...partial,
 });
 

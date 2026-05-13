@@ -34,6 +34,11 @@ import {
   handleClientCommand,
   sendProtocolError,
 } from "./protocol/handlers/handle-client-command.js";
+import { playerKey } from "./lib/redis/room-keys.js";
+
+async function dispatchCmd(ws: WebSocket, cmd: ClientCommand, rm: RoomManager): Promise<void> {
+  await handleClientCommand(ws, cmd, rm);
+}
 
 function captureWs(): { ws: WebSocket; sent: string[] } {
   const sent: string[] = [];
@@ -98,12 +103,12 @@ describe("handleClientCommand + RoomManager", () => {
   beforeEach(() => {
     logInfoMock.mockClear();
   });
-  it("createRoom then joinRoom succeeds for second socket", () => {
+  it("createRoom then joinRoom succeeds for second socket", async () => {
     const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const a = captureWs();
     const b = captureWs();
 
-    handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+    await dispatchCmd(a.ws, { type: "createRoom", ...hostIdentity }, rm);
     expect(a.sent.length).toBeGreaterThanOrEqual(1);
     const created = parseServerEvent(JSON.parse(a.sent[0]!));
     expect(created.type).toBe("roomCreated");
@@ -111,7 +116,7 @@ describe("handleClientCommand + RoomManager", () => {
     expect(created.displayName).toBe("Hosty");
     expect(created.playerId).toBeTruthy();
 
-    handleClientCommand(
+    await dispatchCmd(
       b.ws,
       { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
       rm,
@@ -125,10 +130,81 @@ describe("handleClientCommand + RoomManager", () => {
     ).toBe(true);
   });
 
-  it("unknown room yields UNKNOWN_ROOM", () => {
+  it("leaveRoom notifies remaining lobby members with playerLeft voluntary", async () => {
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
+    const host = captureWs();
+    const guest = captureWs();
+
+    await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+    const created = parseServerEvent(JSON.parse(host.sent[0]!));
+    expect(created.type).toBe("roomCreated");
+    if (created.type !== "roomCreated") throw new Error("unexpected");
+
+    await dispatchCmd(
+      guest.ws,
+      { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+      rm,
+    );
+
+    await dispatchCmd(
+      guest.ws,
+      { type: "leaveRoom", roomCode: created.roomCode },
+      rm,
+    );
+
+    const voluntaryEv = host.sent
+      .map((line) => parseServerEvent(JSON.parse(line)))
+      .find((e) => e.type === "playerLeft" && e.reason === "voluntary");
+    expect(voluntaryEv).toBeDefined();
+  });
+
+  it("reconnectPlayer with TOKEN_MISMATCH surfaces error event", async () => {
+    const redis = stubRedis();
+    const rm = new RoomManager(8, integrationWordBank(), redis);
+    const host = captureWs();
+    const guest = captureWs();
+
+    await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+    const created = parseServerEvent(JSON.parse(host.sent[0]!));
+    if (created.type !== "roomCreated") throw new Error("unexpected");
+
+    await dispatchCmd(
+      guest.ws,
+      { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+      rm,
+    );
+    const joined = parseServerEvent(JSON.parse(guest.sent[0]!));
+    if (joined.type !== "roomJoined") throw new Error("unexpected");
+    const guestPlayerId = joined.playerId;
+
+    await redis.hset(playerKey("mismatch-tok"), {
+      playerId: "someone-else-id",
+      displayName: "",
+      avatarPresetId: "",
+      updatedAt: new Date().toISOString(),
+    });
+
+    const g2 = captureWs();
+    await dispatchCmd(
+      g2.ws,
+      {
+        type: "reconnectPlayer",
+        roomId: created.roomId,
+        playerId: guestPlayerId,
+        ...guestIdentity,
+        token: "mismatch-tok",
+      },
+      rm,
+    );
+    const err = parseServerEvent(JSON.parse(g2.sent[g2.sent.length - 1]!));
+    expect(err.type).toBe("error");
+    if (err.type === "error") expect(err.code).toBe("TOKEN_MISMATCH");
+  });
+
+  it("unknown room yields UNKNOWN_ROOM", async () => {
     const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const { ws, sent } = captureWs();
-    handleClientCommand(
+    await dispatchCmd(
       ws,
       { type: "joinRoom", roomCode: "ZZZZZZ", ...guestIdentity },
       rm,
@@ -139,10 +215,10 @@ describe("handleClientCommand + RoomManager", () => {
     if (ev.type === "error") expect(ev.code).toBe("UNKNOWN_ROOM");
   });
 
-  it("malformed room code yields BAD_CODE", () => {
+  it("malformed room code yields BAD_CODE", async () => {
     const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const { ws, sent } = captureWs();
-    handleClientCommand(
+    await dispatchCmd(
       ws,
       { type: "joinRoom", roomCode: "NO", ...guestIdentity },
       rm,
@@ -153,10 +229,10 @@ describe("handleClientCommand + RoomManager", () => {
     if (ev.type === "error") expect(ev.code).toBe("BAD_CODE");
   });
 
-  it("empty display name yields BAD_NICKNAME", () => {
+  it("empty display name yields BAD_NICKNAME", async () => {
     const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const { ws, sent } = captureWs();
-    handleClientCommand(
+    await dispatchCmd(
       ws,
       { type: "createRoom", displayName: "   ", avatarPresetId: "preset-1" },
       rm,
@@ -167,25 +243,25 @@ describe("handleClientCommand + RoomManager", () => {
     if (ev.type === "error") expect(ev.code).toBe("BAD_NICKNAME");
   });
 
-  it("ROOM_FULL yields stable error.code through handleClientCommand", () => {
+  it("ROOM_FULL yields stable error.code through handleClientCommand", async () => {
     const rm = new RoomManager(2, integrationWordBank(), stubRedis());
     const a = captureWs();
     const b = captureWs();
     const c = captureWs();
 
-    handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+    await dispatchCmd(a.ws, { type: "createRoom", ...hostIdentity }, rm);
     const created = parseServerEvent(JSON.parse(a.sent[0]!));
     expect(created.type).toBe("roomCreated");
     if (created.type !== "roomCreated") throw new Error("unexpected");
 
-    handleClientCommand(
+    await dispatchCmd(
       b.ws,
       { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
       rm,
     );
     expect(parseServerEvent(JSON.parse(b.sent[0]!)).type).toBe("roomJoined");
 
-    handleClientCommand(
+    await dispatchCmd(
       c.ws,
       {
         type: "joinRoom",
@@ -201,16 +277,16 @@ describe("handleClientCommand + RoomManager", () => {
     if (third.type === "error") expect(third.code).toBe("ROOM_FULL");
   });
 
-  it("INVALID_AVATAR when handler bypasses schema (unsupported preset string)", () => {
+  it("INVALID_AVATAR when handler bypasses schema (unsupported preset string)", async () => {
     const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const a = captureWs();
-    handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+    await dispatchCmd(a.ws, { type: "createRoom", ...hostIdentity }, rm);
     const created = parseServerEvent(JSON.parse(a.sent[0]!));
     expect(created.type).toBe("roomCreated");
     if (created.type !== "roomCreated") throw new Error("unexpected");
 
     const b = captureWs();
-    handleClientCommand(
+    await dispatchCmd(
       b.ws,
       {
         type: "joinRoom",
@@ -226,11 +302,11 @@ describe("handleClientCommand + RoomManager", () => {
     if (ev.type === "error") expect(ev.code).toBe("INVALID_AVATAR");
   });
 
-  it("NICKNAME_TOO_LONG on createRoom", () => {
+  it("NICKNAME_TOO_LONG on createRoom", async () => {
     const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const { ws, sent } = captureWs();
     const tooLong = "z".repeat(NICKNAME_MAX_GRAPHEMES + 1);
-    handleClientCommand(
+    await dispatchCmd(
       ws,
       {
         type: "createRoom",
@@ -245,7 +321,7 @@ describe("handleClientCommand + RoomManager", () => {
     if (ev.type === "error") expect(ev.code).toBe("NICKNAME_TOO_LONG");
   });
 
-  it("sendProtocolError matches serializeServerEvent shape", () => {
+  it("sendProtocolError matches serializeServerEvent shape", async () => {
     const { ws, sent } = captureWs();
     sendProtocolError(ws, "BAD_PAYLOAD", "bad");
     const ev = parseServerEvent(JSON.parse(sent[0]!));
@@ -256,16 +332,16 @@ describe("handleClientCommand + RoomManager", () => {
     });
   });
 
-  it("lobby roster after create and join: host flagged, deterministic order by playerId", () => {
+  it("lobby roster after create and join: host flagged, deterministic order by playerId", async () => {
     const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const a = captureWs();
     const b = captureWs();
 
-    handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+    await dispatchCmd(a.ws, { type: "createRoom", ...hostIdentity }, rm);
     const created = parseServerEvent(JSON.parse(a.sent[0]!));
     if (created.type !== "roomCreated") throw new Error("unexpected");
 
-    handleClientCommand(
+    await dispatchCmd(
       b.ws,
       { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
       rm,
@@ -283,22 +359,22 @@ describe("handleClientCommand + RoomManager", () => {
     expect(rA.players.some((p) => p.displayName === "Guesty" && !p.isHost)).toBe(true);
   });
 
-  it("startMatch: two players succeeds; emits matchStarting to both", () => {
+  it("startMatch: two players succeeds; emits matchStarting to both", async () => {
     const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const a = captureWs();
     const b = captureWs();
 
-    handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+    await dispatchCmd(a.ws, { type: "createRoom", ...hostIdentity }, rm);
     const created = parseServerEvent(JSON.parse(a.sent[0]!));
     if (created.type !== "roomCreated") throw new Error("unexpected");
 
-    handleClientCommand(
+    await dispatchCmd(
       b.ws,
       { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
       rm,
     );
 
-    handleClientCommand(a.ws, { type: "startMatch" }, rm);
+    await dispatchCmd(a.ws, { type: "startMatch" }, rm);
 
     const startA = a.sent.map((line) => parseServerEvent(JSON.parse(line)));
     const startB = b.sent.map((line) => parseServerEvent(JSON.parse(line)));
@@ -313,7 +389,7 @@ describe("handleClientCommand + RoomManager", () => {
     );
   });
 
-  it("startMatch: server timers emit matchPhase sequence", () => {
+  it("startMatch: server timers emit matchPhase sequence", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
@@ -321,16 +397,16 @@ describe("handleClientCommand + RoomManager", () => {
       const a = captureWs();
       const b = captureWs();
 
-      handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(a.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(a.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         b.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
       );
-      handleClientCommand(a.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(a.ws, { type: "startMatch" }, rm);
 
       function matchPhases(sent: string[]) {
         return sent
@@ -377,7 +453,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("returnToLobby: host resets to lobby with zero scores after matchEnded", () => {
+  it("returnToLobby: host resets to lobby with zero scores after matchEnded", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
@@ -385,23 +461,23 @@ describe("handleClientCommand + RoomManager", () => {
       const a = captureWs();
       const b = captureWs();
 
-      handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(a.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(a.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         b.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
       );
-      handleClientCommand(a.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(a.ws, { type: "startMatch" }, rm);
 
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
       vi.advanceTimersByTime(resolveWordChoiceMs());
       vi.advanceTimersByTime(resolveRoundMs());
       vi.advanceTimersByTime(resolveInterRoundGapMs());
 
-      handleClientCommand(a.ws, { type: "returnToLobby" }, rm);
+      await dispatchCmd(a.ws, { type: "returnToLobby" }, rm);
 
       function matchPhases(sent: string[]) {
         return sent
@@ -420,7 +496,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("returnToLobby: guest gets NOT_HOST", () => {
+  it("returnToLobby: guest gets NOT_HOST", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
@@ -428,23 +504,23 @@ describe("handleClientCommand + RoomManager", () => {
       const a = captureWs();
       const b = captureWs();
 
-      handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(a.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(a.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         b.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
       );
-      handleClientCommand(a.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(a.ws, { type: "startMatch" }, rm);
 
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
       vi.advanceTimersByTime(resolveWordChoiceMs());
       vi.advanceTimersByTime(resolveRoundMs());
       vi.advanceTimersByTime(resolveInterRoundGapMs());
 
-      handleClientCommand(b.ws, { type: "returnToLobby" }, rm);
+      await dispatchCmd(b.ws, { type: "returnToLobby" }, rm);
       const errEv = b.sent
         .map((line) => parseServerEvent(JSON.parse(line)))
         .find((e) => e.type === "error");
@@ -456,7 +532,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("startMatch: round-robin advances drawer on next round", () => {
+  it("startMatch: round-robin advances drawer on next round", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "2");
     vi.useFakeTimers();
     try {
@@ -464,16 +540,16 @@ describe("handleClientCommand + RoomManager", () => {
       const a = captureWs();
       const b = captureWs();
 
-      handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(a.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(a.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         b.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
       );
-      handleClientCommand(a.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(a.ws, { type: "startMatch" }, rm);
 
       function matchPhases(sent: string[]) {
         return sent
@@ -498,55 +574,55 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("startMatch: non-host rejected with NOT_HOST", () => {
+  it("startMatch: non-host rejected with NOT_HOST", async () => {
     const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const a = captureWs();
     const b = captureWs();
 
-    handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+    await dispatchCmd(a.ws, { type: "createRoom", ...hostIdentity }, rm);
     const created = parseServerEvent(JSON.parse(a.sent[0]!));
     if (created.type !== "roomCreated") throw new Error("unexpected");
 
-    handleClientCommand(
+    await dispatchCmd(
       b.ws,
       { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
       rm,
     );
 
-    handleClientCommand(b.ws, { type: "startMatch" }, rm);
+    await dispatchCmd(b.ws, { type: "startMatch" }, rm);
     const last = parseServerEvent(JSON.parse(b.sent[b.sent.length - 1]!));
     expect(last.type).toBe("error");
     if (last.type === "error") expect(last.code).toBe("NOT_HOST");
   });
 
-  it("startMatch: one player yields NOT_ENOUGH_PLAYERS", () => {
+  it("startMatch: one player yields NOT_ENOUGH_PLAYERS", async () => {
     const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const a = captureWs();
-    handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
-    handleClientCommand(a.ws, { type: "startMatch" }, rm);
+    await dispatchCmd(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+    await dispatchCmd(a.ws, { type: "startMatch" }, rm);
     const last = parseServerEvent(JSON.parse(a.sent[a.sent.length - 1]!));
     expect(last.type).toBe("error");
     if (last.type === "error") expect(last.code).toBe("NOT_ENOUGH_PLAYERS");
   });
 
-  it("join after start yields JOIN_NOT_ALLOWED", () => {
+  it("join after start yields JOIN_NOT_ALLOWED", async () => {
     const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const a = captureWs();
     const b = captureWs();
     const c = captureWs();
 
-    handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+    await dispatchCmd(a.ws, { type: "createRoom", ...hostIdentity }, rm);
     const created = parseServerEvent(JSON.parse(a.sent[0]!));
     if (created.type !== "roomCreated") throw new Error("unexpected");
 
-    handleClientCommand(
+    await dispatchCmd(
       b.ws,
       { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
       rm,
     );
-    handleClientCommand(a.ws, { type: "startMatch" }, rm);
+    await dispatchCmd(a.ws, { type: "startMatch" }, rm);
 
-    handleClientCommand(
+    await dispatchCmd(
       c.ws,
       {
         type: "joinRoom",
@@ -562,16 +638,16 @@ describe("handleClientCommand + RoomManager", () => {
     if (last.type === "error") expect(last.code).toBe("JOIN_NOT_ALLOWED");
   });
 
-  it("leaveSocketRoom broadcasts updated roster", () => {
+  it("leaveSocketRoom broadcasts updated roster", async () => {
     const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const a = captureWs();
     const b = captureWs();
 
-    handleClientCommand(a.ws, { type: "createRoom", ...hostIdentity }, rm);
+    await dispatchCmd(a.ws, { type: "createRoom", ...hostIdentity }, rm);
     const created = parseServerEvent(JSON.parse(a.sent[0]!));
     if (created.type !== "roomCreated") throw new Error("unexpected");
 
-    handleClientCommand(
+    await dispatchCmd(
       b.ws,
       { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
       rm,
@@ -579,20 +655,22 @@ describe("handleClientCommand + RoomManager", () => {
 
     rm.leaveSocketRoom(b.ws);
     const r = lastLobbyRoster(a.sent);
-    expect(r?.players.some((p) => p.displayName === "Guesty")).toBe(false);
+    const guestRow = r?.players.find((p) => p.displayName === "Guesty");
+    expect(guestRow).toBeDefined();
+    expect(guestRow?.connectionStatus).toBe("disconnected");
     expect(r?.players.some((p) => p.displayName === "Hosty" && p.isHost)).toBe(true);
   });
 
-  it("reconnectHost reclaims lobby when the room still exists", () => {
+  it("reconnectHost reclaims lobby when the room still exists", async () => {
     const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const host = captureWs();
     const guest = captureWs();
 
-    handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+    await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
     const created = parseServerEvent(JSON.parse(host.sent[0]!));
     if (created.type !== "roomCreated") throw new Error("unexpected");
 
-    handleClientCommand(
+    await dispatchCmd(
       guest.ws,
       { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
       rm,
@@ -601,7 +679,7 @@ describe("handleClientCommand + RoomManager", () => {
     rm.leaveSocketRoom(host.ws);
 
     const host2 = captureWs();
-    handleClientCommand(
+    await dispatchCmd(
       host2.ws,
       {
         type: "reconnectHost",
@@ -623,32 +701,40 @@ describe("handleClientCommand + RoomManager", () => {
     expect(r?.players.length).toBe(2);
   });
 
-  it("reconnectHost after room dissolved yields HOST_SESSION_LOST", () => {
-    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
-    const host = captureWs();
-    handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
-    const created = parseServerEvent(JSON.parse(host.sent[0]!));
-    if (created.type !== "roomCreated") throw new Error("unexpected");
-    rm.leaveSocketRoom(host.ws);
+  it("reconnectHost after room dissolved yields HOST_SESSION_LOST", async () => {
+    vi.useFakeTimers({ now: 5_000 });
+    try {
+      const rm = new RoomManager(8, integrationWordBank(), stubRedis());
+      const host = captureWs();
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      const created = parseServerEvent(JSON.parse(host.sent[0]!));
+      if (created.type !== "roomCreated") throw new Error("unexpected");
+      rm.leaveSocketRoom(host.ws);
 
-    const host2 = captureWs();
-    handleClientCommand(
-      host2.ws,
-      {
-        type: "reconnectHost",
-        roomId: created.roomId,
-        playerId: created.playerId,
-        displayName: "Hosty",
-        avatarPresetId: "preset-1",
-      },
-      rm,
-    );
-    const ev = parseServerEvent(JSON.parse(host2.sent[0]!));
-    expect(ev.type).toBe("error");
-    if (ev.type === "error") expect(ev.code).toBe("HOST_SESSION_LOST");
+      vi.setSystemTime(5_000 + 31_000);
+      rm.pollLobbyReconnectGrace(5_000 + 31_000);
+
+      const host2 = captureWs();
+      await dispatchCmd(
+        host2.ws,
+        {
+          type: "reconnectHost",
+          roomId: created.roomId,
+          playerId: created.playerId,
+          displayName: "Hosty",
+          avatarPresetId: "preset-1",
+        },
+        rm,
+      );
+      const ev = parseServerEvent(JSON.parse(host2.sent[0]!));
+      expect(ev.type).toBe("error");
+      if (ev.type === "error") expect(ev.code).toBe("HOST_SESSION_LOST");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("choosingWord: drawer receives wordChoiceOffer only; chooseWord enters drawing early", () => {
+  it("choosingWord: drawer receives wordChoiceOffer only; chooseWord enters drawing early", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
@@ -656,17 +742,17 @@ describe("handleClientCommand + RoomManager", () => {
       const host = captureWs();
       const guest = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         guest.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
       );
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
 
       function choosingDrawerId(sent: string[]): string | undefined {
@@ -697,7 +783,7 @@ describe("handleClientCommand + RoomManager", () => {
           .some((e) => e.type === "wordChoiceOffer"),
       ).toBe(false);
 
-      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex: 2 }, rm);
+      await dispatchCmd(drawerCapt.ws, { type: "chooseWord", choiceIndex: 2 }, rm);
 
       const allPhases = [...host.sent, ...guest.sent]
         .map((line) => parseServerEvent(JSON.parse(line)))
@@ -709,7 +795,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("applyCorrectGuessAward updates totals; rejects drawer-as-guesser", () => {
+  it("applyCorrectGuessAward updates totals; rejects drawer-as-guesser", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.stubEnv("ROUND_MS", "80000");
     vi.useFakeTimers();
@@ -718,11 +804,11 @@ describe("handleClientCommand + RoomManager", () => {
       const host = captureWs();
       const guest = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         guest.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
@@ -732,7 +818,7 @@ describe("handleClientCommand + RoomManager", () => {
       const guestPlayerId =
         guestJoined.type === "roomJoined" ? guestJoined.playerId : "";
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
       vi.advanceTimersByTime(resolveWordChoiceMs());
 
@@ -742,7 +828,7 @@ describe("handleClientCommand + RoomManager", () => {
 
       const drawerId = room.currentDrawerPlayerId!;
       const drawerCapt = drawerId === created.playerId ? host : guest;
-      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
+      await dispatchCmd(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
 
       expect(room.phase).toBe("drawing");
       const start = room.drawingPhaseStartedAtMs!;
@@ -787,7 +873,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("drawing: guest disconnect lists them as disconnected on lobbyRoster; reconnect clears flag", () => {
+  it("drawing: guest disconnect lists them as disconnected on lobbyRoster; reconnect clears flag", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
@@ -795,11 +881,11 @@ describe("handleClientCommand + RoomManager", () => {
       const host = captureWs();
       const guest = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         guest.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
@@ -808,7 +894,7 @@ describe("handleClientCommand + RoomManager", () => {
       if (guestJoined.type !== "roomJoined") throw new Error("unexpected");
       const guestPlayerId = guestJoined.playerId;
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
       vi.advanceTimersByTime(resolveWordChoiceMs());
 
@@ -816,7 +902,7 @@ describe("handleClientCommand + RoomManager", () => {
       if (!room) throw new Error("unexpected");
       const drawerId = room.currentDrawerPlayerId!;
       const drawerCapt = drawerId === created.playerId ? host : guest;
-      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
+      await dispatchCmd(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
       expect(room.phase).toBe("drawing");
 
       rm.leaveSocketRoom(guest.ws);
@@ -833,7 +919,7 @@ describe("handleClientCommand + RoomManager", () => {
       expect(hostLive?.isHost).toBe(true);
 
       const guestAgain = captureWs();
-      handleClientCommand(
+      await dispatchCmd(
         guestAgain.ws,
         {
           type: "reconnectPlayer",
@@ -858,7 +944,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("drawing: host disconnect keeps Host roster row via hostPlayerId while disconnected", () => {
+  it("drawing: host disconnect keeps Host roster row via hostPlayerId while disconnected", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
@@ -866,17 +952,17 @@ describe("handleClientCommand + RoomManager", () => {
       const host = captureWs();
       const guest = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         guest.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
       );
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
       vi.advanceTimersByTime(resolveWordChoiceMs());
 
@@ -884,7 +970,7 @@ describe("handleClientCommand + RoomManager", () => {
       if (!room) throw new Error("unexpected");
       const drawerId = room.currentDrawerPlayerId!;
       const drawerCapt = drawerId === created.playerId ? host : guest;
-      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
+      await dispatchCmd(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
       expect(room.phase).toBe("drawing");
 
       rm.leaveSocketRoom(host.ws);
@@ -904,7 +990,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("chatMessage exact guess wires computeGuesserPoints + drawer assist and sends lobbyRoster before chatCorrectGuess", () => {
+  it("chatMessage exact guess wires computeGuesserPoints + drawer assist and sends lobbyRoster before chatCorrectGuess", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.stubEnv("ROUND_MS", "80000");
     vi.useFakeTimers();
@@ -924,11 +1010,11 @@ describe("handleClientCommand + RoomManager", () => {
       const host = captureWs();
       const guest = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         guest.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
@@ -937,7 +1023,7 @@ describe("handleClientCommand + RoomManager", () => {
       if (guestJoined.type !== "roomJoined") throw new Error("unexpected");
       const guestPlayerId = guestJoined.playerId;
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
       vi.advanceTimersByTime(resolveWordChoiceMs());
 
@@ -951,7 +1037,7 @@ describe("handleClientCommand + RoomManager", () => {
       const guesserId =
         drawerId === created.playerId ? guestPlayerId : created.playerId;
 
-      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
+      await dispatchCmd(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
       expect(room.phase).toBe("drawing");
       const secretWord = room.roundSecretWord;
       expect(secretWord).toBeTruthy();
@@ -959,7 +1045,7 @@ describe("handleClientCommand + RoomManager", () => {
 
       vi.advanceTimersByTime(elapsedMs);
 
-      handleClientCommand(
+      await dispatchCmd(
         guesserCapt.ws,
         {
           type: "chatMessage",
@@ -997,7 +1083,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("correct_guess_award structured log carries NFR-O2 fields plus effectiveElapsedMs", () => {
+  it("correct_guess_award structured log carries NFR-O2 fields plus effectiveElapsedMs", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.stubEnv("ROUND_MS", "80000");
     vi.useFakeTimers();
@@ -1011,11 +1097,11 @@ describe("handleClientCommand + RoomManager", () => {
       const host = captureWs();
       const guest = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         guest.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
@@ -1024,7 +1110,7 @@ describe("handleClientCommand + RoomManager", () => {
       if (guestJoined.type !== "roomJoined") throw new Error("unexpected");
       const guestPlayerId = guestJoined.playerId;
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
       vi.advanceTimersByTime(resolveWordChoiceMs());
 
@@ -1038,14 +1124,14 @@ describe("handleClientCommand + RoomManager", () => {
       const guesserId =
         drawerId === created.playerId ? guestPlayerId : created.playerId;
 
-      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
+      await dispatchCmd(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
       const secretWord = room.roundSecretWord;
       expect(secretWord).toBeTruthy();
       if (!secretWord) throw new Error("unexpected");
 
       vi.advanceTimersByTime(elapsedMs);
 
-      handleClientCommand(
+      await dispatchCmd(
         guesserCapt.ws,
         {
           type: "chatMessage",
@@ -1100,7 +1186,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("three players: each distinct chat correct guess stacks drawer assist (N × assist)", () => {
+  it("three players: each distinct chat correct guess stacks drawer assist (N × assist)", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.stubEnv("ROUND_MS", "80000");
     vi.useFakeTimers();
@@ -1111,16 +1197,16 @@ describe("handleClientCommand + RoomManager", () => {
       const guest = captureWs();
       const guest2 = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         guest.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
       );
-      handleClientCommand(
+      await dispatchCmd(
         guest2.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity2 },
         rm,
@@ -1134,7 +1220,7 @@ describe("handleClientCommand + RoomManager", () => {
       const guestPlayerId = gj1.playerId;
       const guest2PlayerId = gj2.playerId;
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
       vi.advanceTimersByTime(resolveWordChoiceMs());
 
@@ -1152,14 +1238,14 @@ describe("handleClientCommand + RoomManager", () => {
       const guesserCaps = socketsByPlayer.filter((x) => x.id !== drawerId).map((x) => x.cap);
       expect(guesserCaps).toHaveLength(2);
 
-      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
+      await dispatchCmd(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
       const secretWord = room.roundSecretWord;
       expect(secretWord).toBeTruthy();
       if (!secretWord) throw new Error("unexpected");
 
       vi.advanceTimersByTime(5000);
 
-      handleClientCommand(
+      await dispatchCmd(
         guesserCaps[0].ws,
         {
           type: "chatMessage",
@@ -1184,7 +1270,7 @@ describe("handleClientCommand + RoomManager", () => {
 
       vi.advanceTimersByTime(5000);
 
-      handleClientCommand(
+      await dispatchCmd(
         guesserCaps[1].ws,
         {
           type: "chatMessage",
@@ -1212,7 +1298,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("drawing phase: non-drawer canvas clear yields NOT_DRAWER", () => {
+  it("drawing phase: non-drawer canvas clear yields NOT_DRAWER", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
@@ -1220,17 +1306,17 @@ describe("handleClientCommand + RoomManager", () => {
       const host = captureWs();
       const guest = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         guest.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
       );
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
       vi.advanceTimersByTime(resolveWordChoiceMs());
 
@@ -1241,14 +1327,14 @@ describe("handleClientCommand + RoomManager", () => {
       const drawerId = room.currentDrawerPlayerId!;
       const guesserCapt = drawerId === created.playerId ? guest : host;
 
-      handleClientCommand(
+      await dispatchCmd(
         drawerId === created.playerId ? host.ws : guest.ws,
         { type: "chooseWord", choiceIndex: 0 },
         rm,
       );
       expect(room.phase).toBe("drawing");
 
-      handleClientCommand(
+      await dispatchCmd(
         guesserCapt.ws,
         {
           type: "drawingCanvasClear",
@@ -1266,23 +1352,23 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("lobby phase: drawer canvas clear yields WRONG_PHASE", () => {
+  it("lobby phase: drawer canvas clear yields WRONG_PHASE", async () => {
     const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const host = captureWs();
     const guest = captureWs();
 
-    handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+    await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
     const created = parseServerEvent(JSON.parse(host.sent[0]!));
     if (created.type !== "roomCreated") throw new Error("unexpected");
 
-    handleClientCommand(
+    await dispatchCmd(
       guest.ws,
       { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
       rm,
     );
 
     const room = rm.getRoomForSocket(host.ws)!;
-    handleClientCommand(
+    await dispatchCmd(
       host.ws,
       {
         type: "drawingCanvasClear",
@@ -1296,7 +1382,7 @@ describe("handleClientCommand + RoomManager", () => {
     if (err?.type === "error") expect(err.code).toBe("WRONG_PHASE");
   });
 
-  it("drawing phase: drawer canvas clear with mismatched roomId yields BAD_ROOM", () => {
+  it("drawing phase: drawer canvas clear with mismatched roomId yields BAD_ROOM", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
@@ -1304,17 +1390,17 @@ describe("handleClientCommand + RoomManager", () => {
       const host = captureWs();
       const guest = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         guest.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
       );
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
       vi.advanceTimersByTime(resolveWordChoiceMs());
 
@@ -1325,10 +1411,10 @@ describe("handleClientCommand + RoomManager", () => {
       const drawerId = room.currentDrawerPlayerId!;
       const drawerWs = drawerId === created.playerId ? host.ws : guest.ws;
 
-      handleClientCommand(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
+      await dispatchCmd(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
       expect(room.phase).toBe("drawing");
 
-      handleClientCommand(
+      await dispatchCmd(
         drawerWs,
         {
           type: "drawingCanvasClear",
@@ -1347,7 +1433,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("drawingHintTick: hints fire on cadence until round end; none after teardown", () => {
+  it("drawingHintTick: hints fire on cadence until round end; none after teardown", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.stubEnv("ROUND_MS", "120000");
     vi.stubEnv("HINT_CADENCE_MS", "2000");
@@ -1357,17 +1443,17 @@ describe("handleClientCommand + RoomManager", () => {
       const host = captureWs();
       const guest = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         guest.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
       );
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
       vi.advanceTimersByTime(resolveWordChoiceMs());
 
@@ -1378,7 +1464,7 @@ describe("handleClientCommand + RoomManager", () => {
       const drawerId = room.currentDrawerPlayerId!;
       const drawerWs = drawerId === created.playerId ? host.ws : guest.ws;
 
-      handleClientCommand(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
+      await dispatchCmd(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
       expect(room.phase).toBe("drawing");
       const secret = room.roundSecretWord;
       expect(secret).toBeTruthy();
@@ -1427,7 +1513,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("chatMessage exact match awards, reveals to drawer and guesser, ends round when lone guesser wins", () => {
+  it("chatMessage exact match awards, reveals to drawer and guesser, ends round when lone guesser wins", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.stubEnv("ROUND_MS", "80000");
     vi.useFakeTimers();
@@ -1436,11 +1522,11 @@ describe("handleClientCommand + RoomManager", () => {
       const host = captureWs();
       const guest = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         guest.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
@@ -1450,7 +1536,7 @@ describe("handleClientCommand + RoomManager", () => {
       const guestPlayerId =
         guestJoined.type === "roomJoined" ? guestJoined.playerId : "";
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
 
       const drawerPhaseEv = [...host.sent, ...guest.sent]
@@ -1475,13 +1561,13 @@ describe("handleClientCommand + RoomManager", () => {
       const choiceIndex = 1;
       const secret = words![choiceIndex]!;
 
-      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex }, rm);
+      await dispatchCmd(drawerCapt.ws, { type: "chooseWord", choiceIndex }, rm);
 
       const roomBefore = rm.getRoomForSocket(host.ws);
       expect(roomBefore?.phase).toBe("drawing");
       expect(roomBefore?.roundSecretWord).toBe(secret);
 
-      handleClientCommand(
+      await dispatchCmd(
         guesserCapt.ws,
         { type: "chatMessage", roomId: roomBefore!.id, text: `  ${secret.toUpperCase()} ` },
         rm,
@@ -1519,7 +1605,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("chatCorrectGuess omits revealedWord for players still guessing (FR21)", () => {
+  it("chatCorrectGuess omits revealedWord for players still guessing (FR21)", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "2");
     vi.stubEnv("ROUND_MS", "80000");
     vi.useFakeTimers();
@@ -1533,10 +1619,10 @@ describe("handleClientCommand + RoomManager", () => {
       const g1 = captureWs();
       const g2 = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
-      handleClientCommand(
+      await dispatchCmd(
         g1.ws,
         {
           type: "joinRoom",
@@ -1546,7 +1632,7 @@ describe("handleClientCommand + RoomManager", () => {
         },
         rm,
       );
-      handleClientCommand(
+      await dispatchCmd(
         g2.ws,
         {
           type: "joinRoom",
@@ -1563,7 +1649,7 @@ describe("handleClientCommand + RoomManager", () => {
       const g2Id = g2Join.type === "roomJoined" ? g2Join.playerId : "";
       expect(g1Id && g2Id).toBeTruthy();
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
 
       const drawerEv = [...host.sent, ...g1.sent, ...g2.sent]
@@ -1602,10 +1688,10 @@ describe("handleClientCommand + RoomManager", () => {
       const secret = words![0]!;
 
       const roomRef = rm.getRoomForSocket(host.ws)!;
-      handleClientCommand(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
+      await dispatchCmd(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
       expect(roomRef.phase).toBe("drawing");
 
-      handleClientCommand(
+      await dispatchCmd(
         guesserWs,
         { type: "chatMessage", roomId: roomRef.id, text: secret },
         rm,
@@ -1632,15 +1718,15 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("lobby chat never emits chatCorrectGuess (no drawing-phase adjudication)", () => {
+  it("lobby chat never emits chatCorrectGuess (no drawing-phase adjudication)", async () => {
     const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const host = captureWs();
     const guest = captureWs();
 
-    handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+    await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
     const created = parseServerEvent(JSON.parse(host.sent[0]!));
     if (created.type !== "roomCreated") throw new Error("unexpected");
-    handleClientCommand(
+    await dispatchCmd(
       guest.ws,
       { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
       rm,
@@ -1650,7 +1736,7 @@ describe("handleClientCommand + RoomManager", () => {
     expect(roomId).toBeTruthy();
     expect(rm.getRoomForSocket(host.ws)?.phase).toBe("lobby");
 
-    handleClientCommand(
+    await dispatchCmd(
       host.ws,
       { type: "chatMessage", roomId: roomId!, text: "apple" },
       rm,
@@ -1670,21 +1756,21 @@ describe("handleClientCommand + RoomManager", () => {
     if (lastGuest?.type === "chatPlayerMessage") expect(lastGuest.text).toBe("apple");
   });
 
-  it("lobbyChat relays lobbyChatMessage without chatCorrectGuess (Story 8.3)", () => {
+  it("lobbyChat relays lobbyChatMessage without chatCorrectGuess (Story 8.3)", async () => {
     const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const host = captureWs();
     const guest = captureWs();
 
-    handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+    await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
     const created = parseServerEvent(JSON.parse(host.sent[0]!));
     if (created.type !== "roomCreated") throw new Error("unexpected");
-    handleClientCommand(
+    await dispatchCmd(
       guest.ws,
       { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
       rm,
     );
 
-    handleClientCommand(
+    await dispatchCmd(
       guest.ws,
       { type: "lobbyChat", roomCode: created.roomCode, message: "lobby-wave" },
       rm,
@@ -1717,7 +1803,7 @@ describe("handleClientCommand + RoomManager", () => {
     expect(fromGuest.displayName).toBe(guestIdentity.displayName);
   });
 
-  it("voteKick emits voteKickResolved before playerLeft and closes target socket (Story 8.4)", () => {
+  it("voteKick emits voteKickResolved before playerLeft and closes target socket (Story 8.4)", async () => {
     const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const host = captureWs();
     const ally = captureWs();
@@ -1725,17 +1811,17 @@ describe("handleClientCommand + RoomManager", () => {
     const closeSpy = vi.fn();
     (target.ws as WebSocket & { close(): void }).close = closeSpy;
 
-    handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+    await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
     const created = parseServerEvent(JSON.parse(host.sent[0]!));
     if (created.type !== "roomCreated") throw new Error("unexpected");
     const roomCode = created.roomCode;
 
-    handleClientCommand(
+    await dispatchCmd(
       ally.ws,
       { type: "joinRoom", roomCode, ...guestIdentity },
       rm,
     );
-    handleClientCommand(
+    await dispatchCmd(
       target.ws,
       {
         type: "joinRoom",
@@ -1751,12 +1837,12 @@ describe("handleClientCommand + RoomManager", () => {
     if (allyJoin.type !== "roomJoined" || targetJoin.type !== "roomJoined") throw new Error("unexpected join");
     const targetId = targetJoin.playerId;
 
-    handleClientCommand(
+    await dispatchCmd(
       host.ws,
       { type: "initiateVoteKick", roomCode, targetPlayerId: targetId },
       rm,
     );
-    handleClientCommand(
+    await dispatchCmd(
       ally.ws,
       { type: "castVoteKick", roomCode, targetPlayerId: targetId, vote: "yes" },
       rm,
@@ -1780,7 +1866,7 @@ describe("handleClientCommand + RoomManager", () => {
     expect(closeSpy).toHaveBeenCalled();
   });
 
-  it("duplicate exact guess masks repeated message as ••• for spectators (already awarded)", () => {
+  it("duplicate exact guess masks repeated message as ••• for spectators (already awarded)", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "2");
     vi.stubEnv("ROUND_MS", "80000");
     vi.useFakeTimers();
@@ -1794,10 +1880,10 @@ describe("handleClientCommand + RoomManager", () => {
       const g1 = captureWs();
       const g2 = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
-      handleClientCommand(
+      await dispatchCmd(
         g1.ws,
         {
           type: "joinRoom",
@@ -1807,7 +1893,7 @@ describe("handleClientCommand + RoomManager", () => {
         },
         rm,
       );
-      handleClientCommand(
+      await dispatchCmd(
         g2.ws,
         {
           type: "joinRoom",
@@ -1823,7 +1909,7 @@ describe("handleClientCommand + RoomManager", () => {
       const g2Id = g2Join.type === "roomJoined" ? g2Join.playerId : "";
       expect(g1Id && g2Id).toBeTruthy();
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
 
       const drawerEv = [...host.sent, ...g1.sent, ...g2.sent]
@@ -1866,7 +1952,7 @@ describe("handleClientCommand + RoomManager", () => {
       const secret = words![0]!;
 
       const roomRef = rm.getRoomForSocket(host.ws)!;
-      handleClientCommand(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
+      await dispatchCmd(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
       expect(roomRef.phase).toBe("drawing");
 
       const guesserPlayerId =
@@ -1877,12 +1963,12 @@ describe("handleClientCommand + RoomManager", () => {
             : g2Id;
       expect(guesserPlayerId).toBeTruthy();
 
-      handleClientCommand(
+      await dispatchCmd(
         guesserWs,
         { type: "chatMessage", roomId: roomRef.id, text: secret },
         rm,
       );
-      handleClientCommand(
+      await dispatchCmd(
         guesserWs,
         { type: "chatMessage", roomId: roomRef.id, text: secret },
         rm,
@@ -1902,7 +1988,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("drawer typing exact secret fans out — to spectators (never raw secret)", () => {
+  it("drawer typing exact secret fans out — to spectators (never raw secret)", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "2");
     vi.stubEnv("ROUND_MS", "80000");
     vi.useFakeTimers();
@@ -1916,10 +2002,10 @@ describe("handleClientCommand + RoomManager", () => {
       const g1 = captureWs();
       const g2 = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
-      handleClientCommand(
+      await dispatchCmd(
         g1.ws,
         {
           type: "joinRoom",
@@ -1929,7 +2015,7 @@ describe("handleClientCommand + RoomManager", () => {
         },
         rm,
       );
-      handleClientCommand(
+      await dispatchCmd(
         g2.ws,
         {
           type: "joinRoom",
@@ -1945,7 +2031,7 @@ describe("handleClientCommand + RoomManager", () => {
       const g2Id = g2Join.type === "roomJoined" ? g2Join.playerId : "";
       expect(g1Id && g2Id).toBeTruthy();
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
 
       const drawerEv = [...host.sent, ...g1.sent, ...g2.sent]
@@ -1986,10 +2072,10 @@ describe("handleClientCommand + RoomManager", () => {
       const secret = words![0]!;
 
       const roomRef = rm.getRoomForSocket(host.ws)!;
-      handleClientCommand(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
+      await dispatchCmd(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
       expect(roomRef.phase).toBe("drawing");
 
-      handleClientCommand(
+      await dispatchCmd(
         drawerWs,
         { type: "chatMessage", roomId: roomRef.id, text: secret },
         rm,
@@ -2022,7 +2108,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("reconnectHost mid-drawing includes contiguous canvas commits in roomHydrate", () => {
+  it("reconnectHost mid-drawing includes contiguous canvas commits in roomHydrate", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
@@ -2030,17 +2116,17 @@ describe("handleClientCommand + RoomManager", () => {
       const host = captureWs();
       const guest = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         guest.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
       );
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
       vi.advanceTimersByTime(resolveWordChoiceMs());
 
@@ -2048,11 +2134,11 @@ describe("handleClientCommand + RoomManager", () => {
       const drawerId = room.currentDrawerPlayerId!;
       const drawerWs = drawerId === created.playerId ? host.ws : guest.ws;
 
-      handleClientCommand(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
+      await dispatchCmd(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
       expect(room.phase).toBe("drawing");
 
       for (let i = 1; i <= 3; i++) {
-        handleClientCommand(
+        await dispatchCmd(
           drawerWs,
           {
             type: "drawingStrokeChunk",
@@ -2072,7 +2158,7 @@ describe("handleClientCommand + RoomManager", () => {
       expect(room.awaitingReconnect.has(created.playerId)).toBe(true);
 
       const host2 = captureWs();
-      handleClientCommand(
+      await dispatchCmd(
         host2.ws,
         {
           type: "reconnectHost",
@@ -2096,7 +2182,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("reconnectPlayer hydrate keeps chatCorrectGuess spoiler-safe for still-guessing reconnect", () => {
+  it("reconnectPlayer hydrate keeps chatCorrectGuess spoiler-safe for still-guessing reconnect", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
@@ -2105,11 +2191,11 @@ describe("handleClientCommand + RoomManager", () => {
       const guesserCapt = captureWs();
       const idleCapt = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         guesserCapt.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
@@ -2117,7 +2203,7 @@ describe("handleClientCommand + RoomManager", () => {
       const joinedG = parseServerEvent(JSON.parse(guesserCapt.sent[0]!));
       if (joinedG.type !== "roomJoined") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         idleCapt.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity2 },
         rm,
@@ -2125,7 +2211,7 @@ describe("handleClientCommand + RoomManager", () => {
       const joinedIdle = parseServerEvent(JSON.parse(idleCapt.sent[0]!));
       if (joinedIdle.type !== "roomJoined") throw new Error("unexpected");
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
       vi.advanceTimersByTime(resolveWordChoiceMs());
 
@@ -2150,12 +2236,12 @@ describe("handleClientCommand + RoomManager", () => {
       const guesserPid = guessersOnly[0]!;
       const idlePid = guessersOnly[1]!;
 
-      handleClientCommand(drawersWs, { type: "chooseWord", choiceIndex: 0 }, rm);
+      await dispatchCmd(drawersWs, { type: "chooseWord", choiceIndex: 0 }, rm);
       expect(room.phase).toBe("drawing");
 
       rm.leaveSocketRoom(wsFor(idlePid));
 
-      handleClientCommand(
+      await dispatchCmd(
         wsFor(guesserPid),
         {
           type: "chatMessage",
@@ -2172,7 +2258,7 @@ describe("handleClientCommand + RoomManager", () => {
           : idlePid === joinedIdle.playerId
             ? guestIdentity2
             : hostIdentity;
-      handleClientCommand(
+      await dispatchCmd(
         reconnect.ws,
         {
           type: "reconnectPlayer",
@@ -2199,7 +2285,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("drawingStrokeChunk canvas log append failure sends error to drawer and canvasOpLogResync to room", () => {
+  it("drawingStrokeChunk canvas log append failure sends error to drawer and canvasOpLogResync to room", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     const origTryAppend = CanvasPhaseLog.prototype.tryAppend;
@@ -2217,17 +2303,17 @@ describe("handleClientCommand + RoomManager", () => {
       const host = captureWs();
       const guest = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         guest.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
       );
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
       vi.advanceTimersByTime(resolveWordChoiceMs());
 
@@ -2235,7 +2321,7 @@ describe("handleClientCommand + RoomManager", () => {
       const drawerId = room.currentDrawerPlayerId!;
       const drawerWs = drawerId === created.playerId ? host.ws : guest.ws;
 
-      handleClientCommand(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
+      await dispatchCmd(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
       expect(room.phase).toBe("drawing");
 
       const stroke = {
@@ -2248,8 +2334,8 @@ describe("handleClientCommand + RoomManager", () => {
         lineWidthPx: 2,
       } satisfies ClientCommand;
 
-      handleClientCommand(drawerWs, stroke, rm);
-      handleClientCommand(
+      await dispatchCmd(drawerWs, stroke, rm);
+      await dispatchCmd(
         drawerWs,
         { ...stroke, chunkId: "c2", points: [{ x: 2, y: 2 }] },
         rm,
@@ -2286,7 +2372,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("roomHydrate canvas verify failure sends error to reconnecting socket and canvasOpLogResync to room", () => {
+  it("roomHydrate canvas verify failure sends error to reconnecting socket and canvasOpLogResync to room", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     const verifySpy = vi.spyOn(CanvasPhaseLog.prototype, "verifyAgainstWatermark").mockReturnValue({
@@ -2298,17 +2384,17 @@ describe("handleClientCommand + RoomManager", () => {
       const host = captureWs();
       const guest = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         guest.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
       );
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
       vi.advanceTimersByTime(resolveWordChoiceMs());
 
@@ -2316,9 +2402,9 @@ describe("handleClientCommand + RoomManager", () => {
       const drawerId = room.currentDrawerPlayerId!;
       const drawerWs = drawerId === created.playerId ? host.ws : guest.ws;
 
-      handleClientCommand(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
+      await dispatchCmd(drawerWs, { type: "chooseWord", choiceIndex: 0 }, rm);
 
-      handleClientCommand(
+      await dispatchCmd(
         drawerWs,
         {
           type: "drawingStrokeChunk",
@@ -2335,7 +2421,7 @@ describe("handleClientCommand + RoomManager", () => {
       rm.leaveSocketRoom(host.ws);
 
       const host2 = captureWs();
-      handleClientCommand(
+      await dispatchCmd(
         host2.ws,
         {
           type: "reconnectHost",
@@ -2373,7 +2459,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("chatMessage near-miss: guesser receives chatCloseGuessHint; drawer does not (Story 7.1)", () => {
+  it("chatMessage near-miss: guesser receives chatCloseGuessHint; drawer does not (Story 7.1)", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.stubEnv("ROUND_MS", "80000");
     vi.stubEnv("CLOSE_GUESS_HINT_COOLDOWN_MS", "0");
@@ -2383,11 +2469,11 @@ describe("handleClientCommand + RoomManager", () => {
       const host = captureWs();
       const guest = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         guest.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
@@ -2395,7 +2481,7 @@ describe("handleClientCommand + RoomManager", () => {
       const guestJoined = parseServerEvent(JSON.parse(guest.sent[0]!));
       if (guestJoined.type !== "roomJoined") throw new Error("unexpected");
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
       vi.advanceTimersByTime(resolveWordChoiceMs());
 
@@ -2407,7 +2493,7 @@ describe("handleClientCommand + RoomManager", () => {
       const drawerCapt = drawerId === created.playerId ? host : guest;
       const guesserCapt = drawerId === created.playerId ? guest : host;
 
-      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
+      await dispatchCmd(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
       expect(room.phase).toBe("drawing");
       const secret = room.roundSecretWord;
       expect(secret).toBeTruthy();
@@ -2416,7 +2502,7 @@ describe("handleClientCommand + RoomManager", () => {
       const near = secret.length >= 4 ? secret.slice(0, -1) : `${secret}z`;
       expect(normalizeGuessText(near)).not.toBe(normalizeGuessText(secret));
 
-      handleClientCommand(
+      await dispatchCmd(
         guesserCapt.ws,
         {
           type: "chatMessage",
@@ -2451,7 +2537,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("chatMessage near-miss: other guesser receives no chatCloseGuessHint (Story 7.1 AC2)", () => {
+  it("chatMessage near-miss: other guesser receives no chatCloseGuessHint (Story 7.1 AC2)", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.stubEnv("ROUND_MS", "80000");
     vi.stubEnv("CLOSE_GUESS_HINT_COOLDOWN_MS", "0");
@@ -2462,16 +2548,16 @@ describe("handleClientCommand + RoomManager", () => {
       const guest = captureWs();
       const guest2 = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         guest.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
       );
-      handleClientCommand(
+      await dispatchCmd(
         guest2.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity2 },
         rm,
@@ -2481,7 +2567,7 @@ describe("handleClientCommand + RoomManager", () => {
       const gj2 = parseServerEvent(JSON.parse(guest2.sent[0]!));
       if (gj1.type !== "roomJoined" || gj2.type !== "roomJoined") throw new Error("unexpected");
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
       vi.advanceTimersByTime(resolveWordChoiceMs());
 
@@ -2499,7 +2585,7 @@ describe("handleClientCommand + RoomManager", () => {
       const guesserCaps = socketsByPlayer.filter((x) => x.id !== drawerId).map((x) => x.cap);
       expect(guesserCaps).toHaveLength(2);
 
-      handleClientCommand(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
+      await dispatchCmd(drawerCapt.ws, { type: "chooseWord", choiceIndex: 0 }, rm);
       expect(room.phase).toBe("drawing");
       const secret = room.roundSecretWord;
       expect(secret).toBeTruthy();
@@ -2511,7 +2597,7 @@ describe("handleClientCommand + RoomManager", () => {
       const submittingGuesser = guesserCaps[0]!;
       const otherGuesser = guesserCaps[1]!;
 
-      handleClientCommand(
+      await dispatchCmd(
         submittingGuesser.ws,
         {
           type: "chatMessage",
@@ -2541,7 +2627,7 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("page-reload reconnect: drop socket then reconnectPlayer with same playerId → roomJoined + roomHydrate", () => {
+  it("page-reload reconnect: drop socket then reconnectPlayer with same playerId → roomJoined + roomHydrate", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
@@ -2549,11 +2635,11 @@ describe("handleClientCommand + RoomManager", () => {
       const host = captureWs();
       const guest = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         guest.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
@@ -2561,7 +2647,7 @@ describe("handleClientCommand + RoomManager", () => {
       const joined = parseServerEvent(JSON.parse(guest.sent[0]!));
       if (joined.type !== "roomJoined") throw new Error("unexpected");
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
 
       // Simulate page-reload: guest socket drops
@@ -2569,7 +2655,7 @@ describe("handleClientCommand + RoomManager", () => {
 
       // Guest reconnects with stored session identity
       const guest2 = captureWs();
-      handleClientCommand(
+      await dispatchCmd(
         guest2.ws,
         {
           type: "reconnectPlayer",
@@ -2597,17 +2683,17 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("ALREADY_CONNECTED: second socket with same playerId gets ALREADY_CONNECTED error", () => {
+  it("ALREADY_CONNECTED: second socket with same playerId gets ALREADY_CONNECTED error", async () => {
     const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const host = captureWs();
 
-    handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+    await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
     const created = parseServerEvent(JSON.parse(host.sent[0]!));
     if (created.type !== "roomCreated") throw new Error("unexpected");
 
     // Second socket tries to reconnect as host while first is still connected
     const host2 = captureWs();
-    handleClientCommand(
+    await dispatchCmd(
       host2.ws,
       {
         type: "reconnectHost",
@@ -2626,7 +2712,7 @@ describe("handleClientCommand + RoomManager", () => {
     expect(rm.getLobbySession(host.ws)).not.toBeNull();
   });
 
-  it("IDENTITY_MISMATCH: reconnectPlayer with wrong displayName yields IDENTITY_MISMATCH", () => {
+  it("IDENTITY_MISMATCH: reconnectPlayer with wrong displayName yields IDENTITY_MISMATCH", async () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "1");
     vi.useFakeTimers();
     try {
@@ -2634,11 +2720,11 @@ describe("handleClientCommand + RoomManager", () => {
       const host = captureWs();
       const guest = captureWs();
 
-      handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+      await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
       const created = parseServerEvent(JSON.parse(host.sent[0]!));
       if (created.type !== "roomCreated") throw new Error("unexpected");
 
-      handleClientCommand(
+      await dispatchCmd(
         guest.ws,
         { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
         rm,
@@ -2646,13 +2732,13 @@ describe("handleClientCommand + RoomManager", () => {
       const joined = parseServerEvent(JSON.parse(guest.sent[0]!));
       if (joined.type !== "roomJoined") throw new Error("unexpected");
 
-      handleClientCommand(host.ws, { type: "startMatch" }, rm);
+      await dispatchCmd(host.ws, { type: "startMatch" }, rm);
       vi.advanceTimersByTime(resolveMatchStartHandshakeMs());
 
       rm.leaveSocketRoom(guest.ws);
 
       const impostor = captureWs();
-      handleClientCommand(
+      await dispatchCmd(
         impostor.ws,
         {
           type: "reconnectPlayer",
@@ -2673,16 +2759,16 @@ describe("handleClientCommand + RoomManager", () => {
     }
   });
 
-  it("NO_STASHED_SESSION: lobby-phase guest reconnectPlayer yields NO_STASHED_SESSION", () => {
+  it("NO_STASHED_SESSION: lobby-phase guest reconnectPlayer succeeds after transport drop (Story 8.5 grace stash)", async () => {
     const rm = new RoomManager(8, integrationWordBank(), stubRedis());
     const host = captureWs();
     const guest = captureWs();
 
-    handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+    await dispatchCmd(host.ws, { type: "createRoom", ...hostIdentity }, rm);
     const created = parseServerEvent(JSON.parse(host.sent[0]!));
     if (created.type !== "roomCreated") throw new Error("unexpected");
 
-    handleClientCommand(
+    await dispatchCmd(
       guest.ws,
       { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
       rm,
@@ -2690,11 +2776,10 @@ describe("handleClientCommand + RoomManager", () => {
     const joined = parseServerEvent(JSON.parse(guest.sent[0]!));
     if (joined.type !== "roomJoined") throw new Error("unexpected");
 
-    // Guest drops while still in lobby phase (no stash populated)
     rm.leaveSocketRoom(guest.ws);
 
     const guest2 = captureWs();
-    handleClientCommand(
+    await dispatchCmd(
       guest2.ws,
       {
         type: "reconnectPlayer",
@@ -2707,7 +2792,6 @@ describe("handleClientCommand + RoomManager", () => {
     );
 
     const ev = parseServerEvent(JSON.parse(guest2.sent[0]!));
-    expect(ev.type).toBe("error");
-    if (ev.type === "error") expect(ev.code).toBe("NO_STASHED_SESSION");
+    expect(ev.type).toBe("roomJoined");
   });
 });

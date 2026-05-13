@@ -1,5 +1,5 @@
 # generated: 2026-04-29T12:00:00Z
-# last_updated: 2026-05-13 — Epic 8 story 8.4 vote-kick done
+# last_updated: 2026-05-13 — Story 8.5 → done (review fixes)
 # project: skribbl
 # project_key: NOKEY
 # tracking_system: file-system
@@ -43,7 +43,7 @@ last_updated: '2026-05-13'
 # Epic 5: all stories done.
 # Epic 6: 6-1 done; 6-2 done; 6-3 done; 6-4 backlog; 6-5 done.
 # Epic 7: done.
-# Epic 8: in-progress — 8-0 done (Redis RoomManager); 8-3 done (lobby chat); 8-4 done (vote-kick).
+# Epic 8: in-progress — 8-0 done (Redis RoomManager); 8-1 done; 8-2 review; 8-3 done (lobby chat); 8-4 done (vote-kick); 8-5 done.
 project: skribbl
 project_key: NOKEY
 tracking_system: file-system
@@ -114,5 +114,5 @@ development_status:
   8-2-lobby-settings-host-broadcast: review
   8-3-pre-game-lobby-chat-relay: done
   8-4-vote-kick-system: done
-  8-5-reconnect-grace-window-host-promotion: backlog
+  8-5-reconnect-grace-window-host-promotion: done
   epic-8-retrospective: optional

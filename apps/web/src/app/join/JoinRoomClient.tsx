@@ -188,6 +188,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
     chooseWord: guestChooseWord,
     sendGameJsonLine: guestSendGameJsonLine,
     sendChat: guestSendChat,
+    leaveLobby: guestLeaveLobby,
   } = useGuestJoinRoom({
     activeJoinAttempt,
     connectionAttemptId: joinGeneration,
@@ -503,6 +504,14 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                   <p className="text-sm text-base-content/70 text-center">
                     The host controls when the match starts.
                   </p>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm w-full"
+                    disabled={guestTransport !== "live"}
+                    onClick={() => guestLeaveLobby()}
+                  >
+                    Leave lobby
+                  </button>
                 </div>
               ) : (
                 <p className="text-sm text-base-content/70">

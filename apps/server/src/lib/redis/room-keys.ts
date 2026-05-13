@@ -87,6 +87,8 @@ export interface PersistedRoomFields {
   scoresByPlayerId: Record<string, number>;
   settings: RoomSettings;
   voteKick?: VoteKickPendingState;
+  /** Join order map serialized as JSON object (Story 8.5). */
+  joinedAtByPlayerId: Record<string, number>;
 }
 
 export function serializeRoom(r: PersistedRoomFields): Record<string, string> {
@@ -113,6 +115,7 @@ export function serializeRoom(r: PersistedRoomFields): Record<string, string> {
     scoresByPlayerId: JSON.stringify(r.scoresByPlayerId),
     settings: JSON.stringify(r.settings),
     voteKick: r.voteKick !== undefined ? JSON.stringify(r.voteKick) : "",
+    joinedAtByPlayerId: JSON.stringify(r.joinedAtByPlayerId),
   };
 }
 
@@ -177,6 +180,7 @@ export function deserializeRoom(h: Record<string, string>): PersistedRoomFields 
       scoresByPlayerId: h["scoresByPlayerId"] ? JSON.parse(h["scoresByPlayerId"]) : {},
       settings: h["settings"] ? (JSON.parse(h["settings"]) as RoomSettings) : { ...DEFAULT_ROOM_SETTINGS },
       voteKick: parseVoteKickField(h["voteKick"]),
+      joinedAtByPlayerId: h["joinedAtByPlayerId"] ? (JSON.parse(h["joinedAtByPlayerId"]) as Record<string, number>) : {},
     };
   } catch (err) {
     throw new Error(

@@ -356,6 +356,11 @@ describe("voteKick protocol commands (Story 8.4)", () => {
     expect(serverEventSchema.safeParse(left).success).toBe(true);
     expect(JSON.parse(serializeServerEvent(left))).toEqual(left);
 
+    const leftDisc = { type: "playerLeft" as const, playerId: "x", reason: "disconnected" as const };
+    expect(serverEventSchema.safeParse(leftDisc).success).toBe(true);
+    const leftVol = { type: "playerLeft" as const, playerId: "y", reason: "voluntary" as const };
+    expect(serverEventSchema.safeParse(leftVol).success).toBe(true);
+
     expect(serverEventSchema.safeParse({ ...started, expiresAtMs: "bad" }).success).toBe(false);
     expect(
       serverEventSchema.safeParse({
@@ -418,6 +423,14 @@ describe("serverEventSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts leaveRoom (Story 8.5)", () => {
+    const result = clientCommandSchema.safeParse({
+      type: "leaveRoom",
+      roomCode: "ABCDEF",
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("accepts joinRoom with optional token", () => {
     const result = clientCommandSchema.safeParse({
       type: "joinRoom",
@@ -471,6 +484,16 @@ describe("serverEventSchema", () => {
       score: 0,
     });
     expect(row.connectionStatus).toBe("connected");
+  });
+
+  it("lobby roster player defaults joinedAtMs to 0 when omitted", () => {
+    const row = lobbyRosterPlayerSchema.parse({
+      playerId: "a",
+      displayName: "Hue",
+      avatarPresetId: "preset-1",
+      isHost: true,
+    });
+    expect(row.joinedAtMs).toBe(0);
   });
 
   it("lobby roster player accepts disconnected status", () => {
@@ -661,6 +684,57 @@ describe("serverEventSchema", () => {
         drawerPlayerId: "p",
         canvasCommits: [stroke],
         chatTail: [],
+      }).success,
+    ).toBe(true);
+    expect(
+      serverEventSchema.safeParse({
+        type: "roomHydrate",
+        roomId: "r",
+        phase: "drawing",
+        drawingStrokeSeq: 1,
+        matchRoundIndex: 0,
+        drawerPlayerId: "p",
+        canvasCommits: [stroke],
+        chatTail: [],
+        roomCode: "ABCDEF",
+        settings: {
+          rounds: 3,
+          drawTime: 80,
+          maxPlayers: 8,
+          wordPack: "classic" as const,
+          showHints: true,
+          skipAfk: true,
+          allowVoice: false,
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      serverEventSchema.safeParse({
+        type: "roomHydrate",
+        roomId: "r",
+        phase: "lobby",
+        drawingStrokeSeq: 0,
+        drawerPlayerId: null,
+        canvasCommits: [],
+        chatTail: [],
+        roomCode: "ABCDEF",
+        settings: {
+          rounds: 3,
+          drawTime: 80,
+          maxPlayers: 8,
+          wordPack: "classic" as const,
+          showHints: true,
+          skipAfk: true,
+          allowVoice: false,
+        },
+        voteKick: {
+          status: "PENDING" as const,
+          targetPlayerId: "tgt",
+          initiatorPlayerId: "ini",
+          startedAtMs: 1,
+          expiresAtMs: 2,
+          votes: { ini: "yes" as const },
+        },
       }).success,
     ).toBe(true);
     expect(

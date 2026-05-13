@@ -32,6 +32,7 @@ import {
   serializeReturnToLobbyCommand,
   serializeChatMessageCommand,
   serializeLobbyChatCommand,
+  serializeLeaveRoomCommand,
 } from "@/lib/ws-client";
 import { useLobbySettingsStore } from "@/features/lobby/stores/lobby-settings-store";
 import {
@@ -128,6 +129,8 @@ export type UseHostCreateRoomResult = {
   sendChat: (text: string) => void;
   /** Lobby-phase chat relay only (Story 8.3). */
   sendLobbyChat: (text: string) => void;
+  /** Lobby phase only: voluntary leave (Story 8.5). */
+  leaveLobby: () => void;
 };
 
 /** Avoid unbounded `remoteCanvasCommits` growth during long drawing phases. */
@@ -140,6 +143,7 @@ const TERMINAL_PROTOCOL_CODES_AFTER_LOBBY = new Set([
   "HOST_SESSION_LOST",
   "HOST_RECLAIM_DENIED",
   "ALREADY_CONNECTED",
+  "TOKEN_MISMATCH",
 ]);
 
 /** Recoverable structured errors — server fault, not disconnect (Story 8.3 lobby chat). */
@@ -234,6 +238,19 @@ export function useHostCreateRoom(
     if (snap.status !== "lobby" || snap.phase !== "lobby") return;
     try {
       w.send(serializeLobbyChatCommand(snap.roomCode, text));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const leaveLobby = useCallback(() => {
+    const w = wsRef.current;
+    if (!w || w.readyState !== WebSocket.OPEN) return;
+    const snap = stateSnapshotRef.current;
+    if (snap.status !== "lobby" || snap.phase !== "lobby") return;
+    try {
+      w.send(serializeLeaveRoomCommand(snap.roomCode));
+      clearSession();
     } catch {
       /* ignore */
     }
@@ -658,6 +675,18 @@ export function useHostCreateRoom(
         }
         case "roomHydrate": {
           const h = parsed.data;
+          if (h.settings !== undefined) {
+            useLobbySettingsStore.setState(h.settings);
+          }
+          if (h.phase === "lobby" && h.voteKick?.status === "PENDING") {
+            onLobbyVoteKickEventRef.current?.({
+              type: "voteKickStarted",
+              roomId: h.roomId,
+              targetPlayerId: h.voteKick.targetPlayerId,
+              initiatorPlayerId: h.voteKick.initiatorPlayerId,
+              expiresAtMs: h.voteKick.expiresAtMs,
+            });
+          }
           setState((prev) => {
             if (prev.status !== "lobby") return prev;
             if (h.roomId !== prev.roomId) return prev;
@@ -792,6 +821,7 @@ export function useHostCreateRoom(
       sendGameJsonLine,
       sendChat,
       sendLobbyChat,
+      leaveLobby,
     };
   }
 
@@ -808,6 +838,7 @@ export function useHostCreateRoom(
       sendGameJsonLine,
       sendChat,
       sendLobbyChat,
+      leaveLobby,
     };
   }
 
@@ -824,6 +855,7 @@ export function useHostCreateRoom(
       sendGameJsonLine,
       sendChat,
       sendLobbyChat,
+      leaveLobby,
     };
   }
 
@@ -839,5 +871,6 @@ export function useHostCreateRoom(
     sendGameJsonLine,
     sendChat,
     sendLobbyChat,
+    leaveLobby,
   };
 }

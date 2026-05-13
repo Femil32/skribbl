@@ -54,6 +54,7 @@ export {
   type PlayerLeftReason,
   type InitiateVoteKickCommand,
   type CastVoteKickCommand,
+  type LeaveRoomCommand,
 } from "./schemas.js";
 export {
   assertChatMessageLength,

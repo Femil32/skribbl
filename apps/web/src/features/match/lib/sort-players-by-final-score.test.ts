@@ -10,6 +10,7 @@ function row(
     avatarPresetId: "preset-1",
     isHost: false,
     connectionStatus: "connected",
+    joinedAtMs: 0,
     ...partial,
   };
 }

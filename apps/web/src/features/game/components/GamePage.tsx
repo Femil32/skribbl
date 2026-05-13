@@ -18,6 +18,7 @@ const DEV_PHASEBAR_PLAYERS: LobbyRosterPlayer[] = [
     isHost: true,
     score: 0,
     connectionStatus: "connected",
+    joinedAtMs: 0,
   },
 ];
 

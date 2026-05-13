@@ -44,6 +44,11 @@
 
 - `lobbyChatSendTimestampsByPlayerId` in `room-manager.ts` retains Map keys for every `playerId` that ever sent lobby chat — low-risk process-memory growth; revisit for long-lived deployments or horizontal scale.
 
+## Deferred from: code review of 8-5-reconnect-grace-window-host-promotion.md (2026-05-13)
+
+- Small edits in match/score tests (`PhaseBar.test.tsx`, `sort-players-by-final-score.test.ts`, `GamePage.tsx`) — outside story 8.5 scope; typing/test ripple only.
+- Cold restart honoring Redis grace metadata — story open question #2; out of scope unless product requires reconciliation after process loss.
+
 ## Deferred from: code review of 8-4-vote-kick-system (2026-05-13)
 
 - Extract `LobbyVoteKickWireEvent` (and related lobby wire unions) to a small shared module so `use-guest-join-room` does not import types from `use-host-create-room` — coupling only; behavior is correct.

@@ -32,6 +32,7 @@ import {
   serializeReconnectPlayerCommand,
   serializeChatMessageCommand,
   serializeLobbyChatCommand,
+  serializeLeaveRoomCommand,
 } from "@/lib/ws-client";
 import {
   appendDrawingHintRows,
@@ -113,6 +114,8 @@ export type UseGuestJoinRoomResult = {
   chooseWord: (choiceIndex: 0 | 1 | 2) => void;
   sendGameJsonLine: (raw: string) => void;
   sendChat: (text: string) => void;
+  /** Lobby phase only: voluntary leave (Story 8.5). */
+  leaveLobby: () => void;
 };
 
 /**
@@ -132,6 +135,7 @@ const TERMINAL_PROTOCOL_CODES_AFTER_JOINED = new Set([
   "ALREADY_CONNECTED",
   "NO_STASHED_SESSION",
   "HOST_USE_RECONNECT_HOST",
+  "TOKEN_MISMATCH",
 ]);
 
 /**
@@ -226,6 +230,19 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
       } else {
         w.send(serializeChatMessageCommand(snap.roomId, text));
       }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const leaveLobby = useCallback(() => {
+    const w = wsRef.current;
+    if (!w || w.readyState !== WebSocket.OPEN) return;
+    const snap = guestJoinedSnapshotRef.current;
+    if (!snap || snap.phase !== "lobby") return;
+    try {
+      w.send(serializeLeaveRoomCommand(snap.roomCode));
+      clearSession();
     } catch {
       /* ignore */
     }
@@ -648,6 +665,18 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
         }
         case "roomHydrate": {
           const h = parsed.data;
+          if (h.settings !== undefined) {
+            useLobbySettingsStore.setState(h.settings);
+          }
+          if (h.phase === "lobby" && h.voteKick?.status === "PENDING") {
+            onLobbyVoteKickEventRef.current?.({
+              type: "voteKickStarted",
+              roomId: h.roomId,
+              targetPlayerId: h.voteKick.targetPlayerId,
+              initiatorPlayerId: h.voteKick.initiatorPlayerId,
+              expiresAtMs: h.voteKick.expiresAtMs,
+            });
+          }
           setState((prev) => {
             if (prev.status !== "joined") return prev;
             if (h.roomId !== prev.roomId) return prev;
@@ -756,6 +785,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
       chooseWord,
       sendGameJsonLine,
       sendChat,
+      leaveLobby,
     };
   }
 
@@ -769,6 +799,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
       chooseWord,
       sendGameJsonLine,
       sendChat,
+      leaveLobby,
     };
   }
 
@@ -784,6 +815,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
       chooseWord,
       sendGameJsonLine,
       sendChat,
+      leaveLobby,
     };
   }
 
@@ -796,5 +828,6 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
     chooseWord,
     sendGameJsonLine,
     sendChat,
+    leaveLobby,
   };
 }

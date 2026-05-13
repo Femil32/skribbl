@@ -84,9 +84,10 @@ export async function createGameServer() {
   const voteKickPollMs = 30_000;
   setInterval(() => {
     try {
+      roomManager.pollLobbyReconnectGrace();
       roomManager.pollVoteKicks();
     } catch (err) {
-      log.error({ err }, "pollVoteKicks error");
+      log.error({ err }, "lobby poll error");
     }
   }, voteKickPollMs).unref();
 
@@ -132,6 +133,8 @@ export async function createGameServer() {
     ws.on("close", () => {
       roomManager.leaveSocketRoom(ws);
     });
+
+    let commandChain: Promise<void> = Promise.resolve();
 
     ws.on("message", (raw) => {
       if (inboundWsMessageByteLength(raw) > MAX_WS_MESSAGE_BYTES) {
@@ -180,12 +183,14 @@ export async function createGameServer() {
         sendProtocolError(ws, "BAD_PAYLOAD", "Message validation failed", roomManager);
         return;
       }
-      try {
-        handleClientCommand(ws, parsed.data, roomManager);
-      } catch (err) {
-        log.error({ err }, "handler error");
-        sendProtocolError(ws, "INTERNAL", "Unexpected handler error", roomManager);
-      }
+      commandChain = commandChain.then(async () => {
+        try {
+          await handleClientCommand(ws, parsed.data, roomManager);
+        } catch (err) {
+          log.error({ err }, "handler error");
+          sendProtocolError(ws, "INTERNAL", "Unexpected handler error", roomManager);
+        }
+      });
     });
   });
 

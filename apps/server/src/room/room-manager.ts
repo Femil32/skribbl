@@ -57,6 +57,7 @@ import {
   PLAYER_TTL_S,
 } from "../lib/redis/room-keys.js";
 import type { LobbySessionIdentity } from "./lobby-session.js";
+import type { ReconnectStash } from "./reconnect-stash.js";
 import { Room } from "./room.js";
 import {
   transcriptRowsForHydrateRecipient,
@@ -64,6 +65,7 @@ import {
 } from "./chat-transcript.js";
 
 const VOTE_KICK_WINDOW_MS = 30_000;
+const LOBBY_RECONNECT_GRACE_MS = 30_000;
 
 function countYesFromEligible(votes: Record<string, "yes" | "no">, eligible: Set<string>): number {
   let n = 0;
@@ -125,7 +127,8 @@ export type ReconnectHostFailureReason =
   | "JOIN_NOT_ALLOWED"
   | "NOT_HOST"
   | "ROOM_FULL"
-  | "ALREADY_CONNECTED";
+  | "ALREADY_CONNECTED"
+  | "TOKEN_MISMATCH";
 
 export type ReconnectPlayerFailureReason =
   | "UNKNOWN_ROOM"
@@ -133,7 +136,8 @@ export type ReconnectPlayerFailureReason =
   | "NO_STASHED_SESSION"
   | "ALREADY_CONNECTED"
   | "HOST_USE_RECONNECT_HOST"
-  | "IDENTITY_MISMATCH";
+  | "IDENTITY_MISMATCH"
+  | "TOKEN_MISMATCH";
 
 export type NewLobbyPlayer = Pick<
   LobbySessionIdentity,
@@ -153,6 +157,8 @@ export class RoomManager {
   private readonly lobbyChatSendTimestampsByPlayerId = new Map<string, number[]>();
   /** Cleared when a room is destroyed or match chain reschedules. */
   private readonly matchTimersByRoomId = new Map<string, ReturnType<typeof setTimeout>[]>();
+  /** One-shot timers for lobby grace (~30s wall clock); {@link pollLobbyReconnectGrace} remains backup. */
+  private readonly lobbyGraceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   readonly maxPlayersPerRoom: number;
   private readonly wordBank: WordBank;
@@ -168,6 +174,12 @@ export class RoomManager {
   private getRoomById(id: string): Room | undefined {
     const code = this.roomCodeById.get(id);
     return code ? this.roomRuntimeByCode.get(code) : undefined;
+  }
+
+  private joinedAtRecordForRedis(room: Room): Record<string, number> {
+    const o: Record<string, number> = {};
+    for (const [k, v] of room.joinedAtByPlayerId) o[k] = v;
+    return o;
   }
 
   // P-1+P-2: fire-and-forget via pipeline (hset+expire atomic per key) with error logging.
@@ -193,6 +205,7 @@ export class RoomManager {
       scoresByPlayerId: room.scoresByPlayerId,
       settings: room.settings,
       voteKick: room.voteKick,
+      joinedAtByPlayerId: this.joinedAtRecordForRedis(room),
     });
     void this.redis
       .pipeline()
@@ -226,6 +239,8 @@ export class RoomManager {
         isHost: room.hostPlayerId === playerId,
         score: room.scoresByPlayerId[playerId] ?? 0,
         connectionStatus: "disconnected",
+        joinedAtMs:
+          room.joinedAtByPlayerId.get(playerId) ?? stash.joinedAtMs ?? 0,
       });
     }
 
@@ -239,6 +254,8 @@ export class RoomManager {
         isHost: room.hostPlayerId === identity.playerId,
         score: room.scoresByPlayerId[identity.playerId] ?? 0,
         connectionStatus: "connected",
+        joinedAtMs:
+          room.joinedAtByPlayerId.get(identity.playerId) ?? identity.joinedAtMs ?? 0,
       });
     }
 
@@ -265,6 +282,39 @@ export class RoomManager {
 
   private roomHasCapacity(room: Room): boolean {
     return this.countOccupiedSeatIds(room) < room.maxPlayers;
+  }
+
+  private lobbyGraceTimerKey(roomId: string, playerId: string): string {
+    return `${roomId}:${playerId}`;
+  }
+
+  private clearLobbyGraceTimer(roomId: string, playerId: string): void {
+    const key = this.lobbyGraceTimerKey(roomId, playerId);
+    const t = this.lobbyGraceTimers.get(key);
+    if (t !== undefined) {
+      clearTimeout(t);
+      this.lobbyGraceTimers.delete(key);
+    }
+  }
+
+  private scheduleLobbyGraceTimer(roomId: string, playerId: string): void {
+    this.clearLobbyGraceTimer(roomId, playerId);
+    const t = setTimeout(() => {
+      this.lobbyGraceTimers.delete(this.lobbyGraceTimerKey(roomId, playerId));
+      const room = this.getRoomById(roomId);
+      if (room) this.finalizeLobbyGraceExpiry(room, playerId);
+    }, LOBBY_RECONNECT_GRACE_MS);
+    if (typeof (t as NodeJS.Timeout).unref === "function") (t as NodeJS.Timeout).unref();
+    this.lobbyGraceTimers.set(this.lobbyGraceTimerKey(roomId, playerId), t);
+  }
+
+  private isLobbyGracePast(stash: ReconnectStash, nowMs: number = Date.now()): boolean {
+    return stash.graceExpiresAtMs !== undefined && nowMs >= stash.graceExpiresAtMs;
+  }
+
+  /** `roomJoined.playerCount`: lobby counts grace seats; in-match uses live sockets only. */
+  roomWirePlayerCount(room: Room): number {
+    return room.phase === "lobby" ? this.countOccupiedSeatIds(room) : room.sockets.size;
   }
 
   private transcriptAudiencePlayerIds(room: Room): string[] {
@@ -352,6 +402,13 @@ export class RoomManager {
           : room.currentDrawerPlayerId ?? null,
       canvasCommits,
       chatTail,
+      ...(room.phase === "lobby"
+        ? {
+            roomCode: room.code,
+            settings: room.settings,
+            ...(room.voteKick !== undefined ? { voteKick: room.voteKick } : {}),
+          }
+        : {}),
     };
     this.sendEvent(ws, hydrate);
   }
@@ -1096,7 +1153,7 @@ export class RoomManager {
     if (Object.keys(partial).length === 0) return { ok: true };
     if (
       partial.maxPlayers !== undefined &&
-      partial.maxPlayers < room.sockets.size
+      partial.maxPlayers < this.countOccupiedSeatIds(room)
     ) {
       return { ok: false, code: "VALIDATION_ERROR", detail: "maxPlayers below current count" };
     }
@@ -1129,26 +1186,64 @@ export class RoomManager {
     throw new Error("ROOM_CODE_COLLISION_RETRY_EXHAUSTED");
   }
 
-  /** Lexicographically smallest connected `playerId` in lobby; used after host kicks / voluntary leaves (Story 8.4). */
-  private syncLobbyHostPointers(room: Room): void {
+  private teardownEmptyRoom(room: Room): void {
+    for (const pid of room.awaitingReconnect.keys()) {
+      this.clearLobbyGraceTimer(room.id, pid);
+    }
+    this.clearMatchTimers(room.id);
+    this.roomRuntimeByCode.delete(room.code);
+    this.roomCodeById.delete(room.id);
+    this.deleteRoomFromRedis(room);
+  }
+
+  /** Earliest `joinedAtMs` wins; lexicographic `playerId` tie-break (Story 8.5). */
+  private promoteLobbyHostByJoinedAt(room: Room): void {
     if (room.phase !== "lobby") return;
 
-    let bestId: string | null = null;
-    let bestSock: WebSocket | null = null;
+    const candidates: { id: string; joinedAt: number }[] = [];
+    const seen = new Set<string>();
+
     for (const sock of room.sockets) {
       const id = this.socketLobbyIdentity.get(sock)?.playerId;
-      if (!id) continue;
-      if (bestId === null || id.localeCompare(bestId) < 0) {
-        bestId = id;
-        bestSock = sock;
-      }
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      candidates.push({
+        id,
+        joinedAt: room.joinedAtByPlayerId.get(id) ?? 0,
+      });
     }
-    if (!bestId) {
+
+    for (const [pid, stash] of room.awaitingReconnect) {
+      if (seen.has(pid)) continue;
+      seen.add(pid);
+      candidates.push({
+        id: pid,
+        joinedAt: room.joinedAtByPlayerId.get(pid) ?? stash.joinedAtMs ?? 0,
+      });
+    }
+
+    if (candidates.length === 0) {
       room.hostSocket = null;
       return;
     }
-    room.hostPlayerId = bestId;
-    room.hostSocket = bestSock;
+
+    candidates.sort((a, b) =>
+      a.joinedAt !== b.joinedAt ? a.joinedAt - b.joinedAt : a.id.localeCompare(b.id),
+    );
+
+    const nextHostId = candidates[0]!.id;
+    room.hostPlayerId = nextHostId;
+    room.hostSocket = this.findSocketForPlayerId(room, nextHostId) ?? null;
+  }
+
+  private async verifyReconnectToken(
+    token: string | undefined,
+    expectedPlayerId: string,
+  ): Promise<boolean> {
+    if (token === undefined || token === "") return true;
+    const row = await this.redis.hgetall(playerKey(token));
+    if (!row?.["playerId"]) return false;
+    return row["playerId"] === expectedPlayerId;
   }
 
   private findSocketForPlayerId(room: Room, playerId: string): WebSocket | undefined {
@@ -1187,6 +1282,11 @@ export class RoomManager {
     if (!vk || vk.status !== "PENDING") return;
 
     if (vk.targetPlayerId === leavingPlayerId) {
+      const stash = room.awaitingReconnect.get(leavingPlayerId);
+      if (room.phase === "lobby" && stash?.graceExpiresAtMs !== undefined) {
+        this.evaluateVoteKickProgress(room);
+        return;
+      }
       this.resolveVoteKickFailed(room, "target_left");
       return;
     }
@@ -1220,7 +1320,8 @@ export class RoomManager {
 
   private finalizeVoteKickKick(room: Room, targetPlayerId: string): void {
     const targetWs = this.findSocketForPlayerId(room, targetPlayerId);
-    if (!targetWs) {
+    const stashed = room.awaitingReconnect.get(targetPlayerId);
+    if (!targetWs && !stashed) {
       room.voteKick = undefined;
       this.writeRoomToRedis(room);
       return;
@@ -1237,7 +1338,28 @@ export class RoomManager {
       this.sendEvent(sock, leftEv);
     }
 
-    this.removeLobbyParticipantAfterVoteKick(room, targetWs);
+    if (targetWs) {
+      this.removeLobbyParticipantAfterVoteKick(room, targetWs);
+    } else {
+      this.removeLobbyParticipantAfterKickWithoutSocket(room, targetPlayerId);
+    }
+  }
+
+  private removeLobbyParticipantAfterKickWithoutSocket(room: Room, targetPlayerId: string): void {
+    const wasHost = room.hostPlayerId === targetPlayerId;
+    room.awaitingReconnect.delete(targetPlayerId);
+    room.joinedAtByPlayerId.delete(targetPlayerId);
+
+    if (room.phase === "lobby" && wasHost) {
+      this.promoteLobbyHostByJoinedAt(room);
+    }
+
+    if (room.sockets.size === 0 && room.awaitingReconnect.size === 0) {
+      this.teardownEmptyRoom(room);
+    } else {
+      this.broadcastLobbyRoster(room);
+      this.writeRoomToRedis(room);
+    }
   }
 
   /** Remove kicked player after `voteKickResolved` / `playerLeft`; socket maps cleared before WS close so `close` noop. */
@@ -1246,9 +1368,13 @@ export class RoomManager {
     const wasHost = kickedId !== undefined && room.hostPlayerId === kickedId;
 
     room.sockets.delete(targetWs);
+    if (kickedId !== undefined) {
+      room.awaitingReconnect.delete(kickedId);
+      room.joinedAtByPlayerId.delete(kickedId);
+    }
 
     if (room.phase === "lobby") {
-      if (wasHost) this.syncLobbyHostPointers(room);
+      if (wasHost) this.promoteLobbyHostByJoinedAt(room);
     } else if (room.hostSocket === targetWs) {
       room.hostSocket = room.sockets.values().next().value as WebSocket | undefined ?? null;
     }
@@ -1256,12 +1382,8 @@ export class RoomManager {
     this.socketToRoomId.delete(targetWs);
     this.socketLobbyIdentity.delete(targetWs);
 
-    const survivors = room.sockets.size;
-    if (survivors === 0) {
-      this.clearMatchTimers(room.id);
-      this.roomRuntimeByCode.delete(room.code);
-      this.roomCodeById.delete(room.id);
-      this.deleteRoomFromRedis(room);
+    if (room.sockets.size === 0 && room.awaitingReconnect.size === 0) {
+      this.teardownEmptyRoom(room);
     } else {
       this.broadcastLobbyRoster(room);
       this.writeRoomToRedis(room);
@@ -1379,6 +1501,59 @@ export class RoomManager {
     }
   }
 
+  /** Lobby reconnect grace (Story 8.5) — share the same ~30s poll cadence as vote-kick expiry. */
+  pollLobbyReconnectGrace(nowMs = Date.now()): void {
+    for (const room of this.roomRuntimeByCode.values()) {
+      if (room.phase !== "lobby") continue;
+      const expired: string[] = [];
+      for (const [pid, stash] of room.awaitingReconnect) {
+        if (stash.graceExpiresAtMs !== undefined && nowMs >= stash.graceExpiresAtMs) {
+          expired.push(pid);
+        }
+      }
+      for (const pid of expired) {
+        this.finalizeLobbyGraceExpiry(room, pid);
+      }
+    }
+  }
+
+  private finalizeLobbyGraceExpiry(room: Room, playerId: string): void {
+    this.clearLobbyGraceTimer(room.id, playerId);
+    const stash = room.awaitingReconnect.get(playerId);
+    if (!stash?.graceExpiresAtMs) return;
+
+    room.awaitingReconnect.delete(playerId);
+    room.joinedAtByPlayerId.delete(playerId);
+
+    const wasHost = room.hostPlayerId === playerId;
+
+    const leftEv: ServerEvent = { type: "playerLeft", playerId, reason: "disconnected" };
+    for (const sock of room.sockets) {
+      this.sendEvent(sock, leftEv);
+    }
+
+    if (room.phase === "lobby" && wasHost) {
+      this.promoteLobbyHostByJoinedAt(room);
+    }
+
+    const vk = room.voteKick;
+    if (vk?.status === "PENDING") {
+      if (vk.targetPlayerId === playerId) {
+        this.resolveVoteKickFailed(room, "target_left");
+      } else {
+        this.handleVoteKickOnMemberDisconnected(room, playerId);
+      }
+    }
+
+    if (room.sockets.size === 0 && room.awaitingReconnect.size === 0) {
+      this.teardownEmptyRoom(room);
+      return;
+    }
+
+    this.broadcastLobbyRoster(room);
+    this.writeRoomToRedis(room);
+  }
+
   leaveSocketRoom(ws: WebSocket): void {
     const roomId = this.socketToRoomId.get(ws);
     const identity = roomId ? this.socketLobbyIdentity.get(ws) : undefined;
@@ -1389,26 +1564,48 @@ export class RoomManager {
     const room = this.getRoomById(roomId);
     const leavingPlayerId = identity?.playerId;
 
-    if (room && identity && room.phase !== "lobby") {
-      room.awaitingReconnect.set(identity.playerId, {
-        playerId: identity.playerId,
-        displayName: identity.displayName,
-        avatarPresetId: identity.avatarPresetId,
-      });
+    if (room && identity) {
+      if (room.phase === "lobby") {
+        const joinedAtMs = room.joinedAtByPlayerId.get(identity.playerId) ?? Date.now();
+        const stash: ReconnectStash = {
+          playerId: identity.playerId,
+          displayName: identity.displayName,
+          avatarPresetId: identity.avatarPresetId,
+          joinedAtMs,
+          graceExpiresAtMs: Date.now() + LOBBY_RECONNECT_GRACE_MS,
+        };
+        room.awaitingReconnect.set(identity.playerId, stash);
+        this.scheduleLobbyGraceTimer(room.id, identity.playerId);
+      } else {
+        const joinedAtMs =
+          room.joinedAtByPlayerId.get(identity.playerId) ?? Date.now();
+        room.awaitingReconnect.set(identity.playerId, {
+          playerId: identity.playerId,
+          displayName: identity.displayName,
+          avatarPresetId: identity.avatarPresetId,
+          joinedAtMs,
+        });
+      }
     }
+
     if (room) {
       room.sockets.delete(ws);
       if (room.hostSocket === ws) {
-        const next = room.sockets.values().next().value as WebSocket | undefined;
-        room.hostSocket = next ?? null;
+        if (
+          room.phase === "lobby" &&
+          leavingPlayerId !== undefined &&
+          room.hostPlayerId === leavingPlayerId &&
+          room.awaitingReconnect.has(leavingPlayerId)
+        ) {
+          room.hostSocket = null;
+        } else {
+          const next = room.sockets.values().next().value as WebSocket | undefined;
+          room.hostSocket = next ?? null;
+        }
       }
 
-      const survivors = room.sockets.size;
-      if (survivors === 0) {
-        this.clearMatchTimers(room.id);
-        this.roomRuntimeByCode.delete(room.code);
-        this.roomCodeById.delete(room.id);
-        this.deleteRoomFromRedis(room);
+      if (room.sockets.size === 0 && room.awaitingReconnect.size === 0) {
+        this.teardownEmptyRoom(room);
       } else {
         if (leavingPlayerId !== undefined && room.voteKick?.status === "PENDING") {
           this.handleVoteKickOnMemberDisconnected(room, leavingPlayerId);
@@ -1426,13 +1623,75 @@ export class RoomManager {
     return this.socketLobbyIdentity.get(ws);
   }
 
+  leaveRoom(ws: WebSocket, normalizedCode: string): { ok: true } | { ok: false; code: string } {
+    const room = this.getRoomForSocket(ws);
+    const session = this.getLobbySession(ws);
+    if (!room || !session) return { ok: false, code: "NOT_IN_ROOM" };
+    if (room.phase !== "lobby") return { ok: false, code: "MATCH_IN_PROGRESS" };
+    if (normalizeRoomCode(normalizedCode) !== normalizeRoomCode(room.code)) {
+      return { ok: false, code: "BAD_CODE" };
+    }
+
+    this.removeLobbyMemberVoluntary(room, ws);
+    return { ok: true };
+  }
+
+  private removeLobbyMemberVoluntary(room: Room, ws: WebSocket): void {
+    const identity = this.socketLobbyIdentity.get(ws);
+    if (!identity) return;
+    const leavingId = identity.playerId;
+    const wasHost = room.hostPlayerId === leavingId;
+
+    this.clearLobbyGraceTimer(room.id, leavingId);
+    room.awaitingReconnect.delete(leavingId);
+    room.sockets.delete(ws);
+    room.joinedAtByPlayerId.delete(leavingId);
+
+    if (room.hostSocket === ws) {
+      room.hostSocket = null;
+    }
+
+    if (room.phase === "lobby" && wasHost) {
+      this.promoteLobbyHostByJoinedAt(room);
+    } else if (room.hostSocket === null && room.phase !== "lobby") {
+      const next = room.sockets.values().next().value as WebSocket | undefined;
+      room.hostSocket = next ?? null;
+    }
+
+    this.socketToRoomId.delete(ws);
+    this.socketLobbyIdentity.delete(ws);
+
+    const leftEv: ServerEvent = { type: "playerLeft", playerId: leavingId, reason: "voluntary" };
+    for (const sock of room.sockets) {
+      this.sendEvent(sock, leftEv);
+    }
+
+    if (room.sockets.size === 0 && room.awaitingReconnect.size === 0) {
+      this.teardownEmptyRoom(room);
+    } else {
+      if (room.voteKick?.status === "PENDING") {
+        this.handleVoteKickOnMemberDisconnected(room, leavingId);
+      }
+      this.broadcastLobbyRoster(room);
+      this.writeRoomToRedis(room);
+    }
+
+    try {
+      ws.close();
+    } catch {
+      /* ignore */
+    }
+  }
+
   createRoom(ws: WebSocket, player: NewLobbyPlayer & { token?: string }): Room {
     this.leaveSocketRoom(ws);
     const playerId = randomUUID();
+    const joinedAtMs = Date.now();
     this.socketLobbyIdentity.set(ws, {
       playerId,
       displayName: player.displayName,
       avatarPresetId: player.avatarPresetId,
+      joinedAtMs,
     });
     const code = this.generateUniqueCode();
     const hostToken = randomBytes(16).toString("base64url").slice(0, 21);
@@ -1443,6 +1702,7 @@ export class RoomManager {
       hostPlayerId: playerId,
     });
     room.hostToken = hostToken;
+    room.joinedAtByPlayerId.set(playerId, joinedAtMs);
     room.sockets.add(ws);
     room.hostSocket = ws;
     this.roomRuntimeByCode.set(code, room);
@@ -1467,19 +1727,27 @@ export class RoomManager {
     return room;
   }
 
-  reconnectHost(
+  async reconnectHost(
     ws: WebSocket,
     roomId: string,
     expectedPlayerId: string,
     player: NewLobbyPlayer & { token?: string },
-  ): { ok: true; room: Room } | { ok: false; reason: ReconnectHostFailureReason } {
+  ): Promise<
+    { ok: true; room: Room } | { ok: false; reason: ReconnectHostFailureReason }
+  > {
+    if (!(await this.verifyReconnectToken(player.token, expectedPlayerId))) {
+      return { ok: false, reason: "TOKEN_MISMATCH" };
+    }
+
     const room = this.getRoomById(roomId);
     if (!room) return { ok: false, reason: "UNKNOWN_ROOM" };
     if (room.hostPlayerId !== expectedPlayerId) return { ok: false, reason: "NOT_HOST" };
 
     const stashedSession = room.awaitingReconnect.get(expectedPlayerId);
-    const midMatchReclaim = stashedSession !== undefined;
-    if (!midMatchReclaim && room.phase !== "lobby") {
+    if (stashedSession && this.isLobbyGracePast(stashedSession)) {
+      return { ok: false, reason: "JOIN_NOT_ALLOWED" };
+    }
+    if (room.phase !== "lobby" && !stashedSession) {
       return { ok: false, reason: "JOIN_NOT_ALLOWED" };
     }
 
@@ -1493,11 +1761,15 @@ export class RoomManager {
     this.leaveSocketRoom(ws);
 
     if (stashedSession) {
+      this.clearLobbyGraceTimer(room.id, expectedPlayerId);
       room.awaitingReconnect.delete(expectedPlayerId);
     }
 
     const displayName = stashedSession ? stashedSession.displayName : player.displayName;
     const avatarPresetId = stashedSession ? stashedSession.avatarPresetId : player.avatarPresetId;
+    const joinedAtMs = stashedSession
+      ? stashedSession.joinedAtMs
+      : room.joinedAtByPlayerId.get(expectedPlayerId) ?? Date.now();
 
     // Legacy rooms (pre-8-1) may have an empty hostToken; generate one on reconnect.
     if (!room.hostToken) {
@@ -1508,7 +1780,9 @@ export class RoomManager {
       playerId: expectedPlayerId,
       displayName,
       avatarPresetId,
+      joinedAtMs,
     });
+    room.joinedAtByPlayerId.set(expectedPlayerId, joinedAtMs);
     room.sockets.add(ws);
     room.hostSocket = ws;
     this.socketToRoomId.set(ws, room.id);
@@ -1531,12 +1805,18 @@ export class RoomManager {
     return { ok: true, room };
   }
 
-  reconnectPlayer(
+  async reconnectPlayer(
     ws: WebSocket,
     roomId: string,
     expectedPlayerId: string,
     player: NewLobbyPlayer & { token?: string },
-  ): { ok: true; room: Room } | { ok: false; reason: ReconnectPlayerFailureReason } {
+  ): Promise<
+    { ok: true; room: Room } | { ok: false; reason: ReconnectPlayerFailureReason }
+  > {
+    if (!(await this.verifyReconnectToken(player.token, expectedPlayerId))) {
+      return { ok: false, reason: "TOKEN_MISMATCH" };
+    }
+
     const room = this.getRoomById(roomId);
     if (!room) return { ok: false, reason: "UNKNOWN_ROOM" };
     if (room.hostPlayerId === expectedPlayerId) {
@@ -1544,6 +1824,9 @@ export class RoomManager {
     }
     const stashed = room.awaitingReconnect.get(expectedPlayerId);
     if (!stashed) return { ok: false, reason: "NO_STASHED_SESSION" };
+    if (this.isLobbyGracePast(stashed)) {
+      return { ok: false, reason: "NO_STASHED_SESSION" };
+    }
     if (
       stashed.displayName !== player.displayName ||
       stashed.avatarPresetId !== player.avatarPresetId
@@ -1560,13 +1843,19 @@ export class RoomManager {
 
     this.leaveSocketRoom(ws);
 
+    this.clearLobbyGraceTimer(room.id, expectedPlayerId);
     room.awaitingReconnect.delete(expectedPlayerId);
+
+    const joinedAtMs =
+      room.joinedAtByPlayerId.get(expectedPlayerId) ?? stashed.joinedAtMs;
 
     this.socketLobbyIdentity.set(ws, {
       playerId: expectedPlayerId,
       displayName: stashed.displayName,
       avatarPresetId: stashed.avatarPresetId,
+      joinedAtMs,
     });
+    room.joinedAtByPlayerId.set(expectedPlayerId, joinedAtMs);
     room.sockets.add(ws);
     this.socketToRoomId.set(ws, room.id);
     this.writeRoomToRedis(room, ROOM_TTL_ACTIVE_S);
@@ -1736,11 +2025,14 @@ export class RoomManager {
 
     this.leaveSocketRoom(ws);
     const playerId = randomUUID();
+    const joinedAtMs = Date.now();
     this.socketLobbyIdentity.set(ws, {
       playerId,
       displayName: player.displayName,
       avatarPresetId: player.avatarPresetId,
+      joinedAtMs,
     });
+    room.joinedAtByPlayerId.set(playerId, joinedAtMs);
     room.sockets.add(ws);
     this.socketToRoomId.set(ws, room.id);
     this.writeRoomToRedis(room, ROOM_TTL_ACTIVE_S);

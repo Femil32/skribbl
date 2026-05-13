@@ -119,6 +119,11 @@ export function serializeCastVoteKickCommand(
   return serializeClientCommand({ type: "castVoteKick", roomCode, targetPlayerId, vote });
 }
 
+/** Lobby-only voluntary leave (Story 8.5). */
+export function serializeLeaveRoomCommand(roomCode: string): string {
+  return serializeClientCommand({ type: "leaveRoom", roomCode });
+}
+
 /** Room chat / guesses (Epic 4). */
 export function serializeChatMessageCommand(roomId: string, text: string): string {
   return serializeClientCommand({ type: "chatMessage", roomId, text });

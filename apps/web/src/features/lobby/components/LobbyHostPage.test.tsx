@@ -12,6 +12,7 @@ const PLAYERS: LobbyRosterPlayer[] = [
     isHost: true,
     score: 0,
     connectionStatus: "connected",
+    joinedAtMs: 0,
   },
   {
     playerId: "p2",
@@ -20,6 +21,7 @@ const PLAYERS: LobbyRosterPlayer[] = [
     isHost: false,
     score: 0,
     connectionStatus: "connected",
+    joinedAtMs: 0,
   },
 ];
 
