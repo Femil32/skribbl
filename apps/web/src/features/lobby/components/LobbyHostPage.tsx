@@ -4,10 +4,14 @@ import type { AvatarPresetId } from "@skribbl/shared";
 import {
   DEFAULT_AVATAR_PRESET_ID,
   NICKNAME_MAX_GRAPHEMES,
+  assertChatMessageLength,
   countGraphemes,
   isMatchFlowPhase,
   isRosterScoreVisiblePhase,
+  sanitizeChatMessage,
   sanitizeDisplayName,
+  type LobbyChatMessageEvent,
+  type RoomPhase,
 } from "@skribbl/shared";
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
@@ -29,6 +33,7 @@ import { Stepper } from "@/features/lobby/components/primitives/Stepper";
 import { Toggle } from "@/features/lobby/components/primitives/Toggle";
 import { SectionLabel } from "@/features/lobby/components/primitives/SectionLabel";
 import { CreateRoomForm } from "@/features/lobby/components/CreateRoomForm";
+import { messageForProtocolErrorCode } from "@/features/lobby/lib/protocol-error-message";
 
 // Default accent colour — tomato from the DR palette
 const ACCENT = DR.accent.tomato;
@@ -63,6 +68,7 @@ function clipboardFailureMessage(err: unknown): string {
 type ChatMessage = { id: string; who: string; text: string; system?: boolean };
 
 
+
 export function LobbyHostPage() {
   const [nicknameRaw, setNicknameRaw] = useState("");
   const [avatarId, setAvatarId] = useState<AvatarPresetId>(
@@ -86,6 +92,26 @@ export function LobbyHostPage() {
 
   const shouldConnect = submitted && nicknameOk;
 
+  const [toast, setToast] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const [brushColor, setBrushColor] = useState("#0f172a");
+  const [brushWidthPx, setBrushWidthPx] = useState(4);
+
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatDraft, setChatDraft] = useState("");
+  const chatRef = useRef<HTMLDivElement>(null);
+
+  const onLobbyChatMessage = useCallback((ev: LobbyChatMessageEvent) => {
+    setChatMessages((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), who: ev.displayName, text: ev.message },
+    ]);
+  }, []);
+
+  const onLobbyProtocolNotice = useCallback((code: string) => {
+    setToast(messageForProtocolErrorCode(code));
+  }, []);
+
   const {
     state,
     transport,
@@ -97,11 +123,14 @@ export function LobbyHostPage() {
     returnToLobby,
     sendGameJsonLine,
     sendChat,
+    sendLobbyChat,
   } = useHostCreateRoom({
     shouldConnect,
     attemptId,
     displayName: nicknameTrimmed,
     avatarPresetId: avatarId,
+    onLobbyChatMessage,
+    onLobbyProtocolNotice,
   });
 
   const bumpConnectionAttempt = useCallback(() => {
@@ -111,16 +140,6 @@ export function LobbyHostPage() {
   const reloadFullPage = useCallback(() => {
     if (typeof window !== "undefined") window.location.reload();
   }, []);
-
-  const [toast, setToast] = useState<string | null>(null);
-  const [copyError, setCopyError] = useState<string | null>(null);
-  const [brushColor, setBrushColor] = useState("#0f172a");
-  const [brushWidthPx, setBrushWidthPx] = useState(4);
-
-  // Pre-game chat — UI only (backend wired in later story)
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatDraft, setChatDraft] = useState("");
-  const chatRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     chatRef.current?.scrollTo({ top: 99999 });
@@ -140,6 +159,23 @@ export function LobbyHostPage() {
       setChatMessages([{ id: crypto.randomUUID(), who: "system", text: `Room created · share the code: ${state.roomCode}`, system: true }]);
     }
   }, [state.status === "lobby" ? state.roomCode : null, seededCode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const prevLobbyPhaseRef = useRef<RoomPhase | null>(null);
+  useEffect(() => {
+    if (state.status !== "lobby") return;
+    const prev = prevLobbyPhaseRef.current;
+    prevLobbyPhaseRef.current = state.phase;
+    if (state.phase === "lobby" && prev !== null && prev !== "lobby") {
+      setChatMessages([
+        {
+          id: crypto.randomUUID(),
+          who: "system",
+          text: `Back in the lobby · room code ${state.roomCode}`,
+          system: true,
+        },
+      ]);
+    }
+  }, [state]);
 
   // Lobby settings from Zustand store
   const {
@@ -401,8 +437,18 @@ export function LobbyHostPage() {
   const ck = (x = 4, y = 5) => chunk(x, y, C.line);
 
   const sendChatMessage = () => {
-    if (!chatDraft.trim()) return;
-    setChatMessages((prev) => [...prev, { id: crypto.randomUUID(), who: state.displayName, text: chatDraft.trim() }]);
+    const trimmed = chatDraft.trim();
+    if (trimmed === "") return;
+    const sanitized = sanitizeChatMessage(trimmed);
+    if (sanitized === "") {
+      setToast(messageForProtocolErrorCode("CHAT_EMPTY"));
+      return;
+    }
+    if (!assertChatMessageLength(sanitized).ok) {
+      setToast(messageForProtocolErrorCode("MESSAGE_TOO_LONG"));
+      return;
+    }
+    sendLobbyChat(trimmed);
     setChatDraft("");
   };
 

@@ -100,6 +100,11 @@ export function serializeUpdateSettingsCommand(settings: Partial<RoomSettings>):
   return serializeClientCommand({ type: "updateSettings", settings });
 }
 
+/** Lobby-only chat (Story 8.3). Validates through shared schema before send. */
+export function serializeLobbyChatCommand(roomCode: string, message: string): string {
+  return serializeClientCommand({ type: "lobbyChat", roomCode, message });
+}
+
 /** Room chat / guesses (Epic 4). */
 export function serializeChatMessageCommand(roomId: string, text: string): string {
   return serializeClientCommand({ type: "chatMessage", roomId, text });

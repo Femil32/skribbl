@@ -7,13 +7,17 @@ import type { AvatarPresetId } from "@skribbl/shared";
 import {
   DEFAULT_AVATAR_PRESET_ID,
   NICKNAME_MAX_GRAPHEMES,
+  assertChatMessageLength,
   avatarPresets,
   countGraphemes,
   isMatchFlowPhase,
   isValidRoomCodeForJoin,
   normalizeRoomCode,
+  sanitizeChatMessage,
   sanitizeDisplayName,
+  type LobbyChatMessageEvent,
 } from "@skribbl/shared";
+import { messageForProtocolErrorCode } from "@/features/lobby/lib/protocol-error-message";
 import { useGuestJoinRoom } from "@/features/lobby/hooks/use-guest-join-room";
 import { LobbyConnectionBanner } from "@/features/lobby/components/LobbyConnectionBanner";
 import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster";
@@ -121,6 +125,33 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
 
   const activeJoinAttempt = manualCommitted && formatOk && nicknameOk;
 
+  const [joinLobbyDraft, setJoinLobbyDraft] = useState("");
+  const [guestLobbyLines, setGuestLobbyLines] = useState<
+    { id: string; who: string; text: string }[]
+  >([]);
+  const [guestLobbySnack, setGuestLobbySnack] = useState<string | null>(null);
+
+  const onGuestLobbyChatMessage = useCallback((ev: LobbyChatMessageEvent) => {
+    setGuestLobbyLines((prev) =>
+      [...prev, { id: crypto.randomUUID(), who: ev.displayName, text: ev.message }].slice(-400),
+    );
+  }, []);
+
+  const onGuestLobbyProtocolNotice = useCallback((code: string) => {
+    setGuestLobbySnack(messageForProtocolErrorCode(code));
+  }, []);
+
+  useEffect(() => {
+    setGuestLobbyLines([]);
+    setJoinLobbyDraft("");
+  }, [joinGeneration]);
+
+  useEffect(() => {
+    if (!guestLobbySnack) return;
+    const t = window.setTimeout(() => setGuestLobbySnack(null), 3200);
+    return () => window.clearTimeout(t);
+  }, [guestLobbySnack]);
+
   const {
     state: guestState,
     transport: guestTransport,
@@ -136,6 +167,8 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
     roomCodeInput: raw,
     displayName: nicknameTrimmed,
     avatarPresetId: avatarId,
+    onLobbyChatMessage: onGuestLobbyChatMessage,
+    onLobbyProtocolNotice: onGuestLobbyProtocolNotice,
   });
 
   const bumpGuestConnection = () => {
@@ -371,6 +404,71 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                   />
                   <p className="text-sm text-base-content/70 mt-3">
                     Match finished — scores are above. Wait for the host to play again.
+                  </p>
+                </div>
+              ) : guestState.phase === "lobby" ? (
+                <div className="w-full max-w-md mx-auto flex flex-col gap-3">
+                  <section
+                    aria-label="Lobby chat"
+                    className="flex flex-col gap-2 border border-base-300 rounded-box p-4 bg-base-200/40 min-h-[200px]"
+                  >
+                    <h3 className="text-sm font-semibold text-base-content/80 text-left">Lobby chat</h3>
+                    <ul className="flex-1 overflow-y-auto max-h-[220px] text-sm space-y-2 text-left list-none pl-0 m-0">
+                      {guestLobbyLines.map((m) => (
+                        <li key={m.id} className="break-words">
+                          <span className="font-semibold">{m.who}:</span> {m.text}
+                        </li>
+                      ))}
+                      {guestLobbyLines.length === 0 ? (
+                        <li className="text-base-content/60 italic">
+                          Nobody has said hello yet — you can start the thread.
+                        </li>
+                      ) : null}
+                    </ul>
+                    {guestLobbySnack ? (
+                      <p className="text-warning text-xs text-center" role="status">
+                        {guestLobbySnack}
+                      </p>
+                    ) : null}
+                    <form
+                      className="flex gap-2 items-center"
+                      onSubmit={(e: FormEvent<HTMLFormElement>) => {
+                        e.preventDefault();
+                        const text = joinLobbyDraft.trim();
+                        if (text === "" || guestTransport !== "live") return;
+                        const sanitized = sanitizeChatMessage(text);
+                        if (sanitized === "") {
+                          setGuestLobbySnack(messageForProtocolErrorCode("CHAT_EMPTY"));
+                          return;
+                        }
+                        if (!assertChatMessageLength(sanitized).ok) {
+                          setGuestLobbySnack(messageForProtocolErrorCode("MESSAGE_TOO_LONG"));
+                          return;
+                        }
+                        guestSendChat(text);
+                        setJoinLobbyDraft("");
+                      }}
+                    >
+                      <input
+                        className="input input-bordered input-sm flex-1"
+                        aria-label="Lobby chat message"
+                        value={joinLobbyDraft}
+                        onChange={(e) => setJoinLobbyDraft(e.target.value)}
+                        maxLength={4096}
+                        disabled={guestTransport !== "live"}
+                        placeholder="Message the lobby…"
+                      />
+                      <button
+                        type="submit"
+                        className="btn btn-primary btn-sm shrink-0"
+                        disabled={guestTransport !== "live"}
+                      >
+                        Send
+                      </button>
+                    </form>
+                  </section>
+                  <p className="text-sm text-base-content/70 text-center">
+                    The host controls when the match starts.
                   </p>
                 </div>
               ) : (

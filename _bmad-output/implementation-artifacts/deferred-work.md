@@ -39,3 +39,7 @@
 - No debounce on `sendSettings` in `LobbyHostPage` — rapid stepper input floods server with Redis writes + broadcasts; needs throttle/debounce wrapper.
 - `deserializeRoom` throws on corrupt JSON settings instead of falling back to defaults — no graceful degradation; pre-existing error handling pattern.
 - Client settings desync on server rejection — Zustand updated optimistically but no rollback when server rejects `updateSettings` (e.g. phase change mid-update); enhancement for future story.
+
+## Deferred from: code review of 8-3-pre-game-lobby-chat-relay (2026-05-13)
+
+- `lobbyChatSendTimestampsByPlayerId` in `room-manager.ts` retains Map keys for every `playerId` that ever sent lobby chat — low-risk process-memory growth; revisit for long-lived deployments or horizontal scale.

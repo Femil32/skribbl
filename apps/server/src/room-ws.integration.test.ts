@@ -1670,6 +1670,53 @@ describe("handleClientCommand + RoomManager", () => {
     if (lastGuest?.type === "chatPlayerMessage") expect(lastGuest.text).toBe("apple");
   });
 
+  it("lobbyChat relays lobbyChatMessage without chatCorrectGuess (Story 8.3)", () => {
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
+    const host = captureWs();
+    const guest = captureWs();
+
+    handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+    const created = parseServerEvent(JSON.parse(host.sent[0]!));
+    if (created.type !== "roomCreated") throw new Error("unexpected");
+    handleClientCommand(
+      guest.ws,
+      { type: "joinRoom", roomCode: created.roomCode, ...guestIdentity },
+      rm,
+    );
+
+    handleClientCommand(
+      guest.ws,
+      { type: "lobbyChat", roomCode: created.roomCode, message: "lobby-wave" },
+      rm,
+    );
+
+    const anyCg = [...host.sent, ...guest.sent].some((line) => {
+      const ev = parseServerEvent(JSON.parse(line));
+      return ev.type === "chatCorrectGuess";
+    });
+    expect(anyCg).toBe(false);
+
+    const lobbyOnHost = host.sent
+      .map((line) => parseServerEvent(JSON.parse(line)))
+      .filter((e): e is Extract<ReturnType<typeof parseServerEvent>, { type: "lobbyChatMessage" }> =>
+        e.type === "lobbyChatMessage",
+      );
+    const lobbyOnGuest = guest.sent
+      .map((line) => parseServerEvent(JSON.parse(line)))
+      .filter((e): e is Extract<ReturnType<typeof parseServerEvent>, { type: "lobbyChatMessage" }> =>
+        e.type === "lobbyChatMessage",
+      );
+    expect(lobbyOnHost.length).toBeGreaterThanOrEqual(1);
+    expect(lobbyOnGuest.length).toBeGreaterThanOrEqual(1);
+    const fromHost = lobbyOnHost[lobbyOnHost.length - 1]!;
+    const fromGuest = lobbyOnGuest[lobbyOnGuest.length - 1]!;
+    expect(fromHost.message).toBe("lobby-wave");
+    expect(fromGuest.message).toBe("lobby-wave");
+    expect(fromHost.playerId).toBe(fromGuest.playerId);
+    expect(fromHost.displayName).toBe(fromGuest.displayName);
+    expect(fromGuest.displayName).toBe(guestIdentity.displayName);
+  });
+
   it("duplicate exact guess masks repeated message as ••• for spectators (already awarded)", () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "2");
     vi.stubEnv("ROUND_MS", "80000");

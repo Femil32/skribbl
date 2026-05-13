@@ -1,4 +1,8 @@
 export {
+  wireCodeFromLobbyChatZodError,
+  lobbyChatCommandSchema,
+  LOBBY_CHAT_ZOD_ISSUE_CHAT_EMPTY,
+  LOBBY_CHAT_ZOD_ISSUE_MESSAGE_TOO_LONG,
   clientCommandSchema,
   serverEventSchema,
   roomPhaseSchema,
@@ -36,7 +40,9 @@ export {
   type RoomSettings,
   type WordPackId,
   type SettingsUpdatedEvent,
+  type LobbyChatMessageEvent,
   type UpdateSettings,
+  type LobbyChatCommand,
 } from "./schemas.js";
 export {
   assertChatMessageLength,

@@ -2,7 +2,11 @@ import http from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
 import { WebSocketServer } from "ws";
 import pino from "pino";
-import { safeParseClientCommand } from "@skribbl/shared";
+import {
+  lobbyChatCommandSchema,
+  safeParseClientCommand,
+  wireCodeFromLobbyChatZodError,
+} from "@skribbl/shared";
 import {
   MAX_WS_MESSAGE_BYTES,
   inboundWsMessageByteLength,
@@ -146,6 +150,24 @@ export async function createGameServer() {
       }
       const parsed = safeParseClientCommand(body);
       if (!parsed.success) {
+        const isLobbyChat =
+          typeof body === "object" &&
+          body !== null &&
+          (body as { type?: unknown }).type === "lobbyChat";
+        if (isLobbyChat) {
+          const lobbyTry = lobbyChatCommandSchema.safeParse(body);
+          if (!lobbyTry.success) {
+            const wire = wireCodeFromLobbyChatZodError(lobbyTry.error);
+            if (wire === "MESSAGE_TOO_LONG") {
+              sendProtocolError(ws, "MESSAGE_TOO_LONG", "Message is too long.", roomManager);
+              return;
+            }
+            if (wire === "CHAT_EMPTY") {
+              sendProtocolError(ws, "CHAT_EMPTY", "Enter something to send.", roomManager);
+              return;
+            }
+          }
+        }
         sendProtocolError(ws, "BAD_PAYLOAD", "Message validation failed", roomManager);
         return;
       }

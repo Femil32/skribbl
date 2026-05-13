@@ -41,6 +41,23 @@ function parseLobbyPlayer(cmd: {
   };
 }
 
+function lobbyChatErrorDetail(code: string): string {
+  switch (code) {
+    case "NOT_IN_ROOM":
+      return "You are not in that room.";
+    case "MATCH_IN_PROGRESS":
+      return "Lobby chat is only available before the match starts.";
+    case "MESSAGE_TOO_LONG":
+      return "Message is too long.";
+    case "RATE_LIMITED":
+      return "You are sending messages too quickly. Wait a moment.";
+    case "CHAT_EMPTY":
+      return "Message was empty after cleanup.";
+    default:
+      return "Message could not be sent.";
+  }
+}
+
 function chatMessageErrorDetail(code: string): string {
   switch (code) {
     case "BAD_ROOM":
@@ -456,6 +473,13 @@ export function handleClientCommand(
       const outcome = roomManager.updateSettings(ws, cmd.settings);
       if (!outcome.ok) {
         sendProtocolError(ws, outcome.code, outcome.detail, roomManager);
+      }
+      return;
+    }
+    case "lobbyChat": {
+      const outcome = roomManager.applyLobbyChat(ws, cmd.roomCode, cmd.message);
+      if (!outcome.ok) {
+        sendProtocolError(ws, outcome.code, lobbyChatErrorDetail(outcome.code), roomManager);
       }
       return;
     }

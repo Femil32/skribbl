@@ -3,6 +3,7 @@
 import type {
   AvatarPresetId,
   CanvasReplayEvent,
+  LobbyChatMessageEvent,
   LobbyRosterPlayer,
   RoomPhase,
   ServerEvent,
@@ -30,6 +31,7 @@ import {
   serializeJoinRoomCommand,
   serializeReconnectPlayerCommand,
   serializeChatMessageCommand,
+  serializeLobbyChatCommand,
 } from "@/lib/ws-client";
 import {
   appendDrawingHintRows,
@@ -96,6 +98,8 @@ export type UseGuestJoinRoomArgs = {
   roomCodeInput: string;
   displayName: string;
   avatarPresetId?: AvatarPresetId;
+  onLobbyProtocolNotice?: (code: string) => void;
+  onLobbyChatMessage?: (event: LobbyChatMessageEvent) => void;
 };
 
 export type UseGuestJoinRoomResult = {
@@ -128,6 +132,18 @@ const TERMINAL_PROTOCOL_CODES_AFTER_JOINED = new Set([
   "HOST_USE_RECONNECT_HOST",
 ]);
 
+/**
+ * Recoverable lobby-chat protocol errors (Story 8.3).
+ * Both `onLobbyProtocolNotice` (lobby-panel snack) and `setTransportErrorMessage` (connection banner) are set on purpose so the user sees feedback in-context and in the shared banner.
+ */
+const LOBBY_CHAT_RECOVERABLE = new Set([
+  "RATE_LIMITED",
+  "MESSAGE_TOO_LONG",
+  "MATCH_IN_PROGRESS",
+  "NOT_IN_ROOM",
+  "CHAT_EMPTY",
+]);
+
 export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomResult {
   const {
     connectionAttemptId,
@@ -135,6 +151,8 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
     roomCodeInput,
     displayName,
     avatarPresetId,
+    onLobbyProtocolNotice,
+    onLobbyChatMessage,
   } = args;
   const wsUrl = resolveGameWebSocketUrl();
   const normalized = normalizeRoomCode(roomCodeInput);
@@ -146,10 +164,22 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
     undefined,
   );
 
+  const guestJoinedSnapshotRef = useRef<Extract<GuestJoinLobbyState, { status: "joined" }> | null>(
+    null,
+  );
+
+  useEffect(() => {
+    guestJoinedSnapshotRef.current = state.status === "joined" ? state : null;
+  }, [state]);
+
   const reachedJoinedRef = useRef(false);
   const closedWhileJoinedRef = useRef(false);
   const wsRef = useRef<WebSocket | null>(null);
   const joinedRoomIdRef = useRef<string | null>(null);
+  const onLobbyProtocolNoticeRef = useRef(onLobbyProtocolNotice);
+  onLobbyProtocolNoticeRef.current = onLobbyProtocolNotice;
+  const onLobbyChatMessageRef = useRef(onLobbyChatMessage);
+  onLobbyChatMessageRef.current = onLobbyChatMessage;
   const frozenIdentityRef = useRef<{ displayName: string; avatarPresetId: AvatarPresetId } | null>(null);
   /** True when the current connect attempt is a page-reload reconnect from sessionStorage. */
   const pageReloadReconnectRef = useRef(false);
@@ -174,10 +204,14 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
   const sendChat = useCallback((text: string) => {
     const w = wsRef.current;
     if (!w || w.readyState !== WebSocket.OPEN) return;
-    const rid = joinedRoomIdRef.current;
-    if (!rid) return;
+    const snap = guestJoinedSnapshotRef.current;
+    if (!snap) return;
     try {
-      w.send(serializeChatMessageCommand(rid, text));
+      if (snap.phase === "lobby") {
+        w.send(serializeLobbyChatCommand(snap.roomCode, text));
+      } else {
+        w.send(serializeChatMessageCommand(snap.roomId, text));
+      }
     } catch {
       /* ignore */
     }
@@ -516,6 +550,11 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
             });
             return;
           }
+          if (LOBBY_CHAT_RECOVERABLE.has(code)) {
+            onLobbyProtocolNoticeRef.current?.(code);
+            setTransportErrorMessage(messageForProtocolErrorCode(code));
+            return;
+          }
           // Unknown post-join error — surface as a banner message without clearing state.
           setTransportErrorMessage(messageForProtocolErrorCode(code));
           return;
@@ -618,6 +657,11 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
             if (r.roomId !== prev.roomId) return prev;
             return { ...prev, remoteCanvasCommits: [] };
           });
+          return;
+        }
+        case "lobbyChatMessage": {
+          const ev = parsed.data;
+          onLobbyChatMessageRef.current?.(ev);
           return;
         }
         default: {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { WebSocket } from "ws";
 import type { AvatarPresetId } from "@skribbl/shared";
 import {
@@ -149,6 +149,90 @@ describe("RoomManager", () => {
     if (!out.ok) throw new Error("unexpected");
     expect(out.room.hostSocket).toBe(h2);
     expect(m.getLobbySession(h2)?.playerId).toBe(createdId);
+  });
+
+  describe("applyLobbyChat (Story 8.3)", () => {
+    it("broadcasts sanitized lobbyChatMessage to all peers including sender", () => {
+      const m = new RoomManager(8, testWordBank(), stubRedis());
+      const sentHost: string[] = [];
+      const sentGuest: string[] = [];
+      const hostWs = { send: (msg: string) => sentHost.push(msg) } as unknown as WebSocket;
+      const guestWs = { send: (msg: string) => sentGuest.push(msg) } as unknown as WebSocket;
+
+      const room = m.createRoom(hostWs, player("Ho"));
+      expect(m.getRoomForSocket(hostWs)).toBeDefined();
+      expect(m.getLobbySession(hostWs)).toBeDefined();
+      m.joinRoom(guestWs, room.code, player("Gu"));
+
+      const out = m.applyLobbyChat(hostWs, room.code, "  hi  ");
+      expect(out).toEqual({ ok: true });
+
+      const hostEv = sentHost.map((s) => JSON.parse(s)).find((x) => x.type === "lobbyChatMessage");
+      const guestEv = sentGuest.map((s) => JSON.parse(s)).find((x) => x.type === "lobbyChatMessage");
+      expect(hostEv.message).toBe("hi");
+      expect(guestEv.message).toBe("hi");
+      expect(hostEv.playerId).toBe(m.getLobbySession(hostWs)?.playerId);
+    });
+
+    it("returns NOT_IN_ROOM when roomCode mismatches socket room", () => {
+      const m = new RoomManager(8, testWordBank(), stubRedis());
+      const hostWs = stubSocket();
+      const room = m.createRoom(hostWs, player("Ho"));
+      const other = normalizeRoomCode("AAAAAA");
+      expect(other.length === 6 && isValidRoomCodeForJoin(other)).toBe(true);
+      expect(room.code.toUpperCase() === other).toBe(false);
+      const out = m.applyLobbyChat(hostWs, other, "x");
+      expect(out).toEqual({ ok: false, code: "NOT_IN_ROOM" });
+    });
+
+    it("returns NOT_IN_ROOM when socket has no room", () => {
+      const m = new RoomManager(8, testWordBank(), stubRedis());
+      const loner = stubSocket();
+      const out = m.applyLobbyChat(loner, "AAAAAA", "x");
+      expect(out).toEqual({ ok: false, code: "NOT_IN_ROOM" });
+    });
+
+    it("returns MATCH_IN_PROGRESS when phase left lobby", () => {
+      const m = new RoomManager(8, testWordBank(), stubRedis());
+      const hostWs = stubSocket();
+      const room = m.createRoom(hostWs, player("Ho"));
+      room.phase = "matchStarting";
+      expect(m.applyLobbyChat(hostWs, room.code, "x")).toEqual({
+        ok: false,
+        code: "MATCH_IN_PROGRESS",
+      });
+    });
+
+    it("returns MESSAGE_TOO_LONG after sanitize for oversized message", () => {
+      const m = new RoomManager(8, testWordBank(), stubRedis());
+      const hostWs = stubSocket();
+      const room = m.createRoom(hostWs, player("Ho"));
+      const big = "x".repeat(400);
+      const out = m.applyLobbyChat(hostWs, room.code, big);
+      expect(out).toEqual({ ok: false, code: "MESSAGE_TOO_LONG" });
+    });
+
+    it("returns RATE_LIMITED on 6th message within 3s window (Story 8.3 AC3)", () => {
+      vi.useFakeTimers();
+      try {
+        const m = new RoomManager(8, testWordBank(), stubRedis());
+        const hostWs = stubSocket();
+        const room = m.createRoom(hostWs, player("Ho"));
+        expect(m.getRoomForSocket(hostWs)).toBeDefined();
+        expect(m.getLobbySession(hostWs)).toBeDefined();
+        for (let i = 0; i < 5; i++) {
+          expect(m.applyLobbyChat(hostWs, room.code, `m${i}`)).toEqual({ ok: true });
+        }
+        expect(m.applyLobbyChat(hostWs, room.code, "six")).toEqual({
+          ok: false,
+          code: "RATE_LIMITED",
+        });
+        vi.advanceTimersByTime(3001);
+        expect(m.applyLobbyChat(hostWs, room.code, "after-window")).toEqual({ ok: true });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe("updateSettings (Story 8.2)", () => {

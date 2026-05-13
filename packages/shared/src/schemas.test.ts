@@ -3,10 +3,15 @@ import {
   clientCommandSchema,
   isMatchFlowPhase,
   isRosterScoreVisiblePhase,
+  lobbyChatCommandSchema,
+  LOBBY_CHAT_ZOD_ISSUE_CHAT_EMPTY,
   lobbyRosterPlayerSchema,
+  LOBBY_CHAT_ZOD_ISSUE_MESSAGE_TOO_LONG,
   roomSettingsSchema,
   safeParseServerEvent,
+  wireCodeFromLobbyChatZodError,
   serializeClientCommand,
+  serializeServerEvent,
   serverEventSchema,
 } from "./schemas.js";
 
@@ -137,6 +142,110 @@ describe("clientCommandSchema", () => {
       lineWidthPx: 2,
     });
     expect(JSON.parse(json).type).toBe("drawingStrokeChunk");
+  });
+});
+
+describe("lobbyChat command/event (Story 8.3)", () => {
+  it("accepts lobbyChat via clientCommandSchema", () => {
+    const r = clientCommandSchema.safeParse({
+      type: "lobbyChat",
+      roomCode: "ABCDEF",
+      message: "hello there",
+    });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data).toMatchObject({
+      type: "lobbyChat",
+      roomCode: "ABCDEF",
+      message: "hello there",
+    });
+  });
+
+  it("rejects lobbyChat over 200 graphemes with MESSAGE_TOO_LONG issue", () => {
+    const r = lobbyChatCommandSchema.safeParse({
+      type: "lobbyChat",
+      roomCode: "ABCDEF",
+      message: "a".repeat(201),
+    });
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    const hit = r.error.issues.some((i) => i.message === LOBBY_CHAT_ZOD_ISSUE_MESSAGE_TOO_LONG);
+    expect(hit).toBe(true);
+  });
+
+  it("rejects lobbyChat empty-after-sanitize with CHAT_EMPTY issue", () => {
+    const r = lobbyChatCommandSchema.safeParse({
+      type: "lobbyChat",
+      roomCode: "ABCDEF",
+      message: "   ",
+    });
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    const hit = r.error.issues.some((i) => i.message === LOBBY_CHAT_ZOD_ISSUE_CHAT_EMPTY);
+    expect(hit).toBe(true);
+  });
+
+  it("rejects lobbyChat with unknown keys (strict)", () => {
+    expect(
+      clientCommandSchema.safeParse({
+        type: "lobbyChat",
+        roomCode: "ABCDEF",
+        message: "x",
+        rogue: true,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("serializeClientCommand validates lobbyChat", () => {
+    const json = serializeClientCommand({
+      type: "lobbyChat",
+      roomCode: "ABCDEF",
+      message: "ok",
+    });
+    expect(JSON.parse(json)).toMatchObject({ type: "lobbyChat", roomCode: "ABCDEF", message: "ok" });
+  });
+
+  it("accepts lobbyChatMessage event and serializeServerEvent round-trip", () => {
+    const ev = {
+      type: "lobbyChatMessage" as const,
+      playerId: "p1",
+      displayName: "Pat",
+      message: "hi",
+      timestamp: 1700000000000,
+    };
+    expect(serverEventSchema.safeParse(ev).success).toBe(true);
+    const raw = serializeServerEvent(ev);
+    expect(JSON.parse(raw)).toEqual(ev);
+  });
+
+  it("wireCodeFromLobbyChatZodError maps validation issues to wire codes only", () => {
+    const tooLong = lobbyChatCommandSchema.safeParse({
+      type: "lobbyChat",
+      roomCode: "ABCDEF",
+      message: "a".repeat(201),
+    });
+    expect(tooLong.success).toBe(false);
+    if (tooLong.success) return;
+    expect(wireCodeFromLobbyChatZodError(tooLong.error)).toBe("MESSAGE_TOO_LONG");
+
+    const empty = lobbyChatCommandSchema.safeParse({
+      type: "lobbyChat",
+      roomCode: "ABCDEF",
+      message: "   ",
+    });
+    expect(empty.success).toBe(false);
+    if (empty.success) return;
+    expect(wireCodeFromLobbyChatZodError(empty.error)).toBe("CHAT_EMPTY");
+
+    const strict = lobbyChatCommandSchema.safeParse({
+      type: "lobbyChat",
+      roomCode: "ABCDEF",
+      message: "x",
+      rogue: true,
+    } as unknown);
+    expect(strict.success).toBe(false);
+    if (strict.success) return;
+    expect(wireCodeFromLobbyChatZodError(strict.error)).toBe(null);
   });
 });
 

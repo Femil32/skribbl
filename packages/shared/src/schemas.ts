@@ -7,8 +7,63 @@
  * Discriminant field on the wire: `type` (stable for demux in server handlers and client).
  */
 
-import { z } from "zod";
-import { avatarPresetIdSchema } from "./player-identity.js";
+import { z, type ZodError } from "zod";
+import {
+  CHAT_MESSAGE_MAX_GRAPHEMES,
+  sanitizeChatMessage,
+} from "./chat-text.js";
+import {
+  avatarPresetIdSchema,
+  countGraphemes,
+} from "./player-identity.js";
+
+/** Zod refinement issue messages — echoed by `@skribbl/server` as protocol `error.code` where applicable */
+export const LOBBY_CHAT_ZOD_ISSUE_CHAT_EMPTY = "CHAT_EMPTY";
+export const LOBBY_CHAT_ZOD_ISSUE_MESSAGE_TOO_LONG = "MESSAGE_TOO_LONG";
+
+/**
+ * Maps `lobbyChatCommandSchema.parse` errors to protocol `error.code` values.
+ * Returns `null` for unrelated issues (unknown fields, wrong types, etc.).
+ */
+export function wireCodeFromLobbyChatZodError(
+  error: ZodError,
+): "MESSAGE_TOO_LONG" | "CHAT_EMPTY" | null {
+  for (const issue of error.issues) {
+    if (issue.code !== z.ZodIssueCode.custom) continue;
+    if (issue.message === LOBBY_CHAT_ZOD_ISSUE_MESSAGE_TOO_LONG) return "MESSAGE_TOO_LONG";
+    if (issue.message === LOBBY_CHAT_ZOD_ISSUE_CHAT_EMPTY) return "CHAT_EMPTY";
+  }
+  return null;
+}
+
+/**
+ * Validates `lobbyChat` payloads (Story 8.3). Unknown keys rejected via `.strict()`.
+ */
+export const lobbyChatCommandSchema = z
+  .object({
+    type: z.literal("lobbyChat"),
+    roomCode: z.string(),
+    message: z.string(),
+  })
+  .strict()
+  .superRefine((data, ctx) => {
+    const sanitized = sanitizeChatMessage(data.message);
+    if (sanitized.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: LOBBY_CHAT_ZOD_ISSUE_CHAT_EMPTY,
+        path: ["message"],
+      });
+      return;
+    }
+    if (countGraphemes(sanitized) > CHAT_MESSAGE_MAX_GRAPHEMES) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: LOBBY_CHAT_ZOD_ISSUE_MESSAGE_TOO_LONG,
+        path: ["message"],
+      });
+    }
+  });
 
 // ─── Room Settings (Story 8.2) ───────────────────────────────────────────────
 
@@ -197,6 +252,8 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("updateSettings"),
     settings: roomSettingsSchema.partial(),
   }),
+  /** Lobby-only text relay (Story 8.3). Sanitized grapheme length enforced in schema. */
+  lobbyChatCommandSchema,
 ]);
 
 const drawingCanvasOpPayloadSchema = z.discriminatedUnion("op", [
@@ -458,6 +515,14 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     roomId: z.string(),
     settings: roomSettingsSchema,
   }),
+  /** Ephemeral relay while `phase === lobby` (Story 8.3); `message` is server-sanitized text. */
+  z.object({
+    type: z.literal("lobbyChatMessage"),
+    playerId: z.string(),
+    displayName: z.string(),
+    message: z.string(),
+    timestamp: z.number().int().nonnegative(),
+  }),
 ]);
 
 export type ClientCommand = z.infer<typeof clientCommandSchema>;
@@ -477,7 +542,9 @@ export type CanvasReplayEvent = DrawingStrokeCommitted | DrawingCanvasOpCommitte
 export type RoomHydrateEvent = Extract<ServerEvent, { type: "roomHydrate" }>;
 export type CanvasOpLogResyncEvent = Extract<ServerEvent, { type: "canvasOpLogResync" }>;
 export type SettingsUpdatedEvent = Extract<ServerEvent, { type: "settingsUpdated" }>;
+export type LobbyChatMessageEvent = Extract<ServerEvent, { type: "lobbyChatMessage" }>;
 export type UpdateSettings = Extract<ClientCommand, { type: "updateSettings" }>;
+export type LobbyChatCommand = Extract<ClientCommand, { type: "lobbyChat" }>;
 
 export function safeParseClientCommand(data: unknown) {
   return clientCommandSchema.safeParse(data);

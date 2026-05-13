@@ -108,6 +108,8 @@ export class RoomManager {
 
   private readonly socketToRoomId = new Map<WebSocket, string>();
   private readonly socketLobbyIdentity = new Map<WebSocket, LobbySessionIdentity>();
+  /** Rolling-window timestamps for lobby chat (Story 8.3) — keyed by stable `playerId`. */
+  private readonly lobbyChatSendTimestampsByPlayerId = new Map<string, number[]>();
   /** Cleared when a room is destroyed or match chain reschedules. */
   private readonly matchTimersByRoomId = new Map<string, ReturnType<typeof setTimeout>[]>();
 
@@ -832,6 +834,64 @@ export class RoomManager {
 
     this.broadcastPlayerChatWithPerRecipientText(room, senderId, senderName, sanitized, () => sanitized);
     return { ok: true };
+  }
+
+  /**
+   * Lobby-only chat relay (Story 8.3). Does not touch match chat transcript or guess adjudication.
+   */
+  applyLobbyChat(
+    ws: WebSocket,
+    roomCodeRaw: string,
+    rawMessage: string,
+  ): { ok: true } | { ok: false; code: string } {
+    const room = this.getRoomForSocket(ws);
+    const session = this.getLobbySession(ws);
+    if (!room || !session) return { ok: false, code: "NOT_IN_ROOM" };
+
+    const normalizedCode = normalizeRoomCode(roomCodeRaw);
+    if (normalizedCode !== normalizeRoomCode(room.code)) {
+      return { ok: false, code: "NOT_IN_ROOM" };
+    }
+
+    if (room.phase !== "lobby") return { ok: false, code: "MATCH_IN_PROGRESS" };
+
+    const sanitized = sanitizeChatMessage(rawMessage);
+    if (sanitized === "") return { ok: false, code: "CHAT_EMPTY" };
+    const len = assertChatMessageLength(sanitized);
+    if (!len.ok) return { ok: false, code: "MESSAGE_TOO_LONG" };
+
+    if (!this.tryConsumeLobbyChatRateBudget(session.playerId)) {
+      return { ok: false, code: "RATE_LIMITED" };
+    }
+
+    const ts = Date.now();
+    const evt: ServerEvent = {
+      type: "lobbyChatMessage",
+      playerId: session.playerId,
+      displayName: session.displayName,
+      message: sanitized,
+      timestamp: ts,
+    };
+    for (const sock of room.sockets) {
+      this.sendEvent(sock, evt);
+    }
+
+    return { ok: true };
+  }
+
+  private tryConsumeLobbyChatRateBudget(playerId: string): boolean {
+    const now = Date.now();
+    const windowMs = 3000;
+    const maxSends = 5;
+    let stamps = this.lobbyChatSendTimestampsByPlayerId.get(playerId) ?? [];
+    stamps = stamps.filter((t) => now - t < windowMs);
+    if (stamps.length >= maxSends) {
+      this.lobbyChatSendTimestampsByPlayerId.set(playerId, stamps);
+      return false;
+    }
+    stamps.push(now);
+    this.lobbyChatSendTimestampsByPlayerId.set(playerId, stamps);
+    return true;
   }
 
   private broadcastPlayerChatWithPerRecipientText(

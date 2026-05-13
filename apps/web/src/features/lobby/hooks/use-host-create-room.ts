@@ -3,6 +3,7 @@
 import type {
   AvatarPresetId,
   CanvasReplayEvent,
+  LobbyChatMessageEvent,
   LobbyRosterPlayer,
   RoomPhase,
   ServerEvent,
@@ -27,6 +28,7 @@ import {
   serializeChooseWordCommand,
   serializeReturnToLobbyCommand,
   serializeChatMessageCommand,
+  serializeLobbyChatCommand,
 } from "@/lib/ws-client";
 import { useLobbySettingsStore } from "@/features/lobby/stores/lobby-settings-store";
 import {
@@ -95,6 +97,10 @@ export type UseHostCreateRoomParams = {
   attemptId: number;
   displayName: string;
   avatarPresetId?: AvatarPresetId;
+  /** Optional: structured lobby-chat errors surfaced as toast/snackbar (Story 8.3). */
+  onLobbyProtocolNotice?: (code: string) => void;
+  /** Optional: server **`lobbyChatMessage`** relay (Story 8.3). */
+  onLobbyChatMessage?: (event: LobbyChatMessageEvent) => void;
 };
 
 export type UseHostCreateRoomResult = {
@@ -115,6 +121,8 @@ export type UseHostCreateRoomResult = {
   sendGameJsonLine: (raw: string) => void;
   /** Send a chat line / guess (Epic 4). */
   sendChat: (text: string) => void;
+  /** Lobby-phase chat relay only (Story 8.3). */
+  sendLobbyChat: (text: string) => void;
 };
 
 /** Avoid unbounded `remoteCanvasCommits` growth during long drawing phases. */
@@ -129,6 +137,15 @@ const TERMINAL_PROTOCOL_CODES_AFTER_LOBBY = new Set([
   "ALREADY_CONNECTED",
 ]);
 
+/** Recoverable structured errors — server fault, not disconnect (Story 8.3 lobby chat). */
+const LOBBY_CHAT_RECOVERABLE = new Set([
+  "RATE_LIMITED",
+  "MESSAGE_TOO_LONG",
+  "MATCH_IN_PROGRESS",
+  "NOT_IN_ROOM",
+  "CHAT_EMPTY",
+]);
+
 type HostResumeContext = {
   roomId: string;
   playerId: string;
@@ -139,7 +156,8 @@ type HostResumeContext = {
 export function useHostCreateRoom(
   params: UseHostCreateRoomParams,
 ): UseHostCreateRoomResult {
-  const { shouldConnect, attemptId, displayName, avatarPresetId } = params;
+  const { shouldConnect, attemptId, displayName, avatarPresetId, onLobbyProtocolNotice, onLobbyChatMessage } =
+    params;
   const wsUrl = resolveGameWebSocketUrl();
   const [state, setState] = useState<HostLobbyState>({ status: "idle" });
   const [transport, setTransport] = useState<LobbyTransportPhase>("idle");
@@ -152,6 +170,10 @@ export function useHostCreateRoom(
   const reachedLobbyRef = useRef(false);
   const wsRef = useRef<WebSocket | null>(null);
   const stateSnapshotRef = useRef<HostLobbyState>(state);
+  const onLobbyProtocolNoticeRef = useRef(onLobbyProtocolNotice);
+  onLobbyProtocolNoticeRef.current = onLobbyProtocolNotice;
+  const onLobbyChatMessageRef = useRef(onLobbyChatMessage);
+  onLobbyChatMessageRef.current = onLobbyChatMessage;
 
   useEffect(() => {
     stateSnapshotRef.current = state;
@@ -178,6 +200,19 @@ export function useHostCreateRoom(
       /* ignore */
     }
   }, []);
+
+  const sendLobbyChat = useCallback((text: string) => {
+    const w = wsRef.current;
+    if (!w || w.readyState !== WebSocket.OPEN) return;
+    const snap = stateSnapshotRef.current;
+    if (snap.status !== "lobby" || snap.phase !== "lobby") return;
+    try {
+      w.send(serializeLobbyChatCommand(snap.roomCode, text));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   /** Set when the socket closes after the host reached the lobby; drives “reconnecting” copy on retry. */
   const closedWhileInLobbyRef = useRef(false);
   /** Latest successful `roomCreated` — used for `reconnectHost` after a transport drop. */
@@ -503,6 +538,10 @@ export function useHostCreateRoom(
             });
             return;
           }
+          if (LOBBY_CHAT_RECOVERABLE.has(err.code)) {
+            onLobbyProtocolNoticeRef.current?.(err.code);
+            return;
+          }
           setState((prev) => {
             if (prev.status !== "lobby") return prev;
             return { ...prev, isStartPending: false };
@@ -615,6 +654,11 @@ export function useHostCreateRoom(
           });
           return;
         }
+        case "lobbyChatMessage": {
+          const ev = parsed.data;
+          onLobbyChatMessageRef.current?.(ev);
+          return;
+        }
         default: {
           const _exhaustive: never = parsed.data;
           return _exhaustive;
@@ -705,6 +749,7 @@ export function useHostCreateRoom(
       returnToLobby,
       sendGameJsonLine,
       sendChat,
+      sendLobbyChat,
     };
   }
 
@@ -720,6 +765,7 @@ export function useHostCreateRoom(
       returnToLobby,
       sendGameJsonLine,
       sendChat,
+      sendLobbyChat,
     };
   }
 
@@ -735,6 +781,7 @@ export function useHostCreateRoom(
       returnToLobby,
       sendGameJsonLine,
       sendChat,
+      sendLobbyChat,
     };
   }
 
@@ -749,5 +796,6 @@ export function useHostCreateRoom(
     returnToLobby,
     sendGameJsonLine,
     sendChat,
+    sendLobbyChat,
   };
 }

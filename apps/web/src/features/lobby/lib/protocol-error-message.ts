@@ -45,6 +45,14 @@ export function messageForProtocolErrorCode(code: string): string {
       return "That message is too long for chat.";
     case "CHAT_EMPTY":
       return "Enter something to send.";
+    case "MATCH_IN_PROGRESS":
+      return "That cannot be changed or sent while a match is in progress.";
+    case "NOT_IN_ROOM":
+      return "Room connection mismatch. Try reconnecting.";
+    case "MESSAGE_TOO_LONG":
+      return "That message is too long for chat.";
+    case "RATE_LIMITED":
+      return "You are sending messages too quickly. Wait a moment.";
     case "BAD_ROOM":
       return "That room does not match your connection. Try reconnecting.";
     case "NO_WORD_OFFER":
