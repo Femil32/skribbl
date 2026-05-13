@@ -1,4 +1,4 @@
-import type { AvatarPresetId, ClientCommand } from "@skribbl/shared";
+import type { AvatarPresetId, ClientCommand, RoomSettings } from "@skribbl/shared";
 import {
   clientCommandSchema,
   serializeClientCommand,
@@ -93,6 +93,11 @@ export function serializeChooseWordCommand(choiceIndex: 0 | 1 | 2): string {
 /** Host-only: leave post-match scoreboard and reset room to lobby (Story 2.7). */
 export function serializeReturnToLobbyCommand(): string {
   return serializeClientCommand({ type: "returnToLobby" });
+}
+
+/** Host-only: update lobby match settings (Story 8.2). */
+export function serializeUpdateSettingsCommand(settings: Partial<RoomSettings>): string {
+  return serializeClientCommand({ type: "updateSettings", settings });
 }
 
 /** Room chat / guesses (Epic 4). */

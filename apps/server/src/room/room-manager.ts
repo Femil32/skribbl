@@ -23,6 +23,7 @@ import {
   type CanvasReplayEvent,
   type DrawingCanvasOpPayload,
   type ServerEvent,
+  type RoomSettings,
 } from "@skribbl/shared";
 import type { WebSocket } from "ws";
 import {
@@ -147,6 +148,7 @@ export class RoomManager {
       drawingPhaseStartedAtMs: room.drawingPhaseStartedAtMs,
       drawingPhaseAwardedGuesserIds: room.drawingPhaseAwardedGuesserIds,
       scoresByPlayerId: room.scoresByPlayerId,
+      settings: room.settings,
     });
     void this.redis
       .pipeline()
@@ -976,6 +978,34 @@ export class RoomManager {
     for (const sock of room.sockets) this.sendEvent(sock, payload);
     this.scheduleMatchFlow(room);
     this.writeRoomToRedis(room, ROOM_TTL_ACTIVE_S);
+    return { ok: true };
+  }
+
+  updateSettings(
+    actor: WebSocket,
+    partial: Partial<RoomSettings>,
+  ): { ok: true } | { ok: false; code: string; detail?: string } {
+    const room = this.getRoomForSocket(actor);
+    if (!room) return { ok: false, code: "NOT_IN_ROOM" };
+    if (room.hostSocket !== actor) return { ok: false, code: "NOT_HOST" };
+    if (room.phase !== "lobby") return { ok: false, code: "MATCH_IN_PROGRESS" };
+    if (Object.keys(partial).length === 0) return { ok: true };
+    if (
+      partial.maxPlayers !== undefined &&
+      partial.maxPlayers < room.sockets.size
+    ) {
+      return { ok: false, code: "VALIDATION_ERROR", detail: "maxPlayers below current count" };
+    }
+    const knownKeys: (keyof RoomSettings)[] = ["rounds", "drawTime", "maxPlayers", "wordPack", "showHints", "skipAfk", "allowVoice"];
+    const filtered = Object.fromEntries(
+      knownKeys.filter((k) => k in partial).map((k) => [k, partial[k]])
+    ) as Partial<RoomSettings>;
+    room.settings = { ...room.settings, ...filtered };
+    this.writeRoomToRedis(room);
+    const event: ServerEvent = { type: "settingsUpdated", roomId: room.id, settings: room.settings };
+    for (const ws of room.sockets) {
+      this.sendEvent(ws, event);
+    }
     return { ok: true };
   }
 

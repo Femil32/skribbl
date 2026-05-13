@@ -1,7 +1,8 @@
-import type { AvatarPresetId } from "@skribbl/shared";
+import type { AvatarPresetId, RoomSettings } from "@skribbl/shared";
 import { DEFAULT_AVATAR_PRESET_ID, isValidAvatarPresetId } from "@skribbl/shared";
 import type { RoomPhase } from "@skribbl/shared";
 import type { ChatTranscriptFanoutRow } from "../../room/chat-transcript.js";
+import { DEFAULT_ROOM_SETTINGS } from "../../config/game.js";
 
 export const ROOM_TTL_IDLE_S = 1800; // 30 min idle
 export const ROOM_TTL_ACTIVE_S = 7200; // 2h active
@@ -75,6 +76,7 @@ export interface PersistedRoomFields {
   drawingPhaseStartedAtMs: number | null;
   drawingPhaseAwardedGuesserIds: Set<string> | null;
   scoresByPlayerId: Record<string, number>;
+  settings: RoomSettings;
 }
 
 export function serializeRoom(r: PersistedRoomFields): Record<string, string> {
@@ -99,6 +101,7 @@ export function serializeRoom(r: PersistedRoomFields): Record<string, string> {
         ? JSON.stringify([...r.drawingPhaseAwardedGuesserIds])
         : "",
     scoresByPlayerId: JSON.stringify(r.scoresByPlayerId),
+    settings: JSON.stringify(r.settings),
   };
 }
 
@@ -146,6 +149,7 @@ export function deserializeRoom(h: Record<string, string>): PersistedRoomFields 
         ? new Set(JSON.parse(h["drawingPhaseAwardedGuesserIds"]))
         : null,
       scoresByPlayerId: h["scoresByPlayerId"] ? JSON.parse(h["scoresByPlayerId"]) : {},
+      settings: h["settings"] ? (JSON.parse(h["settings"]) as RoomSettings) : { ...DEFAULT_ROOM_SETTINGS },
     };
   } catch (err) {
     throw new Error(

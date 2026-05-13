@@ -10,6 +10,22 @@
 import { z } from "zod";
 import { avatarPresetIdSchema } from "./player-identity.js";
 
+// ─── Room Settings (Story 8.2) ───────────────────────────────────────────────
+
+export const roomSettingsSchema = z.object({
+  rounds:     z.number().int().min(1).max(20),
+  drawTime:   z.number().int().min(20).max(240),
+  maxPlayers: z.number().int().min(2).max(12),
+  wordPack:   z.enum(["classic", "cryptids", "foods", "movies", "custom"]),
+  showHints:  z.boolean(),
+  skipAfk:    z.boolean(),
+  allowVoice: z.boolean(),
+});
+export type RoomSettings = z.infer<typeof roomSettingsSchema>;
+export type WordPackId = z.infer<typeof roomSettingsSchema.shape.wordPack>;
+
+// ─── Room Phase ──────────────────────────────────────────────────────────────
+
 /** Shared room phase literals — server is authoritative (Epic 2.1+ match flow). */
 export const roomPhaseSchema = z.enum([
   "lobby",
@@ -176,6 +192,11 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
     roomId: z.string().min(1),
     text: z.string().min(1).max(4096),
   }),
+  /** Host-only: update lobby match settings (Story 8.2). */
+  z.object({
+    type: z.literal("updateSettings"),
+    settings: roomSettingsSchema.partial(),
+  }),
 ]);
 
 const drawingCanvasOpPayloadSchema = z.discriminatedUnion("op", [
@@ -290,6 +311,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     avatarPresetId: avatarPresetIdSchema,
     /** Host identity token — sent only to the creating WS, never broadcast. */
     hostToken: z.string().min(1),
+    settings: roomSettingsSchema,
   }),
   z.object({
     type: z.literal("roomJoined"),
@@ -300,6 +322,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     playerId: z.string(),
     displayName: z.string(),
     avatarPresetId: avatarPresetIdSchema,
+    settings: roomSettingsSchema,
   }),
   z.object({
     type: z.literal("lobbyRoster"),
@@ -429,6 +452,12 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     code: z.string(),
     message: z.string().optional(),
   }),
+  /** Broadcast to all room members when host changes lobby settings (Story 8.2). */
+  z.object({
+    type: z.literal("settingsUpdated"),
+    roomId: z.string(),
+    settings: roomSettingsSchema,
+  }),
 ]);
 
 export type ClientCommand = z.infer<typeof clientCommandSchema>;
@@ -447,6 +476,8 @@ export type DrawingCanvasOpCommitted = Extract<
 export type CanvasReplayEvent = DrawingStrokeCommitted | DrawingCanvasOpCommitted;
 export type RoomHydrateEvent = Extract<ServerEvent, { type: "roomHydrate" }>;
 export type CanvasOpLogResyncEvent = Extract<ServerEvent, { type: "canvasOpLogResync" }>;
+export type SettingsUpdatedEvent = Extract<ServerEvent, { type: "settingsUpdated" }>;
+export type UpdateSettings = Extract<ClientCommand, { type: "updateSettings" }>;
 
 export function safeParseClientCommand(data: unknown) {
   return clientCommandSchema.safeParse(data);

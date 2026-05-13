@@ -1,8 +1,9 @@
 import type { WebSocket } from "ws";
-import type { RoomPhase } from "@skribbl/shared";
+import type { RoomPhase, RoomSettings } from "@skribbl/shared";
 import type { LobbySessionIdentity } from "./lobby-session.js";
 import { CanvasPhaseLog } from "./canvas-log.js";
 import type { ChatTranscriptFanoutRow } from "./chat-transcript.js";
+import { DEFAULT_ROOM_SETTINGS } from "../config/game.js";
 
 /**
  * In-memory room aggregate (Story 1.2 skeleton): code, capacity, lobby phase.
@@ -74,13 +75,17 @@ export class Room {
 
   readonly sockets = new Set<WebSocket>();
   hostSocket: WebSocket | null = null;
-  readonly maxPlayers: number;
+  settings: RoomSettings;
 
   constructor(opts: { id: string; code: string; maxPlayers: number; hostPlayerId: string }) {
     this.id = opts.id;
     this.code = opts.code;
-    this.maxPlayers = opts.maxPlayers;
     this.hostPlayerId = opts.hostPlayerId;
+    this.settings = { ...DEFAULT_ROOM_SETTINGS, maxPlayers: opts.maxPlayers };
+  }
+
+  get maxPlayers(): number {
+    return this.settings.maxPlayers;
   }
 
   get playerCount(): number {
@@ -88,6 +93,6 @@ export class Room {
   }
 
   hasCapacity(): boolean {
-    return this.sockets.size < this.maxPlayers;
+    return this.sockets.size < this.settings.maxPlayers;
   }
 }

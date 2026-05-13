@@ -28,6 +28,7 @@ import {
   serializeReturnToLobbyCommand,
   serializeChatMessageCommand,
 } from "@/lib/ws-client";
+import { useLobbySettingsStore } from "@/features/lobby/stores/lobby-settings-store";
 import {
   appendDrawingHintRows,
   type MatchHintFeedRow,
@@ -319,6 +320,7 @@ export function useHostCreateRoom(
             chatFeed: [],
             closeGuessHint: null,
           });
+          useLobbySettingsStore.setState(parsed.data.settings);
           setTransport("live");
           return;
         case "lobbyRoster": {
@@ -530,8 +532,14 @@ export function useHostCreateRoom(
           return;
         }
         case "pong":
-        case "roomJoined":
           return;
+        case "roomJoined":
+          useLobbySettingsStore.setState(parsed.data.settings);
+          return;
+        case "settingsUpdated": {
+          useLobbySettingsStore.setState(parsed.data.settings);
+          return;
+        }
         case "drawingStrokeCommitted":
         case "drawingCanvasOpCommitted": {
           const canvasEv = parsed.data;

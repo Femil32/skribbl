@@ -32,6 +32,11 @@ export {
   type HydrateChatTailEvent,
   type RoomHydrateEvent,
   type CanvasOpLogResyncEvent,
+  roomSettingsSchema,
+  type RoomSettings,
+  type WordPackId,
+  type SettingsUpdatedEvent,
+  type UpdateSettings,
 } from "./schemas.js";
 export {
   assertChatMessageLength,

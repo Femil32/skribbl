@@ -12,6 +12,7 @@ import {
   normalizeRoomCode,
   safeParseServerEvent,
 } from "@skribbl/shared";
+import { useLobbySettingsStore } from "@/features/lobby/stores/lobby-settings-store";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   messageForProtocolErrorCode,
@@ -333,9 +334,14 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
             chatFeed: [],
             closeGuessHint: null,
           });
+          useLobbySettingsStore.setState(parsed.data.settings);
           joinedRoomIdRef.current = parsed.data.roomId;
           setTransport("live");
           return;
+        case "settingsUpdated": {
+          useLobbySettingsStore.setState(parsed.data.settings);
+          return;
+        }
         case "lobbyRoster": {
           const roster = parsed.data;
           setState((prev) => {

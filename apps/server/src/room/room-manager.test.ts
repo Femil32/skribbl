@@ -150,4 +150,83 @@ describe("RoomManager", () => {
     expect(out.room.hostSocket).toBe(h2);
     expect(m.getLobbySession(h2)?.playerId).toBe(createdId);
   });
+
+  describe("updateSettings (Story 8.2)", () => {
+    it("returns NOT_HOST when non-host calls updateSettings", () => {
+      const m = new RoomManager(8, testWordBank(), stubRedis());
+      const host = stubSocket();
+      const guest = stubSocket();
+      const room = m.createRoom(host, player("Host"));
+      m.joinRoom(guest, room.code, player("Guest"));
+      expect(m.updateSettings(guest, { rounds: 5 })).toEqual({
+        ok: false,
+        code: "NOT_HOST",
+      });
+    });
+
+    it("returns MATCH_IN_PROGRESS when phase is not lobby", () => {
+      const m = new RoomManager(8, testWordBank(), stubRedis());
+      const host = stubSocket();
+      const guest = stubSocket();
+      const room = m.createRoom(host, player("Host"));
+      m.joinRoom(guest, room.code, player("Guest"));
+      room.phase = "drawing";
+      expect(m.updateSettings(host, { rounds: 5 })).toEqual({
+        ok: false,
+        code: "MATCH_IN_PROGRESS",
+      });
+    });
+
+    it("returns VALIDATION_ERROR when maxPlayers below current count", () => {
+      const m = new RoomManager(8, testWordBank(), stubRedis());
+      const host = stubSocket();
+      const guest = stubSocket();
+      const room = m.createRoom(host, player("Host"));
+      m.joinRoom(guest, room.code, player("Guest"));
+      expect(m.updateSettings(host, { maxPlayers: 1 })).toEqual({
+        ok: false,
+        code: "VALIDATION_ERROR",
+        detail: "maxPlayers below current count",
+      });
+    });
+
+    it("merges partial settings, preserving unchanged fields", () => {
+      const m = new RoomManager(8, testWordBank(), stubRedis());
+      const host = stubSocket();
+      const room = m.createRoom(host, player("Host"));
+      const prevDrawTime = room.settings.drawTime;
+      const result = m.updateSettings(host, { rounds: 10 });
+      expect(result).toEqual({ ok: true });
+      expect(room.settings.rounds).toBe(10);
+      expect(room.settings.drawTime).toBe(prevDrawTime);
+    });
+
+    it("broadcasts settingsUpdated to all sockets", () => {
+      const sent: string[] = [];
+      const makeSocket = () => ({ send: (msg: string) => { sent.push(msg); } }) as unknown as WebSocket;
+      const m = new RoomManager(8, testWordBank(), stubRedis());
+      const host = makeSocket();
+      const guest = makeSocket();
+      const room = m.createRoom(host, player("Host"));
+      m.joinRoom(guest, room.code, player("Guest"));
+      sent.length = 0;
+      m.updateSettings(host, { allowVoice: true });
+      expect(sent.length).toBe(2);
+      const parsed = JSON.parse(sent[0]!);
+      expect(parsed.type).toBe("settingsUpdated");
+      expect(parsed.settings.allowVoice).toBe(true);
+    });
+
+    it("joinRoom includes settings in result room", () => {
+      const m = new RoomManager(8, testWordBank(), stubRedis());
+      const host = stubSocket();
+      const guest = stubSocket();
+      const room = m.createRoom(host, player("Host"));
+      m.updateSettings(host, { rounds: 3 });
+      const outcome = m.joinRoom(guest, room.code, player("Guest"));
+      expect(outcome.ok).toBe(true);
+      if (!outcome.ok) throw new Error("unexpected");
+      expect(outcome.room.settings.rounds).toBe(3);
+    });
+  });
 });

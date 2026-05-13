@@ -4,6 +4,7 @@ import {
   isMatchFlowPhase,
   isRosterScoreVisiblePhase,
   lobbyRosterPlayerSchema,
+  roomSettingsSchema,
   safeParseServerEvent,
   serializeClientCommand,
   serverEventSchema,
@@ -154,6 +155,7 @@ describe("serverEventSchema", () => {
       displayName: "Pat",
       avatarPresetId: "preset-1",
       hostToken: "abc123defgh456ijklmn",
+      settings: { rounds: 6, drawTime: 80, maxPlayers: 8, wordPack: "classic", showHints: true, skipAfk: true, allowVoice: false },
     });
     expect(result.success).toBe(true);
   });
@@ -533,5 +535,121 @@ describe("serializeClientCommand", () => {
     const parsed = clientCommandSchema.safeParse(JSON.parse(line));
     expect(parsed.success).toBe(true);
     if (parsed.success) expect(parsed.data.type).toBe("reconnectPlayer");
+  });
+});
+
+describe("roomSettingsSchema (Story 8.2)", () => {
+  const validSettings = {
+    rounds: 6,
+    drawTime: 80,
+    maxPlayers: 8,
+    wordPack: "classic",
+    showHints: true,
+    skipAfk: true,
+    allowVoice: false,
+  };
+
+  it("accepts valid full settings", () => {
+    expect(roomSettingsSchema.safeParse(validSettings).success).toBe(true);
+  });
+
+  it("rejects rounds out of range", () => {
+    expect(roomSettingsSchema.safeParse({ ...validSettings, rounds: 0 }).success).toBe(false);
+    expect(roomSettingsSchema.safeParse({ ...validSettings, rounds: 21 }).success).toBe(false);
+  });
+
+  it("rejects maxPlayers out of range", () => {
+    expect(roomSettingsSchema.safeParse({ ...validSettings, maxPlayers: 1 }).success).toBe(false);
+    expect(roomSettingsSchema.safeParse({ ...validSettings, maxPlayers: 13 }).success).toBe(false);
+  });
+
+  it("rejects unknown wordPack", () => {
+    expect(roomSettingsSchema.safeParse({ ...validSettings, wordPack: "unknown" }).success).toBe(false);
+  });
+
+  it("accepts all valid wordPack values", () => {
+    for (const wp of ["classic", "cryptids", "foods", "movies", "custom"]) {
+      expect(roomSettingsSchema.safeParse({ ...validSettings, wordPack: wp }).success).toBe(true);
+    }
+  });
+});
+
+describe("updateSettings command (Story 8.2)", () => {
+  it("accepts full settings update", () => {
+    const result = clientCommandSchema.safeParse({
+      type: "updateSettings",
+      settings: { rounds: 3, drawTime: 60, maxPlayers: 8, wordPack: "foods", showHints: false, skipAfk: false, allowVoice: true },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts partial settings update", () => {
+    const result = clientCommandSchema.safeParse({
+      type: "updateSettings",
+      settings: { rounds: 5 },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts empty partial", () => {
+    const result = clientCommandSchema.safeParse({
+      type: "updateSettings",
+      settings: {},
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects invalid field value", () => {
+    const result = clientCommandSchema.safeParse({
+      type: "updateSettings",
+      settings: { rounds: 99 },
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("settingsUpdated event (Story 8.2)", () => {
+  it("round-trips settingsUpdated", () => {
+    const event = {
+      type: "settingsUpdated",
+      roomId: "r1",
+      settings: { rounds: 6, drawTime: 80, maxPlayers: 8, wordPack: "classic", showHints: true, skipAfk: true, allowVoice: false },
+    };
+    const result = serverEventSchema.safeParse(event);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.type).toBe("settingsUpdated");
+    }
+  });
+});
+
+describe("roomJoined includes settings (Story 8.2)", () => {
+  it("accepts roomJoined with settings", () => {
+    const event = {
+      type: "roomJoined",
+      roomId: "r1",
+      roomCode: "ABCD",
+      phase: "lobby",
+      playerCount: 2,
+      playerId: "p1",
+      displayName: "Pat",
+      avatarPresetId: "preset-1",
+      settings: { rounds: 6, drawTime: 80, maxPlayers: 8, wordPack: "classic", showHints: true, skipAfk: true, allowVoice: false },
+    };
+    expect(serverEventSchema.safeParse(event).success).toBe(true);
+  });
+
+  it("rejects roomJoined without settings", () => {
+    const event = {
+      type: "roomJoined",
+      roomId: "r1",
+      roomCode: "ABCD",
+      phase: "lobby",
+      playerCount: 2,
+      playerId: "p1",
+      displayName: "Pat",
+      avatarPresetId: "preset-1",
+    };
+    expect(serverEventSchema.safeParse(event).success).toBe(false);
   });
 });

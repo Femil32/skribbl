@@ -33,3 +33,9 @@
 - Button CTA variant silently ignores size prop — design decision; needs API doc or type-level enforcement.
 - Color swatch buttons in DrawingToolbar shift height on press (btn-sm removed when active) — layout polish, low priority.
 - Tabs onChange fires before focus() — React batched update means newly-focused tab has tabIndex=-1 at focus time; minor AT sequencing issue.
+
+## Deferred from: code review of 8-2-lobby-settings-host-broadcast (2026-05-13)
+
+- No debounce on `sendSettings` in `LobbyHostPage` — rapid stepper input floods server with Redis writes + broadcasts; needs throttle/debounce wrapper.
+- `deserializeRoom` throws on corrupt JSON settings instead of falling back to defaults — no graceful degradation; pre-existing error handling pattern.
+- Client settings desync on server rejection — Zustand updated optimistically but no rollback when server rejects `updateSettings` (e.g. phase change mid-update); enhancement for future story.

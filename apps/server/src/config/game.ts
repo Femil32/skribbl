@@ -5,6 +5,17 @@
  * MAX_PLAYERS: max players per lobby room (NFR-S1); override via env like WORDS_PATH.
  */
 import type { RawData } from "ws";
+import type { RoomSettings } from "@skribbl/shared";
+
+export const DEFAULT_ROOM_SETTINGS: RoomSettings = {
+  rounds: 6,
+  drawTime: 80,
+  maxPlayers: 8,
+  wordPack: "classic",
+  showHints: true,
+  skipAfk: true,
+  allowVoice: false,
+};
 
 export const GAME_SERVER_DEFAULT_PORT = 3001;
 

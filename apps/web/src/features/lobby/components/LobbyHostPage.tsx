@@ -24,6 +24,7 @@ import { buildRoomInviteUrl, resolvePublicWebOrigin } from "@/lib/invite-url";
 import { loadSession } from "@/features/lobby/lib/session-storage";
 import { DR, chunk, WORD_PACKS } from "@/features/lobby/design/tokens";
 import { useLobbySettingsStore } from "@/features/lobby/stores/lobby-settings-store";
+import { useLobbySettingsSync } from "@/features/lobby/hooks/use-lobby-settings";
 import { Stepper } from "@/features/lobby/components/primitives/Stepper";
 import { Toggle } from "@/features/lobby/components/primitives/Toggle";
 import { SectionLabel } from "@/features/lobby/components/primitives/SectionLabel";
@@ -150,6 +151,9 @@ export function LobbyHostPage() {
     skipAfk, setSkipAfk,
     allowVoice, setAllowVoice,
   } = useLobbySettingsStore();
+
+  // Host setting changes are synced to server; sendGameJsonLine no-ops when socket isn't open
+  const { sendSettings } = useLobbySettingsSync(sendGameJsonLine, true);
 
   // Auto-reconnect on page reload: if a host session exists in sessionStorage, pre-fill and connect.
   useEffect(() => {
@@ -646,7 +650,8 @@ export function LobbyHostPage() {
               value={rounds}
               min={1}
               max={20}
-              setValue={setRounds}
+              data-testid="settings-rounds"
+              setValue={(v) => { setRounds(v); sendSettings({ rounds: v }); }}
               disabled={!isHost}
             />
             <Stepper
@@ -656,7 +661,8 @@ export function LobbyHostPage() {
               max={240}
               step={10}
               unit="s"
-              setValue={setDrawTime}
+              data-testid="settings-drawTime"
+              setValue={(v) => { setDrawTime(v); sendSettings({ drawTime: v }); }}
               disabled={!isHost}
             />
             <Stepper
@@ -664,7 +670,8 @@ export function LobbyHostPage() {
               value={maxPlayers}
               min={2}
               max={12}
-              setValue={setMaxPlayers}
+              data-testid="settings-maxPlayers"
+              setValue={(v) => { setMaxPlayers(v); sendSettings({ maxPlayers: v }); }}
               disabled={!isHost}
             />
           </div>
@@ -679,7 +686,8 @@ export function LobbyHostPage() {
                   <button
                     key={wp.id}
                     type="button"
-                    onClick={() => isHost && setWordPack(wp.id)}
+                    data-testid={`settings-wordPack-${wp.id}`}
+                    onClick={() => { if (isHost) { setWordPack(wp.id); sendSettings({ wordPack: wp.id }); } }}
                     disabled={!isHost}
                     className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-primary"
                     style={{
@@ -724,19 +732,22 @@ export function LobbyHostPage() {
             <Toggle
               label="Show hints"
               value={showHints}
-              setValue={setShowHints}
+              data-testid="settings-showHints"
+              setValue={(v) => { setShowHints(v); sendSettings({ showHints: v }); }}
               disabled={!isHost}
             />
             <Toggle
               label="Auto-skip AFK"
               value={skipAfk}
-              setValue={setSkipAfk}
+              data-testid="settings-skipAfk"
+              setValue={(v) => { setSkipAfk(v); sendSettings({ skipAfk: v }); }}
               disabled={!isHost}
             />
             <Toggle
               label="Allow voice"
               value={allowVoice}
-              setValue={setAllowVoice}
+              data-testid="settings-allowVoice"
+              setValue={(v) => { setAllowVoice(v); sendSettings({ allowVoice: v }); }}
               disabled={!isHost}
             />
           </div>

@@ -149,6 +149,7 @@ export function handleClientCommand(
           displayName: session.displayName,
           avatarPresetId: session.avatarPresetId,
           hostToken: room.hostToken,
+          settings: room.settings,
         },
         roomManager,
       );
@@ -206,6 +207,7 @@ export function handleClientCommand(
           playerId: session.playerId,
           displayName: session.displayName,
           avatarPresetId: session.avatarPresetId,
+          settings: room.settings,
         },
         roomManager,
       );
@@ -268,6 +270,7 @@ export function handleClientCommand(
           displayName: session.displayName,
           avatarPresetId: session.avatarPresetId,
           hostToken: room.hostToken,
+          settings: room.settings,
         },
         roomManager,
       );
@@ -335,6 +338,7 @@ export function handleClientCommand(
           playerId: session.playerId,
           displayName: session.displayName,
           avatarPresetId: session.avatarPresetId,
+          settings: room.settings,
         },
         roomManager,
       );
@@ -445,6 +449,13 @@ export function handleClientCommand(
           chatMessageErrorDetail(outcome.code),
           roomManager,
         );
+      }
+      return;
+    }
+    case "updateSettings": {
+      const outcome = roomManager.updateSettings(ws, cmd.settings);
+      if (!outcome.ok) {
+        sendProtocolError(ws, outcome.code, outcome.detail, roomManager);
       }
       return;
     }
