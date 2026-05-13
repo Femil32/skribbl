@@ -254,7 +254,42 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   }),
   /** Lobby-only text relay (Story 8.3). Sanitized grapheme length enforced in schema. */
   lobbyChatCommandSchema,
+  /** Lobby-only: start a 30s vote-kick window (Story 8.4). */
+  z
+    .object({
+      type: z.literal("initiateVoteKick"),
+      roomCode: z.string(),
+      targetPlayerId: z.string().min(1),
+    })
+    .strict(),
+  /** Lobby-only: cast yes/no on the active vote for `targetPlayerId` (Story 8.4). */
+  z
+    .object({
+      type: z.literal("castVoteKick"),
+      roomCode: z.string(),
+      targetPlayerId: z.string().min(1),
+      vote: z.enum(["yes", "no"]),
+    })
+    .strict(),
 ]);
+
+/** Persisted / hydrated vote-kick tally while `status === PENDING` (Story 8.4). */
+export const voteKickPendingStateSchema = z.object({
+  status: z.literal("PENDING"),
+  targetPlayerId: z.string(),
+  initiatorPlayerId: z.string(),
+  startedAtMs: z.number(),
+  expiresAtMs: z.number(),
+  votes: z.record(z.string(), z.enum(["yes", "no"])),
+});
+
+export type VoteKickPendingState = z.infer<typeof voteKickPendingStateSchema>;
+
+export const voteKickResolvedReasonSchema = z.enum(["target_left"]);
+export type VoteKickResolvedReason = z.infer<typeof voteKickResolvedReasonSchema>;
+
+export const playerLeftReasonSchema = z.enum(["kicked"]);
+export type PlayerLeftReason = z.infer<typeof playerLeftReasonSchema>;
 
 const drawingCanvasOpPayloadSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("clear") }),
@@ -523,6 +558,26 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     message: z.string(),
     timestamp: z.number().int().nonnegative(),
   }),
+  /** Lobby vote-kick window opened (Story 8.4). */
+  z.object({
+    type: z.literal("voteKickStarted"),
+    roomId: z.string(),
+    targetPlayerId: z.string(),
+    initiatorPlayerId: z.string(),
+    expiresAtMs: z.number(),
+  }),
+  /** Lobby vote-kick outcome (Story 8.4). Optional `reason` when `outcome === "failed"`. */
+  z.object({
+    type: z.literal("voteKickResolved"),
+    outcome: z.enum(["kicked", "failed", "expired"]),
+    reason: voteKickResolvedReasonSchema.optional(),
+  }),
+  /** Lobby roster departure fact; extend `reason` in later epics (Story 8.4 — `kicked`). */
+  z.object({
+    type: z.literal("playerLeft"),
+    playerId: z.string(),
+    reason: playerLeftReasonSchema,
+  }),
 ]);
 
 export type ClientCommand = z.infer<typeof clientCommandSchema>;
@@ -545,6 +600,11 @@ export type SettingsUpdatedEvent = Extract<ServerEvent, { type: "settingsUpdated
 export type LobbyChatMessageEvent = Extract<ServerEvent, { type: "lobbyChatMessage" }>;
 export type UpdateSettings = Extract<ClientCommand, { type: "updateSettings" }>;
 export type LobbyChatCommand = Extract<ClientCommand, { type: "lobbyChat" }>;
+export type InitiateVoteKickCommand = Extract<ClientCommand, { type: "initiateVoteKick" }>;
+export type CastVoteKickCommand = Extract<ClientCommand, { type: "castVoteKick" }>;
+export type VoteKickStartedEvent = Extract<ServerEvent, { type: "voteKickStarted" }>;
+export type VoteKickResolvedEvent = Extract<ServerEvent, { type: "voteKickResolved" }>;
+export type PlayerLeftEvent = Extract<ServerEvent, { type: "playerLeft" }>;
 
 export function safeParseClientCommand(data: unknown) {
   return clientCommandSchema.safeParse(data);

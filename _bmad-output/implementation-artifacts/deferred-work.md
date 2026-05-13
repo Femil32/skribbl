@@ -43,3 +43,7 @@
 ## Deferred from: code review of 8-3-pre-game-lobby-chat-relay (2026-05-13)
 
 - `lobbyChatSendTimestampsByPlayerId` in `room-manager.ts` retains Map keys for every `playerId` that ever sent lobby chat — low-risk process-memory growth; revisit for long-lived deployments or horizontal scale.
+
+## Deferred from: code review of 8-4-vote-kick-system (2026-05-13)
+
+- Extract `LobbyVoteKickWireEvent` (and related lobby wire unions) to a small shared module so `use-guest-join-room` does not import types from `use-host-create-room` — coupling only; behavior is correct.

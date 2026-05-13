@@ -1,5 +1,5 @@
 import type { WebSocket } from "ws";
-import type { RoomPhase, RoomSettings } from "@skribbl/shared";
+import type { RoomPhase, RoomSettings, VoteKickPendingState } from "@skribbl/shared";
 import type { LobbySessionIdentity } from "./lobby-session.js";
 import { CanvasPhaseLog } from "./canvas-log.js";
 import type { ChatTranscriptFanoutRow } from "./chat-transcript.js";
@@ -11,8 +11,11 @@ import { DEFAULT_ROOM_SETTINGS } from "../config/game.js";
 export class Room {
   readonly id: string;
   readonly code: string;
-  /** Canonical host player id from the first `roomCreated` (Story 1.7 reconnect). */
-  readonly hostPlayerId: string;
+  /**
+   * Canonical host player id. Promoted deterministically when the host leaves or is kicked during
+   * **lobby** (lexicographically smallest remaining `playerId`, Story 8.4).
+   */
+  hostPlayerId: string;
   /** Persistent host identity token — generated once in createRoom, sent only in roomCreated. */
   hostToken: string = "";
   phase: RoomPhase = "lobby";
@@ -77,11 +80,15 @@ export class Room {
   hostSocket: WebSocket | null = null;
   settings: RoomSettings;
 
+  /** Active lobby vote-kick (Story 8.4); cleared on resolve/kick/expiry/cancel. */
+  voteKick: VoteKickPendingState | undefined;
+
   constructor(opts: { id: string; code: string; maxPlayers: number; hostPlayerId: string }) {
     this.id = opts.id;
     this.code = opts.code;
     this.hostPlayerId = opts.hostPlayerId;
     this.settings = { ...DEFAULT_ROOM_SETTINGS, maxPlayers: opts.maxPlayers };
+    this.voteKick = undefined;
   }
 
   get maxPlayers(): number {

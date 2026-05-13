@@ -105,6 +105,20 @@ export function serializeLobbyChatCommand(roomCode: string, message: string): st
   return serializeClientCommand({ type: "lobbyChat", roomCode, message });
 }
 
+/** Story 8.4 — start a vote-kick (server: lobby phase only). */
+export function serializeInitiateVoteKickCommand(roomCode: string, targetPlayerId: string): string {
+  return serializeClientCommand({ type: "initiateVoteKick", roomCode, targetPlayerId });
+}
+
+/** Story 8.4 — vote on an active kick. */
+export function serializeCastVoteKickCommand(
+  roomCode: string,
+  targetPlayerId: string,
+  vote: "yes" | "no",
+): string {
+  return serializeClientCommand({ type: "castVoteKick", roomCode, targetPlayerId, vote });
+}
+
 /** Room chat / guesses (Epic 4). */
 export function serializeChatMessageCommand(roomId: string, text: string): string {
   return serializeClientCommand({ type: "chatMessage", roomId, text });

@@ -31,7 +31,6 @@ describe("Lobby shell — axe smoke (AC #6)", () => {
         localPlayerId="p1"
         maxPlayers={8}
         accent="#22d3ee"
-        isHost={true}
       />
     );
     const results = await axe(container);

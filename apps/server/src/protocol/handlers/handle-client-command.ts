@@ -41,6 +41,29 @@ function parseLobbyPlayer(cmd: {
   };
 }
 
+function voteKickErrorDetail(code: string): string {
+  switch (code) {
+    case "NOT_IN_ROOM":
+      return "You are not in that room.";
+    case "BAD_CODE":
+      return "Room code mismatch.";
+    case "MATCH_IN_PROGRESS":
+      return "Votes are only allowed in the lobby before the match.";
+    case "VOTE_IN_PROGRESS":
+      return "A vote is already active.";
+    case "NO_ACTIVE_VOTE":
+      return "There is no active vote.";
+    case "ALREADY_VOTED":
+      return "You have already voted.";
+    case "INVALID_TARGET":
+      return "Cannot start that kick.";
+    case "NOT_ELIGIBLE":
+      return "You cannot vote.";
+    default:
+      return "Vote action could not be completed.";
+  }
+}
+
 function lobbyChatErrorDetail(code: string): string {
   switch (code) {
     case "NOT_IN_ROOM":
@@ -481,6 +504,18 @@ export function handleClientCommand(
       if (!outcome.ok) {
         sendProtocolError(ws, outcome.code, lobbyChatErrorDetail(outcome.code), roomManager);
       }
+      return;
+    }
+    case "initiateVoteKick": {
+      const out = roomManager.applyInitiateVoteKick(ws, cmd.roomCode, cmd.targetPlayerId);
+      if (!out.ok)
+        sendProtocolError(ws, out.code, voteKickErrorDetail(out.code), roomManager);
+      return;
+    }
+    case "castVoteKick": {
+      const out = roomManager.applyCastVoteKick(ws, cmd.roomCode, cmd.targetPlayerId, cmd.vote);
+      if (!out.ok)
+        sendProtocolError(ws, out.code, voteKickErrorDetail(out.code), roomManager);
       return;
     }
     default: {

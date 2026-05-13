@@ -5,7 +5,57 @@ import {
   deserializePlayer,
   PLAYER_TTL_S,
   type PersistedPlayerFields,
+  serializeRoom,
+  deserializeRoom,
+  type PersistedRoomFields,
 } from "./room-keys.js";
+import { DEFAULT_ROOM_SETTINGS } from "../../config/game.js";
+
+function minimalPersistedRoom(extra: Partial<PersistedRoomFields> = {}): PersistedRoomFields {
+  return {
+    id: "rid-8-4",
+    code: "ABCDEF",
+    hostPlayerId: "hp1",
+    hostToken: "tok8",
+    phase: "lobby",
+    maxPlayers: 8,
+    matchPlayerOrder: null,
+    matchRoundIndex: 0,
+    currentDrawerPlayerId: null,
+    roundWordOptions: null,
+    roundSecretWord: null,
+    drawingStrokeSeq: 0,
+    chatTranscriptFanoutRows: [],
+    drawingPhaseStartedAtMs: null,
+    drawingPhaseAwardedGuesserIds: null,
+    scoresByPlayerId: {},
+    settings: { ...DEFAULT_ROOM_SETTINGS },
+    ...extra,
+  };
+}
+
+describe("serializeRoom / deserializeRoom voteKick (Story 8.4)", () => {
+  it("round-trips PENDING voteKick", () => {
+    const voteKick = {
+      status: "PENDING" as const,
+      targetPlayerId: "t1",
+      initiatorPlayerId: "i9",
+      startedAtMs: 10,
+      expiresAtMs: 30010,
+      votes: { i9: "yes" as const },
+    };
+    const room = minimalPersistedRoom({ voteKick });
+    const round = deserializeRoom(serializeRoom(room));
+    expect(round.voteKick).toEqual(voteKick);
+  });
+
+  it("omits voteKick when absent", () => {
+    const room = minimalPersistedRoom();
+    const fields = serializeRoom(room);
+    expect(fields.voteKick).toBe("");
+    expect(deserializeRoom(fields).voteKick).toBeUndefined();
+  });
+});
 
 describe("playerKey", () => {
   it("returns player:{token}", () => {

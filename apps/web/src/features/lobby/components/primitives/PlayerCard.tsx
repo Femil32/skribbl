@@ -11,11 +11,11 @@ type PlayerCardProps = {
   index: number;
   isLocalPlayer: boolean;
   accent: string;
-  /** Host can kick non-host, non-self players */
-  onKick?: () => void;
+  /** Any member may start a vote-kick against another connected player (Story 8.4). */
+  onVoteKick?: () => void;
 };
 
-export function PlayerCard({ player, index, isLocalPlayer, accent, onKick }: PlayerCardProps) {
+export function PlayerCard({ player, index, isLocalPlayer, accent, onVoteKick }: PlayerCardProps) {
   const C = DR.colors;
   const ck = (x = 3, y = 4) => chunk(x, y, C.line);
   const avatarColor = AVATAR_PRESET_COLORS[player.avatarPresetId] ?? "#ffd93d";
@@ -85,12 +85,12 @@ export function PlayerCard({ player, index, isLocalPlayer, accent, onKick }: Pla
         </div>
       </div>
 
-      {/* Kick button — host-only, not for self or other host */}
-      {onKick && !player.isHost && !isLocalPlayer && (
+      {/* Vote-kick starter — anyone except self vs connected peers (Story 8.4) */}
+      {onVoteKick && !isLocalPlayer && !disconnected && (
         <button
           type="button"
-          onClick={onKick}
-          aria-label={`Kick ${player.displayName}`}
+          onClick={onVoteKick}
+          aria-label={`Start vote to remove ${player.displayName}`}
           className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-primary"
           style={{
             flexShrink: 0,

@@ -10,8 +10,8 @@ type LobbyPlayerRosterProps = {
   localPlayerId: string;
   maxPlayers: number;
   accent: string;
-  isHost: boolean;
-  onKick?: (playerId: string) => void;
+  /** Host can start a vote to remove another connected player (Story 8.4). */
+  onVoteKick?: (playerId: string) => void;
 };
 
 export function LobbyPlayerRoster({
@@ -19,8 +19,7 @@ export function LobbyPlayerRoster({
   localPlayerId,
   maxPlayers,
   accent,
-  isHost,
-  onKick,
+  onVoteKick,
 }: LobbyPlayerRosterProps) {
   const C = DR.colors;
   const ready = players.filter((p) => (p.connectionStatus ?? "connected") === "connected").length;
@@ -71,7 +70,7 @@ export function LobbyPlayerRoster({
               index={idx}
               isLocalPlayer={p.playerId === localPlayerId}
               accent={accent}
-              onKick={isHost ? () => onKick?.(p.playerId) : undefined}
+              onVoteKick={onVoteKick ? () => onVoteKick(p.playerId) : undefined}
             />
           </div>
         ))}

@@ -46,6 +46,7 @@ import {
   loadSession,
   saveSession,
 } from "@/features/lobby/lib/session-storage";
+import type { LobbyVoteKickWireEvent } from "@/features/lobby/hooks/use-host-create-room";
 
 type ChatFeedEvent = Extract<
   ServerEvent,
@@ -100,6 +101,7 @@ export type UseGuestJoinRoomArgs = {
   avatarPresetId?: AvatarPresetId;
   onLobbyProtocolNotice?: (code: string) => void;
   onLobbyChatMessage?: (event: LobbyChatMessageEvent) => void;
+  onLobbyVoteKickEvent?: (event: LobbyVoteKickWireEvent) => void;
 };
 
 export type UseGuestJoinRoomResult = {
@@ -144,6 +146,15 @@ const LOBBY_CHAT_RECOVERABLE = new Set([
   "CHAT_EMPTY",
 ]);
 
+const VOTE_KICK_RECOVERABLE = new Set([
+  "VOTE_IN_PROGRESS",
+  "ALREADY_VOTED",
+  "NO_ACTIVE_VOTE",
+  "NOT_ELIGIBLE",
+  "INVALID_TARGET",
+  "BAD_CODE",
+]);
+
 export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomResult {
   const {
     connectionAttemptId,
@@ -153,6 +164,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
     avatarPresetId,
     onLobbyProtocolNotice,
     onLobbyChatMessage,
+    onLobbyVoteKickEvent,
   } = args;
   const wsUrl = resolveGameWebSocketUrl();
   const normalized = normalizeRoomCode(roomCodeInput);
@@ -180,6 +192,8 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
   onLobbyProtocolNoticeRef.current = onLobbyProtocolNotice;
   const onLobbyChatMessageRef = useRef(onLobbyChatMessage);
   onLobbyChatMessageRef.current = onLobbyChatMessage;
+  const onLobbyVoteKickEventRef = useRef(onLobbyVoteKickEvent);
+  onLobbyVoteKickEventRef.current = onLobbyVoteKickEvent;
   const frozenIdentityRef = useRef<{ displayName: string; avatarPresetId: AvatarPresetId } | null>(null);
   /** True when the current connect attempt is a page-reload reconnect from sessionStorage. */
   const pageReloadReconnectRef = useRef(false);
@@ -550,7 +564,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
             });
             return;
           }
-          if (LOBBY_CHAT_RECOVERABLE.has(code)) {
+          if (LOBBY_CHAT_RECOVERABLE.has(code) || VOTE_KICK_RECOVERABLE.has(code)) {
             onLobbyProtocolNoticeRef.current?.(code);
             setTransportErrorMessage(messageForProtocolErrorCode(code));
             return;
@@ -662,6 +676,19 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
         case "lobbyChatMessage": {
           const ev = parsed.data;
           onLobbyChatMessageRef.current?.(ev);
+          return;
+        }
+        case "voteKickStarted": {
+          onLobbyVoteKickEventRef.current?.(parsed.data);
+          return;
+        }
+        case "voteKickResolved": {
+          onLobbyVoteKickEventRef.current?.(parsed.data);
+          return;
+        }
+        case "playerLeft": {
+          if (parsed.data.reason === "kicked")
+            onLobbyVoteKickEventRef.current?.(parsed.data);
           return;
         }
         default: {

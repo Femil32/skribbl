@@ -19,6 +19,11 @@ import {
 } from "@skribbl/shared";
 import { messageForProtocolErrorCode } from "@/features/lobby/lib/protocol-error-message";
 import { useGuestJoinRoom } from "@/features/lobby/hooks/use-guest-join-room";
+import type { LobbyVoteKickWireEvent } from "@/features/lobby/hooks/use-host-create-room";
+import {
+  serializeCastVoteKickCommand,
+  serializeInitiateVoteKickCommand,
+} from "@/lib/ws-client";
 import { LobbyConnectionBanner } from "@/features/lobby/components/LobbyConnectionBanner";
 import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster";
 import { MatchDrawingColumn } from "@/features/game/components/MatchDrawingColumn";
@@ -130,6 +135,10 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
     { id: string; who: string; text: string }[]
   >([]);
   const [guestLobbySnack, setGuestLobbySnack] = useState<string | null>(null);
+  const [guestVoteKickActive, setGuestVoteKickActive] = useState<{
+    targetPlayerId: string;
+    expiresAtMs: number;
+  } | null>(null);
 
   const onGuestLobbyChatMessage = useCallback((ev: LobbyChatMessageEvent) => {
     setGuestLobbyLines((prev) =>
@@ -141,9 +150,27 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
     setGuestLobbySnack(messageForProtocolErrorCode(code));
   }, []);
 
+  const onGuestLobbyVoteKick = useCallback((ev: LobbyVoteKickWireEvent) => {
+    if (ev.type === "voteKickStarted") {
+      setGuestVoteKickActive({ targetPlayerId: ev.targetPlayerId, expiresAtMs: ev.expiresAtMs });
+      setGuestLobbySnack("Vote kick started.");
+      return;
+    }
+    if (ev.type === "voteKickResolved") {
+      setGuestVoteKickActive(null);
+      if (ev.reason === "target_left") setGuestLobbySnack("Vote ended — target left.");
+      else if (ev.outcome === "kicked") setGuestLobbySnack("Player removed by vote.");
+      else if (ev.outcome === "expired") setGuestLobbySnack("Vote kick timed out.");
+      else setGuestLobbySnack("Vote kick did not pass.");
+      return;
+    }
+    setGuestVoteKickActive(null);
+  }, []);
+
   useEffect(() => {
     setGuestLobbyLines([]);
     setJoinLobbyDraft("");
+    setGuestVoteKickActive(null);
   }, [joinGeneration]);
 
   useEffect(() => {
@@ -169,11 +196,17 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
     avatarPresetId: avatarId,
     onLobbyChatMessage: onGuestLobbyChatMessage,
     onLobbyProtocolNotice: onGuestLobbyProtocolNotice,
+    onLobbyVoteKickEvent: onGuestLobbyVoteKick,
   });
 
   const bumpGuestConnection = () => {
     setJoinGeneration((n) => n + 1);
   };
+
+  useEffect(() => {
+    if (guestState.status !== "joined") return;
+    if (guestState.phase !== "lobby") setGuestVoteKickActive(null);
+  }, [guestState]);
 
   // Track whether the current attempt is a page-reload reconnect so we can detect fallback.
   const [isPageReloadReconnect, setIsPageReloadReconnect] = useState(false);
@@ -486,8 +519,56 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                   localPlayerId={guestState.playerId}
                   maxPlayers={12}
                   accent="#ff5a3c"
-                  isHost={false}
+                  onVoteKick={(targetPlayerId) => {
+                    if (guestTransport !== "live") return;
+                    guestSendGameJsonLine(
+                      serializeInitiateVoteKickCommand(guestState.roomCode, targetPlayerId),
+                    );
+                  }}
                 />
+                {guestState.phase === "lobby" && guestVoteKickActive ? (
+                  <div className="rounded-box border border-base-300 bg-base-200/60 p-3 text-sm flex flex-col gap-2">
+                    <span className="font-semibold">Kick vote active</span>
+                    {guestVoteKickActive.targetPlayerId === guestState.playerId ? (
+                      <span className="text-base-content/75">Others are voting on whether you stay.</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          disabled={guestTransport !== "live"}
+                          onClick={() =>
+                            guestSendGameJsonLine(
+                              serializeCastVoteKickCommand(
+                                guestState.roomCode,
+                                guestVoteKickActive.targetPlayerId,
+                                "yes",
+                              ),
+                            )
+                          }
+                        >
+                          Vote yes — remove
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-outline btn-sm"
+                          disabled={guestTransport !== "live"}
+                          onClick={() =>
+                            guestSendGameJsonLine(
+                              serializeCastVoteKickCommand(
+                                guestState.roomCode,
+                                guestVoteKickActive.targetPlayerId,
+                                "no",
+                              ),
+                            )
+                          }
+                        >
+                          Vote no — keep
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
               </div>
               <div className="space-y-2">
                 <span className="text-sm font-medium text-base-content/70">

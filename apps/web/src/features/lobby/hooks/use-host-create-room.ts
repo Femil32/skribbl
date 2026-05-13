@@ -5,8 +5,11 @@ import type {
   CanvasReplayEvent,
   LobbyChatMessageEvent,
   LobbyRosterPlayer,
+  PlayerLeftEvent,
   RoomPhase,
   ServerEvent,
+  VoteKickResolvedEvent,
+  VoteKickStartedEvent,
 } from "@skribbl/shared";
 import { safeParseServerEvent } from "@skribbl/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -101,6 +104,8 @@ export type UseHostCreateRoomParams = {
   onLobbyProtocolNotice?: (code: string) => void;
   /** Optional: server **`lobbyChatMessage`** relay (Story 8.3). */
   onLobbyChatMessage?: (event: LobbyChatMessageEvent) => void;
+  /** Optional: vote-kick lifecycle (Story 8.4). */
+  onLobbyVoteKickEvent?: (event: LobbyVoteKickWireEvent) => void;
 };
 
 export type UseHostCreateRoomResult = {
@@ -146,6 +151,17 @@ const LOBBY_CHAT_RECOVERABLE = new Set([
   "CHAT_EMPTY",
 ]);
 
+export type LobbyVoteKickWireEvent = VoteKickStartedEvent | VoteKickResolvedEvent | PlayerLeftEvent;
+
+const VOTE_KICK_RECOVERABLE = new Set([
+  "VOTE_IN_PROGRESS",
+  "ALREADY_VOTED",
+  "NO_ACTIVE_VOTE",
+  "NOT_ELIGIBLE",
+  "INVALID_TARGET",
+  "BAD_CODE",
+]);
+
 type HostResumeContext = {
   roomId: string;
   playerId: string;
@@ -156,7 +172,15 @@ type HostResumeContext = {
 export function useHostCreateRoom(
   params: UseHostCreateRoomParams,
 ): UseHostCreateRoomResult {
-  const { shouldConnect, attemptId, displayName, avatarPresetId, onLobbyProtocolNotice, onLobbyChatMessage } =
+  const {
+    shouldConnect,
+    attemptId,
+    displayName,
+    avatarPresetId,
+    onLobbyProtocolNotice,
+    onLobbyChatMessage,
+    onLobbyVoteKickEvent,
+  } =
     params;
   const wsUrl = resolveGameWebSocketUrl();
   const [state, setState] = useState<HostLobbyState>({ status: "idle" });
@@ -174,6 +198,8 @@ export function useHostCreateRoom(
   onLobbyProtocolNoticeRef.current = onLobbyProtocolNotice;
   const onLobbyChatMessageRef = useRef(onLobbyChatMessage);
   onLobbyChatMessageRef.current = onLobbyChatMessage;
+  const onLobbyVoteKickEventRef = useRef(onLobbyVoteKickEvent);
+  onLobbyVoteKickEventRef.current = onLobbyVoteKickEvent;
 
   useEffect(() => {
     stateSnapshotRef.current = state;
@@ -538,7 +564,10 @@ export function useHostCreateRoom(
             });
             return;
           }
-          if (LOBBY_CHAT_RECOVERABLE.has(err.code)) {
+          if (
+            LOBBY_CHAT_RECOVERABLE.has(err.code) ||
+            VOTE_KICK_RECOVERABLE.has(err.code)
+          ) {
             onLobbyProtocolNoticeRef.current?.(err.code);
             return;
           }
@@ -657,6 +686,19 @@ export function useHostCreateRoom(
         case "lobbyChatMessage": {
           const ev = parsed.data;
           onLobbyChatMessageRef.current?.(ev);
+          return;
+        }
+        case "voteKickStarted": {
+          onLobbyVoteKickEventRef.current?.(parsed.data);
+          return;
+        }
+        case "voteKickResolved": {
+          onLobbyVoteKickEventRef.current?.(parsed.data);
+          return;
+        }
+        case "playerLeft": {
+          if (parsed.data.reason === "kicked")
+            onLobbyVoteKickEventRef.current?.(parsed.data);
           return;
         }
         default: {

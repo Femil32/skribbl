@@ -24,6 +24,7 @@ import {
   type DrawingCanvasOpPayload,
   type ServerEvent,
   type RoomSettings,
+  type VoteKickPendingState,
 } from "@skribbl/shared";
 import type { WebSocket } from "ws";
 import {
@@ -61,6 +62,46 @@ import {
   transcriptRowsForHydrateRecipient,
   type ChatTranscriptFanoutRow,
 } from "./chat-transcript.js";
+
+const VOTE_KICK_WINDOW_MS = 30_000;
+
+function countYesFromEligible(votes: Record<string, "yes" | "no">, eligible: Set<string>): number {
+  let n = 0;
+  for (const id of eligible) {
+    if (votes[id] === "yes") n++;
+  }
+  return n;
+}
+
+function maxPotentialYes(votes: Record<string, "yes" | "no">, eligible: Set<string>): number {
+  let yes = countYesFromEligible(votes, eligible);
+  for (const id of eligible) {
+    if (votes[id] === undefined) yes++;
+  }
+  return yes;
+}
+
+function votesCannotReachThreshold(
+  votes: Record<string, "yes" | "no">,
+  eligible: Set<string>,
+): boolean {
+  const ec = eligible.size;
+  if (ec === 0) return true;
+  return maxPotentialYes(votes, eligible) / ec < 0.55 - 1e-9;
+}
+
+function kickThresholdReached(votes: Record<string, "yes" | "no">, eligible: Set<string>): boolean {
+  const ec = eligible.size;
+  if (ec === 0) return false;
+  return countYesFromEligible(votes, eligible) / ec >= 0.55 - 1e-9;
+}
+
+function allEligibleVoted(votes: Record<string, "yes" | "no">, eligible: Set<string>): boolean {
+  for (const id of eligible) {
+    if (votes[id] === undefined) return false;
+  }
+  return true;
+}
 
 const log = pino({
   level: process.env.LOG_LEVEL ?? "info",
@@ -151,6 +192,7 @@ export class RoomManager {
       drawingPhaseAwardedGuesserIds: room.drawingPhaseAwardedGuesserIds,
       scoresByPlayerId: room.scoresByPlayerId,
       settings: room.settings,
+      voteKick: room.voteKick,
     });
     void this.redis
       .pipeline()
@@ -511,6 +553,7 @@ export class RoomManager {
     room.canvasPhaseLog.reset();
     room.drawingStrokeSeq = 0;
     room.phase = "lobby";
+    room.voteKick = undefined;
     room.matchPlayerOrder = null;
     room.currentDrawerPlayerId = null;
     room.matchRoundIndex = 0;
@@ -1029,6 +1072,7 @@ export class RoomManager {
     if (room.phase !== "lobby") return { ok: false, code: "WRONG_PHASE" };
     if (room.playerCount < 2) return { ok: false, code: "NOT_ENOUGH_PLAYERS" };
 
+    room.voteKick = undefined;
     room.phase = "matchStarting";
     const payload: ServerEvent = {
       type: "matchStarting",
@@ -1085,6 +1129,256 @@ export class RoomManager {
     throw new Error("ROOM_CODE_COLLISION_RETRY_EXHAUSTED");
   }
 
+  /** Lexicographically smallest connected `playerId` in lobby; used after host kicks / voluntary leaves (Story 8.4). */
+  private syncLobbyHostPointers(room: Room): void {
+    if (room.phase !== "lobby") return;
+
+    let bestId: string | null = null;
+    let bestSock: WebSocket | null = null;
+    for (const sock of room.sockets) {
+      const id = this.socketLobbyIdentity.get(sock)?.playerId;
+      if (!id) continue;
+      if (bestId === null || id.localeCompare(bestId) < 0) {
+        bestId = id;
+        bestSock = sock;
+      }
+    }
+    if (!bestId) {
+      room.hostSocket = null;
+      return;
+    }
+    room.hostPlayerId = bestId;
+    room.hostSocket = bestSock;
+  }
+
+  private findSocketForPlayerId(room: Room, playerId: string): WebSocket | undefined {
+    for (const sock of room.sockets) {
+      if (this.socketLobbyIdentity.get(sock)?.playerId === playerId) return sock;
+    }
+    return undefined;
+  }
+
+  private hasConnectedPlayer(room: Room, playerId: string): boolean {
+    return this.findSocketForPlayerId(room, playerId) !== undefined;
+  }
+
+  /** Eligible vote-kickers: connected roster ids excluding target (Story 8.4). */
+  private eligibleKickVoters(room: Room, targetPlayerId: string): Set<string> {
+    return new Set(
+      [...room.sockets]
+        .map((s) => this.socketLobbyIdentity.get(s)?.playerId)
+        .filter((id): id is string => Boolean(id && id !== targetPlayerId)),
+    );
+  }
+
+  private resolveVoteKickFailed(room: Room, reason?: "target_left"): void {
+    const ev: ServerEvent =
+      reason === "target_left"
+        ? { type: "voteKickResolved", outcome: "failed", reason: "target_left" }
+        : { type: "voteKickResolved", outcome: "failed" };
+    room.voteKick = undefined;
+    for (const sock of room.sockets) this.sendEvent(sock, ev);
+    this.writeRoomToRedis(room);
+  }
+
+  /** After roster change mid-vote: target left, eligibility shrink, or post-cast recompute. */
+  private handleVoteKickOnMemberDisconnected(room: Room, leavingPlayerId: string): void {
+    const vk = room.voteKick;
+    if (!vk || vk.status !== "PENDING") return;
+
+    if (vk.targetPlayerId === leavingPlayerId) {
+      this.resolveVoteKickFailed(room, "target_left");
+      return;
+    }
+
+    const eligible = this.eligibleKickVoters(room, vk.targetPlayerId);
+    if (eligible.size === 0) {
+      this.resolveVoteKickFailed(room);
+      return;
+    }
+    if (votesCannotReachThreshold(vk.votes, eligible)) this.resolveVoteKickFailed(room);
+    else if (kickThresholdReached(vk.votes, eligible)) void this.finalizeVoteKickKick(room, vk.targetPlayerId);
+    else if (allEligibleVoted(vk.votes, eligible)) this.resolveVoteKickFailed(room);
+    else this.writeRoomToRedis(room);
+  }
+
+  private evaluateVoteKickProgress(room: Room): void {
+    const vk = room.voteKick;
+    if (!vk || vk.status !== "PENDING") return;
+
+    const eligible = this.eligibleKickVoters(room, vk.targetPlayerId);
+
+    if (eligible.size === 0) {
+      this.resolveVoteKickFailed(room);
+      return;
+    }
+    if (kickThresholdReached(vk.votes, eligible)) void this.finalizeVoteKickKick(room, vk.targetPlayerId);
+    else if (votesCannotReachThreshold(vk.votes, eligible)) this.resolveVoteKickFailed(room);
+    else if (allEligibleVoted(vk.votes, eligible)) this.resolveVoteKickFailed(room);
+    else this.writeRoomToRedis(room);
+  }
+
+  private finalizeVoteKickKick(room: Room, targetPlayerId: string): void {
+    const targetWs = this.findSocketForPlayerId(room, targetPlayerId);
+    if (!targetWs) {
+      room.voteKick = undefined;
+      this.writeRoomToRedis(room);
+      return;
+    }
+
+    room.voteKick = undefined;
+    this.writeRoomToRedis(room);
+
+    const resolved: ServerEvent = { type: "voteKickResolved", outcome: "kicked" };
+    const leftEv: ServerEvent = { type: "playerLeft", playerId: targetPlayerId, reason: "kicked" };
+
+    for (const sock of room.sockets) {
+      this.sendEvent(sock, resolved);
+      this.sendEvent(sock, leftEv);
+    }
+
+    this.removeLobbyParticipantAfterVoteKick(room, targetWs);
+  }
+
+  /** Remove kicked player after `voteKickResolved` / `playerLeft`; socket maps cleared before WS close so `close` noop. */
+  private removeLobbyParticipantAfterVoteKick(room: Room, targetWs: WebSocket): void {
+    const kickedId = this.socketLobbyIdentity.get(targetWs)?.playerId;
+    const wasHost = kickedId !== undefined && room.hostPlayerId === kickedId;
+
+    room.sockets.delete(targetWs);
+
+    if (room.phase === "lobby") {
+      if (wasHost) this.syncLobbyHostPointers(room);
+    } else if (room.hostSocket === targetWs) {
+      room.hostSocket = room.sockets.values().next().value as WebSocket | undefined ?? null;
+    }
+
+    this.socketToRoomId.delete(targetWs);
+    this.socketLobbyIdentity.delete(targetWs);
+
+    const survivors = room.sockets.size;
+    if (survivors === 0) {
+      this.clearMatchTimers(room.id);
+      this.roomRuntimeByCode.delete(room.code);
+      this.roomCodeById.delete(room.id);
+      this.deleteRoomFromRedis(room);
+    } else {
+      this.broadcastLobbyRoster(room);
+      this.writeRoomToRedis(room);
+    }
+
+    try {
+      targetWs.close();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  applyInitiateVoteKick(
+    ws: WebSocket,
+    roomCodeRaw: string,
+    targetPlayerId: string,
+  ): { ok: true } | { ok: false; code: string } {
+    const room = this.getRoomForSocket(ws);
+    const session = this.getLobbySession(ws);
+    if (!room || !session) return { ok: false, code: "NOT_IN_ROOM" };
+
+    const normalizedCode = normalizeRoomCode(roomCodeRaw);
+    if (!isValidRoomCodeForJoin(normalizedCode)) return { ok: false, code: "BAD_CODE" };
+    if (normalizedCode !== normalizeRoomCode(room.code)) return { ok: false, code: "NOT_IN_ROOM" };
+    if (room.phase !== "lobby") return { ok: false, code: "MATCH_IN_PROGRESS" };
+    if (room.voteKick?.status === "PENDING") return { ok: false, code: "VOTE_IN_PROGRESS" };
+
+    if (session.playerId === targetPlayerId) return { ok: false, code: "INVALID_TARGET" };
+    if (!this.hasConnectedPlayer(room, targetPlayerId)) return { ok: false, code: "INVALID_TARGET" };
+
+    const eligible = this.eligibleKickVoters(room, targetPlayerId);
+    if (eligible.size === 0) return { ok: false, code: "INVALID_TARGET" };
+
+    const now = Date.now();
+    const voteKickState: VoteKickPendingState = {
+      status: "PENDING",
+      targetPlayerId,
+      initiatorPlayerId: session.playerId,
+      startedAtMs: now,
+      expiresAtMs: now + VOTE_KICK_WINDOW_MS,
+      votes: { [session.playerId]: "yes" },
+    };
+    room.voteKick = voteKickState;
+    this.writeRoomToRedis(room);
+
+    const startEv: ServerEvent = {
+      type: "voteKickStarted",
+      roomId: room.id,
+      targetPlayerId,
+      initiatorPlayerId: session.playerId,
+      expiresAtMs: voteKickState.expiresAtMs,
+    };
+    for (const sock of room.sockets) this.sendEvent(sock, startEv);
+
+    this.evaluateVoteKickProgress(room);
+    return { ok: true };
+  }
+
+  applyCastVoteKick(
+    ws: WebSocket,
+    roomCodeRaw: string,
+    targetPlayerId: string,
+    vote: "yes" | "no",
+  ): { ok: true } | { ok: false; code: string } {
+    const room = this.getRoomForSocket(ws);
+    const session = this.getLobbySession(ws);
+    if (!room || !session) return { ok: false, code: "NOT_IN_ROOM" };
+
+    const normalizedCode = normalizeRoomCode(roomCodeRaw);
+    if (!isValidRoomCodeForJoin(normalizedCode)) return { ok: false, code: "BAD_CODE" };
+    if (normalizedCode !== normalizeRoomCode(room.code)) return { ok: false, code: "NOT_IN_ROOM" };
+
+    if (room.phase !== "lobby") return { ok: false, code: "MATCH_IN_PROGRESS" };
+
+    const vk = room.voteKick;
+    if (!vk || vk.status !== "PENDING") return { ok: false, code: "NO_ACTIVE_VOTE" };
+    if (vk.targetPlayerId !== targetPlayerId) return { ok: false, code: "INVALID_TARGET" };
+
+    if (session.playerId === targetPlayerId) return { ok: false, code: "NOT_ELIGIBLE" };
+
+    const eligible = this.eligibleKickVoters(room, targetPlayerId);
+    if (!eligible.has(session.playerId)) return { ok: false, code: "NOT_ELIGIBLE" };
+
+    if (vk.votes[session.playerId] !== undefined) return { ok: false, code: "ALREADY_VOTED" };
+
+    vk.votes[session.playerId] = vote;
+
+    if (votesCannotReachThreshold(vk.votes, eligible)) {
+      this.resolveVoteKickFailed(room);
+      return { ok: true };
+    }
+
+    if (kickThresholdReached(vk.votes, eligible)) {
+      void this.finalizeVoteKickKick(room, vk.targetPlayerId);
+      return { ok: true };
+    }
+
+    if (allEligibleVoted(vk.votes, eligible)) this.resolveVoteKickFailed(room);
+    else this.writeRoomToRedis(room);
+
+    return { ok: true };
+  }
+
+  /** Polling expiry (Story 8.4) — invoke every ~30s from game server bootstrap; Redis keyscan-free. */
+  pollVoteKicks(nowMs = Date.now()): void {
+    for (const room of this.roomRuntimeByCode.values()) {
+      const vk = room.voteKick;
+      if (!vk || vk.status !== "PENDING") continue;
+      if (nowMs < vk.expiresAtMs) continue;
+
+      room.voteKick = undefined;
+      const ev: ServerEvent = { type: "voteKickResolved", outcome: "expired" };
+      for (const sock of room.sockets) this.sendEvent(sock, ev);
+      this.writeRoomToRedis(room);
+    }
+  }
+
   leaveSocketRoom(ws: WebSocket): void {
     const roomId = this.socketToRoomId.get(ws);
     const identity = roomId ? this.socketLobbyIdentity.get(ws) : undefined;
@@ -1093,6 +1387,8 @@ export class RoomManager {
       return;
     }
     const room = this.getRoomById(roomId);
+    const leavingPlayerId = identity?.playerId;
+
     if (room && identity && room.phase !== "lobby") {
       room.awaitingReconnect.set(identity.playerId, {
         playerId: identity.playerId,
@@ -1106,6 +1402,7 @@ export class RoomManager {
         const next = room.sockets.values().next().value as WebSocket | undefined;
         room.hostSocket = next ?? null;
       }
+
       const survivors = room.sockets.size;
       if (survivors === 0) {
         this.clearMatchTimers(room.id);
@@ -1113,9 +1410,14 @@ export class RoomManager {
         this.roomCodeById.delete(room.id);
         this.deleteRoomFromRedis(room);
       } else {
+        if (leavingPlayerId !== undefined && room.voteKick?.status === "PENDING") {
+          this.handleVoteKickOnMemberDisconnected(room, leavingPlayerId);
+        }
         this.broadcastLobbyRoster(room);
+        this.writeRoomToRedis(room);
       }
     }
+
     this.socketToRoomId.delete(ws);
     this.socketLobbyIdentity.delete(ws);
   }

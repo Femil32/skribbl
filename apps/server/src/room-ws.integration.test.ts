@@ -1717,6 +1717,69 @@ describe("handleClientCommand + RoomManager", () => {
     expect(fromGuest.displayName).toBe(guestIdentity.displayName);
   });
 
+  it("voteKick emits voteKickResolved before playerLeft and closes target socket (Story 8.4)", () => {
+    const rm = new RoomManager(8, integrationWordBank(), stubRedis());
+    const host = captureWs();
+    const ally = captureWs();
+    const target = captureWs();
+    const closeSpy = vi.fn();
+    (target.ws as WebSocket & { close(): void }).close = closeSpy;
+
+    handleClientCommand(host.ws, { type: "createRoom", ...hostIdentity }, rm);
+    const created = parseServerEvent(JSON.parse(host.sent[0]!));
+    if (created.type !== "roomCreated") throw new Error("unexpected");
+    const roomCode = created.roomCode;
+
+    handleClientCommand(
+      ally.ws,
+      { type: "joinRoom", roomCode, ...guestIdentity },
+      rm,
+    );
+    handleClientCommand(
+      target.ws,
+      {
+        type: "joinRoom",
+        roomCode,
+        displayName: "KickMe",
+        avatarPresetId: "preset-3",
+      },
+      rm,
+    );
+
+    const allyJoin = parseServerEvent(JSON.parse(ally.sent[0]!));
+    const targetJoin = parseServerEvent(JSON.parse(target.sent[0]!));
+    if (allyJoin.type !== "roomJoined" || targetJoin.type !== "roomJoined") throw new Error("unexpected join");
+    const targetId = targetJoin.playerId;
+
+    handleClientCommand(
+      host.ws,
+      { type: "initiateVoteKick", roomCode, targetPlayerId: targetId },
+      rm,
+    );
+    handleClientCommand(
+      ally.ws,
+      { type: "castVoteKick", roomCode, targetPlayerId: targetId, vote: "yes" },
+      rm,
+    );
+
+    const tail = target.sent.map((line) => parseServerEvent(JSON.parse(line)));
+    let lastKickIdx = -1;
+    let lastLeftIdx = -1;
+    for (let i = tail.length - 1; i >= 0; i--) {
+      const e = tail[i]!;
+      if (lastKickIdx < 0 && e.type === "voteKickResolved" && e.outcome === "kicked")
+        lastKickIdx = i;
+      if (lastLeftIdx < 0 && e.type === "playerLeft") lastLeftIdx = i;
+      if (lastKickIdx >= 0 && lastLeftIdx >= 0) break;
+    }
+    expect(lastKickIdx).toBeGreaterThanOrEqual(0);
+    expect(lastLeftIdx).toBeGreaterThanOrEqual(0);
+    expect(lastKickIdx).toBeLessThan(lastLeftIdx);
+    const leftEv = tail[lastLeftIdx]!;
+    expect(leftEv.type === "playerLeft" && leftEv.playerId === targetId && leftEv.reason === "kicked").toBe(true);
+    expect(closeSpy).toHaveBeenCalled();
+  });
+
   it("duplicate exact guess masks repeated message as ••• for spectators (already awarded)", () => {
     vi.stubEnv("ROUNDS_PER_MATCH", "2");
     vi.stubEnv("ROUND_MS", "80000");

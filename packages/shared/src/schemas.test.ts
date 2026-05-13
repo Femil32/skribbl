@@ -249,6 +249,124 @@ describe("lobbyChat command/event (Story 8.3)", () => {
   });
 });
 
+describe("voteKick protocol commands (Story 8.4)", () => {
+  it("accepts initiateVoteKick and rejects unknown keys", () => {
+    const ok = clientCommandSchema.safeParse({
+      type: "initiateVoteKick",
+      roomCode: "ABCDEF",
+      targetPlayerId: "p-target",
+    });
+    expect(ok.success).toBe(true);
+
+    expect(
+      clientCommandSchema.safeParse({
+        type: "initiateVoteKick",
+        roomCode: "ABCDEF",
+        targetPlayerId: "p-target",
+        rogueKey: true,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts castVoteKick and rejects invalid vote or extra keys", () => {
+    expect(
+      clientCommandSchema.safeParse({
+        type: "castVoteKick",
+        roomCode: "ABCDEF",
+        targetPlayerId: "t1",
+        vote: "yes",
+      }).success,
+    ).toBe(true);
+
+    expect(
+      clientCommandSchema.safeParse({
+        type: "castVoteKick",
+        roomCode: "ABCDEF",
+        targetPlayerId: "t1",
+        vote: "maybe",
+      }).success,
+    ).toBe(false);
+
+    expect(
+      clientCommandSchema.safeParse({
+        type: "castVoteKick",
+        roomCode: "ABCDEF",
+        targetPlayerId: "t1",
+        vote: "yes",
+        extra: 1,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("serializeClientCommand round-trips initiateVoteKick and castVoteKick", () => {
+    const ini = serializeClientCommand({
+      type: "initiateVoteKick",
+      roomCode: "ABCDEF",
+      targetPlayerId: "pid-1",
+    });
+    expect(JSON.parse(ini)).toEqual({
+      type: "initiateVoteKick",
+      roomCode: "ABCDEF",
+      targetPlayerId: "pid-1",
+    });
+
+    const cast = serializeClientCommand({
+      type: "castVoteKick",
+      roomCode: "ABCDEF",
+      targetPlayerId: "pid-9",
+      vote: "no",
+    });
+    expect(JSON.parse(cast)).toMatchObject({
+      type: "castVoteKick",
+      vote: "no",
+    });
+  });
+
+  it("accepts vote-kick-related server events and serializeServerEvent round-trip (Story 8.4)", () => {
+    const started = {
+      type: "voteKickStarted" as const,
+      roomId: "r1",
+      targetPlayerId: "t99",
+      initiatorPlayerId: "i1",
+      expiresAtMs: 17_000_000,
+    };
+    expect(serverEventSchema.safeParse(started).success).toBe(true);
+    expect(JSON.parse(serializeServerEvent(started))).toEqual(started);
+
+    const failedTargetLeft = {
+      type: "voteKickResolved" as const,
+      outcome: "failed" as const,
+      reason: "target_left" as const,
+    };
+    expect(serverEventSchema.safeParse(failedTargetLeft).success).toBe(true);
+    expect(JSON.parse(serializeServerEvent(failedTargetLeft))).toEqual(failedTargetLeft);
+
+    const kicked = {
+      type: "voteKickResolved" as const,
+      outcome: "kicked" as const,
+    };
+    expect(serverEventSchema.safeParse(kicked).success).toBe(true);
+    expect(JSON.parse(serializeServerEvent(kicked))).toEqual(kicked);
+
+    const left = {
+      type: "playerLeft" as const,
+      playerId: "t99",
+      reason: "kicked" as const,
+    };
+    expect(serverEventSchema.safeParse(left).success).toBe(true);
+    expect(JSON.parse(serializeServerEvent(left))).toEqual(left);
+
+    expect(serverEventSchema.safeParse({ ...started, expiresAtMs: "bad" }).success).toBe(false);
+    expect(
+      serverEventSchema.safeParse({
+        type: "voteKickResolved",
+        outcome: "failed",
+        reason: "bogus",
+      }).success,
+    ).toBe(false);
+  });
+});
+
 describe("serverEventSchema", () => {
   it("rejects roomJoined missing required fields", () => {
     expect(safeParseServerEvent({ type: "roomJoined" }).success).toBe(false);

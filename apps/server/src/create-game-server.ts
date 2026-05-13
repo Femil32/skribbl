@@ -81,6 +81,15 @@ export async function createGameServer() {
   const redis = await getRedisClient();
   const roomManager = new RoomManager(undefined, createWordBankFromEnv(), redis);
 
+  const voteKickPollMs = 30_000;
+  setInterval(() => {
+    try {
+      roomManager.pollVoteKicks();
+    } catch (err) {
+      log.error({ err }, "pollVoteKicks error");
+    }
+  }, voteKickPollMs).unref();
+
   const server = http.createServer(async (req, res) => {
     const path = req.url?.split("?")[0];
 

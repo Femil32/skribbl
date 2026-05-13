@@ -1,8 +1,17 @@
-import type { AvatarPresetId, RoomSettings } from "@skribbl/shared";
-import { DEFAULT_AVATAR_PRESET_ID, isValidAvatarPresetId } from "@skribbl/shared";
-import type { RoomPhase } from "@skribbl/shared";
+import type { AvatarPresetId, RoomPhase, RoomSettings, VoteKickPendingState } from "@skribbl/shared";
+import {
+  DEFAULT_AVATAR_PRESET_ID,
+  isValidAvatarPresetId,
+  voteKickPendingStateSchema,
+} from "@skribbl/shared";
 import type { ChatTranscriptFanoutRow } from "../../room/chat-transcript.js";
 import { DEFAULT_ROOM_SETTINGS } from "../../config/game.js";
+import pino from "pino";
+
+const log = pino({
+  level: process.env.LOG_LEVEL ?? "info",
+  name: "room-keys",
+});
 
 export const ROOM_TTL_IDLE_S = 1800; // 30 min idle
 export const ROOM_TTL_ACTIVE_S = 7200; // 2h active
@@ -77,6 +86,7 @@ export interface PersistedRoomFields {
   drawingPhaseAwardedGuesserIds: Set<string> | null;
   scoresByPlayerId: Record<string, number>;
   settings: RoomSettings;
+  voteKick?: VoteKickPendingState;
 }
 
 export function serializeRoom(r: PersistedRoomFields): Record<string, string> {
@@ -102,6 +112,7 @@ export function serializeRoom(r: PersistedRoomFields): Record<string, string> {
         : "",
     scoresByPlayerId: JSON.stringify(r.scoresByPlayerId),
     settings: JSON.stringify(r.settings),
+    voteKick: r.voteKick !== undefined ? JSON.stringify(r.voteKick) : "",
   };
 }
 
@@ -122,7 +133,22 @@ function parseRoomPhase(value: string | undefined): RoomPhase {
   return value as RoomPhase;
 }
 
-// P-6: wrap all JSON.parse calls so corrupt Redis data throws a clear error
+function parseVoteKickField(raw: string | undefined): VoteKickPendingState | undefined {
+  if (!raw) return undefined;
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(raw);
+  } catch (err) {
+    log.warn({ err }, "voteKick Redis field: invalid JSON");
+    return undefined;
+  }
+  const p = voteKickPendingStateSchema.safeParse(parsedJson);
+  if (!p.success) {
+    log.warn({ issues: p.error.issues }, "voteKick Redis field: schema validation failed");
+    return undefined;
+  }
+  return p.data;
+}
 export function deserializeRoom(h: Record<string, string>): PersistedRoomFields {
   try {
     return {
@@ -150,6 +176,7 @@ export function deserializeRoom(h: Record<string, string>): PersistedRoomFields 
         : null,
       scoresByPlayerId: h["scoresByPlayerId"] ? JSON.parse(h["scoresByPlayerId"]) : {},
       settings: h["settings"] ? (JSON.parse(h["settings"]) as RoomSettings) : { ...DEFAULT_ROOM_SETTINGS },
+      voteKick: parseVoteKickField(h["voteKick"]),
     };
   } catch (err) {
     throw new Error(

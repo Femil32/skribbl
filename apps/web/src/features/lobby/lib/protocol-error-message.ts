@@ -45,12 +45,22 @@ export function messageForProtocolErrorCode(code: string): string {
       return "That message is too long for chat.";
     case "CHAT_EMPTY":
       return "Enter something to send.";
+    case "NO_ACTIVE_VOTE":
+      return "There is no active vote.";
+    case "VOTE_IN_PROGRESS":
+      return "A vote kick is already in progress.";
+    case "ALREADY_VOTED":
+      return "You have already voted in this poll.";
+    case "NOT_ELIGIBLE":
+      return "You are not eligible to vote in this poll.";
+    case "MESSAGE_TOO_LONG":
+      return "That message is too long for chat.";
+    case "INVALID_TARGET":
+      return "Vote kick targets must be someone else connected to this lobby.";
     case "MATCH_IN_PROGRESS":
       return "That cannot be changed or sent while a match is in progress.";
     case "NOT_IN_ROOM":
       return "Room connection mismatch. Try reconnecting.";
-    case "MESSAGE_TOO_LONG":
-      return "That message is too long for chat.";
     case "RATE_LIMITED":
       return "You are sending messages too quickly. Wait a moment.";
     case "BAD_ROOM":

@@ -15,7 +15,7 @@ import {
 } from "@skribbl/shared";
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { useHostCreateRoom } from "@/features/lobby/hooks/use-host-create-room";
+import { useHostCreateRoom, type LobbyVoteKickWireEvent } from "@/features/lobby/hooks/use-host-create-room";
 import { LobbyConnectionBanner } from "@/features/lobby/components/LobbyConnectionBanner";
 import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster";
 import { MatchDrawingColumn } from "@/features/game/components/MatchDrawingColumn";
@@ -24,6 +24,10 @@ import { ScoreboardSummary } from "@/features/match/components/ScoreboardSummary
 import { MatchHintFeed } from "@/features/match/components/MatchHintFeed";
 import { WordChoicePanel } from "@/features/match/components/WordChoicePanel";
 import { MatchChatPanel } from "@/features/match/components/MatchChatPanel";
+import {
+  serializeCastVoteKickCommand,
+  serializeInitiateVoteKickCommand,
+} from "@/lib/ws-client";
 import { buildRoomInviteUrl, resolvePublicWebOrigin } from "@/lib/invite-url";
 import { loadSession } from "@/features/lobby/lib/session-storage";
 import { DR, chunk, WORD_PACKS } from "@/features/lobby/design/tokens";
@@ -93,6 +97,10 @@ export function LobbyHostPage() {
   const shouldConnect = submitted && nicknameOk;
 
   const [toast, setToast] = useState<string | null>(null);
+  const [voteKickActive, setVoteKickActive] = useState<{
+    targetPlayerId: string;
+    expiresAtMs: number;
+  } | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
   const [brushColor, setBrushColor] = useState("#0f172a");
   const [brushWidthPx, setBrushWidthPx] = useState(4);
@@ -110,6 +118,23 @@ export function LobbyHostPage() {
 
   const onLobbyProtocolNotice = useCallback((code: string) => {
     setToast(messageForProtocolErrorCode(code));
+  }, []);
+
+  const onLobbyVoteKickEvent = useCallback((ev: LobbyVoteKickWireEvent) => {
+    if (ev.type === "voteKickStarted") {
+      setVoteKickActive({ targetPlayerId: ev.targetPlayerId, expiresAtMs: ev.expiresAtMs });
+      setToast("Vote kick started.");
+      return;
+    }
+    if (ev.type === "voteKickResolved") {
+      setVoteKickActive(null);
+      if (ev.reason === "target_left") setToast("Vote ended — target left the lobby.");
+      else if (ev.outcome === "kicked") setToast("Player removed by vote.");
+      else if (ev.outcome === "expired") setToast("Vote kick timed out.");
+      else setToast("Vote kick did not pass.");
+      return;
+    }
+    setVoteKickActive(null);
   }, []);
 
   const {
@@ -131,6 +156,7 @@ export function LobbyHostPage() {
     avatarPresetId: avatarId,
     onLobbyChatMessage,
     onLobbyProtocolNotice,
+    onLobbyVoteKickEvent,
   });
 
   const bumpConnectionAttempt = useCallback(() => {
@@ -144,6 +170,11 @@ export function LobbyHostPage() {
   useEffect(() => {
     chatRef.current?.scrollTo({ top: 99999 });
   }, [chatMessages]);
+
+  useEffect(() => {
+    if (state.status !== "lobby") return;
+    if (state.phase !== "lobby") setVoteKickActive(null);
+  }, [state]);
 
   useEffect(() => {
     if (!toast) return;
@@ -645,9 +676,46 @@ export function LobbyHostPage() {
             localPlayerId={state.playerId}
             maxPlayers={maxPlayers}
             accent={ACCENT}
-            isHost={isHost}
-            // onKick wired once backend supports kick command
+            onVoteKick={(targetPlayerId) => {
+              if (transport !== "live") return;
+              sendGameJsonLine(serializeInitiateVoteKickCommand(roomCode, targetPlayerId));
+            }}
           />
+          {state.phase === "lobby" && voteKickActive ? (
+            <div className="mt-3 rounded-box border border-base-300 bg-base-100/80 p-3 text-sm flex flex-col gap-2">
+              <span className="font-semibold text-base-content/90">Kick vote active</span>
+              {voteKickActive.targetPlayerId === state.playerId ? (
+                <span className="text-base-content/75">Others are voting on whether you stay.</span>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    disabled={transport !== "live"}
+                    onClick={() =>
+                      sendGameJsonLine(
+                        serializeCastVoteKickCommand(roomCode, voteKickActive.targetPlayerId, "yes"),
+                      )
+                    }
+                  >
+                    Vote yes — remove
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    disabled={transport !== "live"}
+                    onClick={() =>
+                      sendGameJsonLine(
+                        serializeCastVoteKickCommand(roomCode, voteKickActive.targetPlayerId, "no"),
+                      )
+                    }
+                  >
+                    Vote no — keep
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : null}
         </section>
 
         {/* Settings section — "Rules of the round" */}

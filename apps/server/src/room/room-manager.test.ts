@@ -313,4 +313,210 @@ describe("RoomManager", () => {
       expect(outcome.room.settings.rounds).toBe(3);
     });
   });
+
+  describe("vote kick (Story 8.4)", () => {
+    function makeCapturingWs(): { ws: WebSocket; sent: string[] } {
+      const sent: string[] = [];
+      const ws = { send(msg: string) { sent.push(msg); } } as unknown as WebSocket;
+      return { ws, sent };
+    }
+
+    it("hosts a two-player lobby kicks target immediately when lone voter crosses 55%", () => {
+      const m = new RoomManager(8, testWordBank(), stubRedis());
+      const { ws: hostWs, sent: sentHost } = makeCapturingWs();
+      const { ws: targetWs, sent: sentTarget } = makeCapturingWs();
+
+      const room = m.createRoom(hostWs, player("H"));
+      m.joinRoom(targetWs, room.code, player("T"));
+      const targetSess = m.getLobbySession(targetWs);
+      if (!targetSess) throw new Error("expected target lobby session");
+      const targetId = targetSess.playerId;
+
+      expect(m.applyInitiateVoteKick(hostWs, room.code, targetId)).toEqual({ ok: true });
+
+      const parsedTarget = sentTarget.map((line) => JSON.parse(line));
+      const idxKick = parsedTarget.findIndex((e) => e.type === "voteKickResolved");
+      const idxLeft = parsedTarget.findIndex((e) => e.type === "playerLeft");
+      expect(idxKick).toBeGreaterThanOrEqual(0);
+      expect(idxLeft).toBeGreaterThan(idxKick);
+      expect(parsedTarget[idxKick]).toMatchObject({ type: "voteKickResolved", outcome: "kicked" });
+      expect(parsedTarget[idxLeft]).toMatchObject({
+        type: "playerLeft",
+        playerId: targetId,
+        reason: "kicked",
+      });
+      expect(m.getLobbySession(targetWs)).toBeUndefined();
+
+      const hostKickEv = [...sentHost]
+        .reverse()
+        .find((line) => {
+          try {
+            const e = JSON.parse(line);
+            return e.type === "voteKickResolved" && e.outcome === "kicked";
+          } catch {
+            return false;
+          }
+        });
+      if (!hostKickEv) throw new Error("expected host voteKickResolved");
+      expect(JSON.parse(hostKickEv).type).toBe("voteKickResolved");
+      const hostSess = m.getLobbySession(hostWs);
+      if (!hostSess) throw new Error("expected host lobby session");
+      expect(room.hostPlayerId).toBe(hostSess.playerId);
+    });
+
+    it("returns VOTE_IN_PROGRESS when a vote is already pending", () => {
+      const m = new RoomManager(8, testWordBank(), stubRedis());
+      const { ws: hostWs } = makeCapturingWs();
+      const aWs = stubSocket();
+      const bWs = stubSocket();
+      const tWs = stubSocket();
+      const room = m.createRoom(hostWs, player("H"));
+      m.joinRoom(aWs, room.code, player("A"));
+      m.joinRoom(bWs, room.code, player("B"));
+      m.joinRoom(tWs, room.code, player("T"));
+      const tid = m.getLobbySession(tWs)?.playerId;
+      if (!tid) throw new Error("expected target lobby session");
+      expect(m.applyInitiateVoteKick(hostWs, room.code, tid)).toEqual({ ok: true });
+
+      expect(m.applyInitiateVoteKick(aWs, room.code, tid)).toEqual({
+        ok: false,
+        code: "VOTE_IN_PROGRESS",
+      });
+    });
+
+    it("returns ALREADY_VOTED on duplicate castVoteKick", () => {
+      const m = new RoomManager(8, testWordBank(), stubRedis());
+      const { ws: hostWs } = makeCapturingWs();
+      const voterWs = stubSocket();
+      const tWs = stubSocket();
+      const room = m.createRoom(hostWs, player("H"));
+      m.joinRoom(voterWs, room.code, player("V"));
+      m.joinRoom(tWs, room.code, player("T"));
+      const tid = m.getLobbySession(tWs)?.playerId;
+      if (!tid) throw new Error("expected target lobby session");
+
+      expect(m.applyInitiateVoteKick(voterWs, room.code, tid)).toEqual({ ok: true });
+      expect(m.applyCastVoteKick(voterWs, room.code, tid, "yes")).toEqual({
+        ok: false,
+        code: "ALREADY_VOTED",
+      });
+    });
+
+    it("expires pending vote via pollVoteKicks after window elapses", () => {
+      vi.useFakeTimers();
+      try {
+        const started = Date.now();
+        vi.setSystemTime(started);
+
+        const m = new RoomManager(8, testWordBank(), stubRedis());
+        const { ws: hostWs, sent } = makeCapturingWs();
+        const voterWs = stubSocket();
+        const tWs = stubSocket();
+
+        const room = m.createRoom(hostWs, player("H"));
+        m.joinRoom(voterWs, room.code, player("V"));
+        m.joinRoom(tWs, room.code, player("T"));
+        const tid = m.getLobbySession(tWs)?.playerId;
+        if (!tid) throw new Error("expected target lobby session");
+
+        expect(m.applyInitiateVoteKick(hostWs, room.code, tid)).toEqual({ ok: true });
+        vi.advanceTimersByTime(30_001);
+        m.pollVoteKicks();
+
+        const lastResolved = [...sent].reverse().find((line) => {
+          try {
+            return JSON.parse(line).type === "voteKickResolved";
+          } catch {
+            return false;
+          }
+        });
+        if (lastResolved === undefined) throw new Error("expected expired voteKickResolved");
+        expect(JSON.parse(lastResolved).outcome).toBe("expired");
+        expect(m.getRoomForSocket(hostWs)?.voteKick).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("returns MATCH_IN_PROGRESS when phase leaves lobby", () => {
+      const m = new RoomManager(8, testWordBank(), stubRedis());
+      const { ws: hostWs } = makeCapturingWs();
+      const tWs = stubSocket();
+      const room = m.createRoom(hostWs, player("H"));
+      m.joinRoom(tWs, room.code, player("T"));
+      room.phase = "matchStarting";
+
+      const tSess = m.getLobbySession(tWs);
+      if (!tSess) throw new Error("expected target lobby session");
+      expect(m.applyInitiateVoteKick(hostWs, room.code, tSess.playerId)).toEqual({
+        ok: false,
+        code: "MATCH_IN_PROGRESS",
+      });
+    });
+
+    it("returns NOT_IN_ROOM for sockets outside the room", () => {
+      const m = new RoomManager(8, testWordBank(), stubRedis());
+      const { ws: hostWs } = makeCapturingWs();
+      const lonerWs = stubSocket();
+      const created = m.createRoom(hostWs, player("H"));
+
+      expect(m.applyInitiateVoteKick(lonerWs, created.code, "any-id")).toEqual({
+        ok: false,
+        code: "NOT_IN_ROOM",
+      });
+    });
+
+    it("resolves failed target_left when target disconnects mid-vote", () => {
+      const m = new RoomManager(8, testWordBank(), stubRedis());
+      const { ws: hostWs, sent } = makeCapturingWs();
+      const keeperWs = stubSocket();
+      const tWs = stubSocket();
+
+      const room = m.createRoom(hostWs, player("H"));
+      m.joinRoom(keeperWs, room.code, player("K"));
+      m.joinRoom(tWs, room.code, player("T"));
+      const tid = m.getLobbySession(tWs)?.playerId;
+      if (!tid) throw new Error("expected target lobby session");
+
+      expect(m.applyInitiateVoteKick(hostWs, room.code, tid)).toEqual({ ok: true });
+      m.leaveSocketRoom(tWs);
+
+      const resolved = [...sent]
+        .map((line) => JSON.parse(line))
+        .filter((e) => e.type === "voteKickResolved")
+        .at(-1);
+      expect(resolved).toMatchObject({
+        type: "voteKickResolved",
+        outcome: "failed",
+        reason: "target_left",
+      });
+    });
+
+    it("resolves failed when voter leaves and yes can no longer reach 55%", () => {
+      const m = new RoomManager(8, testWordBank(), stubRedis());
+      const { ws: hostWs, sent } = makeCapturingWs();
+      const aWs = stubSocket();
+      const bWs = stubSocket();
+      const tWs = stubSocket();
+
+      const room = m.createRoom(hostWs, player("H"));
+      m.joinRoom(aWs, room.code, player("A"));
+      m.joinRoom(bWs, room.code, player("B"));
+      m.joinRoom(tWs, room.code, player("T"));
+      const tid = m.getLobbySession(tWs)?.playerId;
+      if (!tid) throw new Error("expected target lobby session");
+
+      expect(m.applyInitiateVoteKick(hostWs, room.code, tid)).toEqual({ ok: true });
+      expect(m.applyCastVoteKick(aWs, room.code, tid, "no")).toEqual({ ok: true });
+
+      m.leaveSocketRoom(bWs);
+
+      const resolved = [...sent]
+        .map((line) => JSON.parse(line))
+        .filter((e) => e.type === "voteKickResolved")
+        .at(-1);
+      expect(resolved).toMatchObject({ type: "voteKickResolved", outcome: "failed" });
+      expect(m.getRoomForSocket(hostWs)?.voteKick).toBeUndefined();
+    });
+  });
 });
