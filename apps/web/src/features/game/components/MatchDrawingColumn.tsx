@@ -2,14 +2,17 @@
 
 import type { CanvasReplayEvent, RoomPhase } from "@skribbl/shared";
 import { useMemo, useState } from "react";
+import { chunk, type DrPalette } from "@/features/lobby/design/tokens";
 import {
   DrawingCanvas,
   type DrawingActiveTool,
   type DrawingCanvasMode,
 } from "@/features/game/canvas/DrawingCanvas";
-import { DrawingToolbar } from "@/features/game/toolbar/DrawingToolbar";
+import { DrMatchDrawingToolbar } from "@/features/match/components/DrMatchDrawingToolbar";
 
 export type MatchDrawingColumnProps = {
+  palette: DrPalette;
+  accentHex: string;
   phase: RoomPhase;
   localPlayerId: string;
   drawerPlayerId?: string;
@@ -23,12 +26,16 @@ export type MatchDrawingColumnProps = {
   sendJsonLine: (raw: string) => void;
   remoteCanvasCommits: CanvasReplayEvent[];
   wsLive: boolean;
+  /** Guesser SKR reference: “🔍 Guess the word!” chip overlaying the canvas. */
+  showGuessBanner: boolean;
 };
 
 /**
- * Direction-1 canvas stack: optional drawer toolbar + shared `DrawingCanvas` (Story 3.5 + 3.6).
+ * Match canvas stack — canvas first, chunky DR toolbar under drawer (ScreenGame.jsx order).
  */
 export function MatchDrawingColumn({
+  palette,
+  accentHex,
   phase,
   localPlayerId,
   drawerPlayerId,
@@ -41,8 +48,10 @@ export function MatchDrawingColumn({
   sendJsonLine,
   remoteCanvasCommits,
   wsLive,
+  showGuessBanner,
 }: MatchDrawingColumnProps) {
   const [activeTool, setActiveTool] = useState<DrawingActiveTool>("brush");
+  const ck = (x = 4, y = 5) => chunk(x, y, palette.line);
 
   const isDrawer =
     drawerPlayerId !== undefined && drawerPlayerId === localPlayerId;
@@ -67,10 +76,59 @@ export function MatchDrawingColumn({
 
   return (
     <div
-      className="flex w-full flex-col gap-2"
+      className="flex w-full min-h-0 flex-1 flex-col gap-3"
       data-testid="match-drawing-column"
     >
-      <DrawingToolbar
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          position: "relative",
+          background: "#ffffff",
+          border: `3px solid ${palette.line}`,
+          borderRadius: 18,
+          boxShadow: ck(6, 8),
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        {showGuessBanner && phase === "drawing" ? (
+          <div
+            style={{
+              position: "absolute",
+              top: 12,
+              left: "50%",
+              transform: "translateX(-50%)",
+              background: palette.panel,
+              border: `2px solid ${palette.line}`,
+              borderRadius: 10,
+              padding: "4px 12px",
+              fontWeight: 700,
+              fontSize: 12,
+              boxShadow: ck(3, 4),
+              zIndex: 2,
+              pointerEvents: "none",
+            }}
+          >
+            🔍 Guess the word!
+          </div>
+        ) : null}
+        <DrawingCanvas
+          key={canvasInstanceKey}
+          className="min-h-[200px] w-full flex-1"
+          brushColor={brushColor}
+          brushWidthPx={brushWidthPx}
+          activeTool={activeTool}
+          mode={canvasMode}
+          strokeTransport={strokeTransport}
+          remoteCanvasCommits={remoteCanvasCommits}
+        />
+      </div>
+
+      <DrMatchDrawingToolbar
+        palette={palette}
+        accentHex={accentHex}
         phase={phase}
         isDrawer={isDrawer}
         roomId={roomId}
@@ -82,23 +140,12 @@ export function MatchDrawingColumn({
         onBrushColorChange={onBrushColorChange}
         onBrushWidthChange={onBrushWidthChange}
       />
+
       {phase === "drawing" && !isDrawer ? (
-        <p className="text-xs text-base-content/60" role="note">
-          Only the drawer can use color and brush controls. You can still watch the sketch.
+        <p style={{ fontSize: 12, color: palette.inkDim, margin: 0 }} role="note">
+          Only the drawer can use tools. You can still watch the sketch.
         </p>
       ) : null}
-      <div className="flex min-h-[220px] w-full flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200">
-        <DrawingCanvas
-          key={canvasInstanceKey}
-          className="min-h-[200px]"
-          brushColor={brushColor}
-          brushWidthPx={brushWidthPx}
-          activeTool={activeTool}
-          mode={canvasMode}
-          strokeTransport={strokeTransport}
-          remoteCanvasCommits={remoteCanvasCommits}
-        />
-      </div>
     </div>
   );
 }

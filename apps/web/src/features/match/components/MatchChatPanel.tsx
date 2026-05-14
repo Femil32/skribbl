@@ -8,6 +8,9 @@ import {
 } from "@skribbl/shared";
 import { FormEvent, useEffect, useRef, useState } from "react";
 
+import type { DrPalette } from "@/features/lobby/design/tokens";
+import { DR } from "@/features/lobby/design/tokens";
+
 export type MatchChatFeedEvent = Extract<
   ServerEvent,
   | { type: "chatPlayerMessage" }
@@ -22,6 +25,15 @@ type MatchChatPanelProps = {
   disabled: boolean;
   /** Ephemeral private proximity hint (Story 7.1); not part of chat log. */
   closeGuessHint?: { message: string; id: string } | null;
+  /** DaisyUI (default) vs Doodle Royale chunky kit (HTML references). */
+  variant?: "daisy" | "doodleRoyale";
+  /** Required when `variant` is `doodleRoyale`. */
+  palette?: DrPalette;
+  accentHex?: string;
+  /** Hide composer (e.g. drawer “Their guesses” view). */
+  showComposer?: boolean;
+  composerPlaceholder?: string;
+  composerSubmitLabel?: string;
 };
 
 /** Whisper banner for close-guess feedback (Story 7.1 / FR24). */
@@ -47,6 +59,12 @@ export function MatchChatPanel({
   onSend,
   disabled,
   closeGuessHint = null,
+  variant = "daisy",
+  palette,
+  accentHex,
+  showComposer = true,
+  composerPlaceholder = "type your guess…",
+  composerSubmitLabel = "go",
 }: MatchChatPanelProps) {
   const listRef = useRef<HTMLOListElement>(null);
   const [draft, setDraft] = useState("");
@@ -106,6 +124,229 @@ export function MatchChatPanel({
   const chatLengthOk =
     trimmedDraft === "" || assertChatMessageLength(sanitizeChatMessage(trimmedDraft)).ok;
 
+  const useDr = variant === "doodleRoyale" && palette !== undefined && accentHex !== undefined;
+  const C = palette;
+  const accent = accentHex;
+
+  function messagesInner() {
+    return feed.map((ev) => {
+      if (ev.type === "chatPlayerMessage") {
+        const isSelf = ev.senderPlayerId === localPlayerId;
+        if (useDr && C) {
+          return (
+            <li key={`${ev.id}:${ev.ts}`} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <span
+                style={{
+                  fontWeight: 800,
+                  color: isSelf ? accent : C.ink,
+                  flexShrink: 0,
+                }}
+              >
+                {ev.senderDisplayName}
+              </span>
+              <span style={{ fontWeight: 500, color: C.ink }}>{ev.text}</span>
+            </li>
+          );
+        }
+        return (
+          <li
+            key={`${ev.id}:${ev.ts}`}
+            className={`text-sm break-words ${isSelf ? "text-end" : "text-start"}`}
+          >
+            <span className="font-semibold text-base-content/85">
+              {ev.senderDisplayName}:{" "}
+            </span>
+            <span className="text-base-content">{ev.text}</span>
+          </li>
+        );
+      }
+      if (ev.type === "chatSystemMessage") {
+        if (useDr && C) {
+          return (
+            <li key={`${ev.id}:${ev.ts}`} style={{ fontSize: 12, color: C.inkDim, fontStyle: "italic" }}>
+              <span style={{ fontWeight: 600, fontStyle: "normal" }}>System · </span>
+              {ev.text}
+            </li>
+          );
+        }
+        return (
+          <li
+            key={`${ev.id}:${ev.ts}`}
+            className="text-xs text-base-content/75 italic text-start break-words"
+          >
+            <span className="font-medium not-italic">System · </span>
+            {ev.text}
+          </li>
+        );
+      }
+      if (useDr && C) {
+        return (
+          <li
+            key={`${ev.id}:${ev.ts}`}
+            data-chat-row="correctGuess"
+            style={{ display: "flex", gap: 8, alignItems: "flex-start" }}
+          >
+            <span style={{ fontWeight: 800, color: DR.semantic.success, flexShrink: 0 }}>✓</span>
+            <span style={{ fontWeight: 700, color: C.ink, background: "rgba(42,143,74,.12)", borderRadius: 6, padding: "0 6px" }}>
+              {lineForCorrectGuess(ev)}
+            </span>
+          </li>
+        );
+      }
+      return (
+        <li
+          key={`${ev.id}:${ev.ts}`}
+          className="text-sm text-success font-medium text-start break-words flex gap-2 items-start"
+          data-chat-row="correctGuess"
+        >
+          <span className="shrink-0 mt-px" aria-hidden="true">
+            ✓
+          </span>
+          <span className="min-w-0">{lineForCorrectGuess(ev)}</span>
+        </li>
+      );
+    });
+  }
+
+  if (useDr && C) {
+    return (
+      <section
+        aria-labelledby="match-chat-heading"
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          flex: 1,
+          minHeight: 0,
+          maxHeight: "min(64vh, 520px)",
+        }}
+      >
+        <h2 id="match-chat-heading" className="sr-only">
+          Room chat
+        </h2>
+        {closeHintBanner ? (
+          <div
+            data-testid="close-guess-hint"
+            style={{
+              flexShrink: 0,
+              padding: "8px 10px",
+              fontSize: 13,
+              background: "rgba(91,141,239,0.15)",
+              borderBottom: `1px solid rgba(91,141,239,0.35)`,
+              color: C.ink,
+            }}
+            role="status"
+            aria-live="polite"
+          >
+            {closeHintBanner}
+          </div>
+        ) : null}
+        {pulseBanner ? (
+          <div
+            data-testid="correct-guess-pulse-banner"
+            style={{
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 8,
+              padding: "8px 10px",
+              fontSize: 13,
+              background: "rgba(42,143,74,0.12)",
+              borderBottom: `1px solid rgba(42,143,74,0.35)`,
+              color: C.ink,
+            }}
+            role="status"
+            aria-live="polite"
+          >
+            <span aria-hidden>✓</span>
+            <span className="min-w-0">{pulseBanner}</span>
+          </div>
+        ) : null}
+        <ol
+          ref={listRef}
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            background: C.panel2,
+            border: `2px solid ${C.line}`,
+            borderRadius: 12,
+            padding: 10,
+            margin: 0,
+            listStyle: "none",
+            fontSize: 13,
+            lineHeight: 1.45,
+          }}
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions"
+        >
+          {messagesInner()}
+        </ol>
+        {showComposer ? (
+          <form
+            style={{ display: "flex", gap: 8, marginTop: 10, flexShrink: 0 }}
+            onSubmit={onSubmit}
+          >
+            <label className="sr-only" htmlFor="match-chat-composer">
+              Type a guess in chat
+            </label>
+            <input
+              id="match-chat-composer"
+              data-testid="chat-composer-input"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              disabled={disabled}
+              autoComplete="off"
+              placeholder={composerPlaceholder}
+              aria-invalid={trimmedDraft !== "" && !chatLengthOk}
+              aria-describedby={
+                trimmedDraft !== "" && !chatLengthOk ? "match-chat-composer-limit" : undefined
+              }
+              style={{
+                flex: 1,
+                padding: "10px 12px",
+                border: `2.5px solid ${C.line}`,
+                borderRadius: 12,
+                background: C.panel2,
+                color: C.ink,
+                fontFamily: DR.font.body,
+                fontSize: 14,
+                outline: "none",
+                minWidth: 0,
+              }}
+            />
+            <button
+              type="submit"
+              disabled={disabled || trimmedDraft === "" || !chatLengthOk}
+              style={{
+                border: `2.5px solid ${C.line}`,
+                borderRadius: 12,
+                background: C.ink,
+                color: C.panel,
+                padding: "0 14px",
+                fontWeight: 800,
+                cursor:
+                  disabled || trimmedDraft === "" || !chatLengthOk ? "not-allowed" : "pointer",
+                fontFamily: DR.font.body,
+                opacity: disabled || trimmedDraft === "" || !chatLengthOk ? 0.5 : 1,
+              }}
+            >
+              {composerSubmitLabel}
+            </button>
+          </form>
+        ) : null}
+        {trimmedDraft !== "" && !chatLengthOk ? (
+          <p id="match-chat-composer-limit" style={{ fontSize: 12, color: DR.semantic.danger }} role="alert">
+            Message is too long (max {CHAT_MESSAGE_MAX_GRAPHEMES} graphemes).
+          </p>
+        ) : null}
+      </section>
+    );
+  }
+
   return (
     <section
       aria-labelledby="match-chat-heading"
@@ -144,45 +385,7 @@ export function MatchChatPanel({
         aria-live="polite"
         aria-relevant="additions"
       >
-        {feed.map((ev) => {
-          if (ev.type === "chatPlayerMessage") {
-            const isSelf = ev.senderPlayerId === localPlayerId;
-            return (
-              <li
-                key={`${ev.id}:${ev.ts}`}
-                className={`text-sm break-words ${isSelf ? "text-end" : "text-start"}`}
-              >
-                <span className="font-semibold text-base-content/85">
-                  {ev.senderDisplayName}:{" "}
-                </span>
-                <span className="text-base-content">{ev.text}</span>
-              </li>
-            );
-          }
-          if (ev.type === "chatSystemMessage") {
-            return (
-              <li
-                key={`${ev.id}:${ev.ts}`}
-                className="text-xs text-base-content/75 italic text-start break-words"
-              >
-                <span className="font-medium not-italic">System · </span>
-                {ev.text}
-              </li>
-            );
-          }
-          return (
-            <li
-              key={`${ev.id}:${ev.ts}`}
-              className="text-sm text-success font-medium text-start break-words flex gap-2 items-start"
-              data-chat-row="correctGuess"
-            >
-              <span className="shrink-0 mt-px" aria-hidden="true">
-                ✓
-              </span>
-              <span className="min-w-0">{lineForCorrectGuess(ev)}</span>
-            </li>
-          );
-        })}
+        {messagesInner()}
       </ol>
       <form
         className="shrink-0 flex flex-col gap-1 p-2 border-t border-base-300 bg-base-100 rounded-b-box"

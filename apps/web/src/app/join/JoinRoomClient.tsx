@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import type { AvatarPresetId } from "@skribbl/shared";
 import {
@@ -9,7 +9,6 @@ import {
   NICKNAME_MAX_GRAPHEMES,
   assertChatMessageLength,
   countGraphemes,
-  isMatchFlowPhase,
   isValidRoomCodeForJoin,
   normalizeRoomCode,
   sanitizeChatMessage,
@@ -30,16 +29,9 @@ import {
   clipboardFailureMessage,
   copyToClipboard,
 } from "@/features/lobby/lib/lobby-dr-clipboard";
-import { LobbyConnectionBanner } from "@/features/lobby/components/LobbyConnectionBanner";
 import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster";
 import { LobbyDrWaitingRoom } from "@/features/lobby/components/LobbyDrWaitingRoom";
 import { CreateRoomForm } from "@/features/lobby/components/CreateRoomForm";
-import { MatchDrawingColumn } from "@/features/game/components/MatchDrawingColumn";
-import { PhaseBar } from "@/features/match/components/PhaseBar";
-import { ScoreboardSummary } from "@/features/match/components/ScoreboardSummary";
-import { MatchHintFeed } from "@/features/match/components/MatchHintFeed";
-import { WordChoicePanel } from "@/features/match/components/WordChoicePanel";
-import { MatchChatPanel } from "@/features/match/components/MatchChatPanel";
 import { loadSession } from "@/features/lobby/lib/session-storage";
 import { DR, chunk } from "@/features/lobby/design/tokens";
 import { randomClientId } from "@/lib/random-client-id";
@@ -88,6 +80,7 @@ type JoinRoomClientProps = {
  * sent after display name + optional avatar preset are chosen (Story 1.5).
  */
 export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const codeFromRouter = searchParams.get("code");
   const effectiveQueryRaw =
@@ -117,8 +110,6 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
   const [avatarId, setAvatarId] = useState<AvatarPresetId>(
     DEFAULT_AVATAR_PRESET_ID,
   );
-  const [brushColor, setBrushColor] = useState("#0f172a");
-  const [brushWidthPx, setBrushWidthPx] = useState(4);
 
   const normalized = normalizeRoomCode(raw);
   const formatOk = isValidRoomCodeForJoin(normalized);
@@ -191,10 +182,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
   const {
     state: guestState,
     transport: guestTransport,
-    connectionReason: guestConnectionReason,
     transportErrorMessage: guestTransportError,
-    awaitingRoomHandshake: guestAwaitingHandshake,
-    chooseWord: guestChooseWord,
     sendGameJsonLine: guestSendGameJsonLine,
     sendChat: guestSendChat,
     leaveLobby: guestLeaveLobby,
@@ -223,6 +211,12 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
     if (guestState.status !== "joined") return;
     if (guestState.phase !== "lobby") setGuestVoteKickActive(null);
   }, [guestState]);
+
+  useEffect(() => {
+    if (guestState.status !== "joined") return;
+    if (guestState.phase === "lobby") return;
+    router.replace(`/game?code=${encodeURIComponent(guestState.roomCode)}`);
+  }, [guestState, router]);
 
   // Track whether the current attempt is a page-reload reconnect so we can detect fallback.
   const [isPageReloadReconnect, setIsPageReloadReconnect] = useState(false);
@@ -257,10 +251,6 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
   const connecting = guestState.status === "connecting";
   const bannerErrorDetail =
     guestState.status === "error" ? guestState.message : guestTransportError;
-  const bannerOnRetry =
-    guestTransport === "fatal" || guestTransport === "disconnected"
-      ? bumpGuestConnection
-      : undefined;
   const helperFormat =
     raw.trim().length > 0 && !formatOk
       ? "After removing spaces and symbols, codes are six letters or numbers using 2–9 and A–Z (excluding O, I, and L)."
@@ -313,6 +303,14 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
   }
 
   if (guestState.status === "joined") {
+    if (guestState.phase !== "lobby") {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-base-200 p-8">
+          <p className="text-base-content/80">Opening match…</p>
+        </div>
+      );
+    }
+
     const publicOriginJoin =
       resolvePublicWebOrigin() ||
       (typeof window !== "undefined" ? window.location.origin : "");
@@ -346,8 +344,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
       setJoinLobbyDraft("");
     };
 
-    if (guestState.phase === "lobby") {
-      const hostPlayer = guestState.players.find((p) => p.isHost);
+    const hostPlayer = guestState.players.find((p) => p.isHost);
       const CJ = DR.colors;
       const ckj = (x = 4, y = 5) => chunk(x, y, CJ.line);
       const calloutJoined = (
@@ -489,24 +486,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
       );
 
       return (
-        <>
-          {guestTransport !== "live" ? (
-            <LobbyConnectionBanner
-              transport={guestTransport}
-              reason={guestConnectionReason}
-              errorMessage={
-                guestTransport === "blocked" || guestTransport === "fatal"
-                  ? bannerErrorDetail
-                  : undefined
-              }
-              awaitingRoomHandshake={false}
-              onRetry={
-                guestTransport === "disconnected" ? bumpGuestConnection : undefined
-              }
-              onReload={guestTransport === "blocked" ? reloadFullPage : undefined}
-            />
-          ) : null}
-          <LobbyDrWaitingRoom
+        <LobbyDrWaitingRoom
             callout={calloutJoined}
             roomCode={guestState.roomCode}
             headerEyebrow={`Invitation · #${guestState.roomCode}`}
@@ -601,186 +581,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
             }
             sidebarFooter={guestSidebarFooterJoined}
           />
-        </>
       );
-    }
-
-    return (
-      <div className="min-h-screen flex flex-col bg-base-200">
-        <LobbyConnectionBanner
-          transport={guestTransport}
-          reason={guestConnectionReason}
-          errorMessage={
-            guestTransport === "blocked" || guestTransport === "fatal"
-              ? bannerErrorDetail
-              : undefined
-          }
-          awaitingRoomHandshake={false}
-          onRetry={
-            guestTransport === "disconnected" ? bumpGuestConnection : undefined
-          }
-          onReload={guestTransport === "blocked" ? reloadFullPage : undefined}
-        />
-        <div className="flex flex-1 flex-col items-center justify-center p-8">
-          <div
-            className={`card bg-base-100 shadow-xl w-full ${
-              isMatchFlowPhase(guestState.phase) ? "max-w-4xl" : "max-w-lg"
-            } ${
-              guestTransport === "disconnected"
-                ? "opacity-60 pointer-events-none"
-                : ""
-            }`}
-          >
-            <div className="card-body gap-6 text-center">
-              <h1 className="card-title text-2xl justify-center">
-                {guestState.phase === "matchEnded"
-                  ? "Match finished"
-                  : isMatchFlowPhase(guestState.phase)
-                    ? "Match in progress"
-                    : "Waiting"}
-              </h1>
-              <p className="text-base-content/80">
-                {guestState.phase === "matchEnded" ? (
-                  <>
-                    You are{" "}
-                    <span className="font-semibold">{guestState.displayName}</span> in
-                    this room. Final scores are below — wait for the host to play again.
-                  </>
-                ) : isMatchFlowPhase(guestState.phase) ? (
-                  <>
-                    You are{" "}
-                    <span className="font-semibold">{guestState.displayName}</span> in
-                    this room as a guest.
-                  </>
-                ) : (
-                  <>
-                    Waiting for the host — you&apos;ll join the round when it begins.
-                  </>
-                )}
-              </p>
-              {isMatchFlowPhase(guestState.phase) || guestState.phase === "matchEnded" ? (
-                <PhaseBar
-                  phase={guestState.phase}
-                  players={guestState.players}
-                  localPlayerId={guestState.playerId}
-                  drawerPlayerId={guestState.drawerPlayerId}
-                  matchRoundIndex={guestState.matchRoundIndex}
-                  phaseDeadlineMs={guestState.phaseDeadlineMs}
-                />
-              ) : null}
-              {guestState.phase === "drawing" ? (
-                <MatchHintFeed
-                  rows={guestState.drawingHintRows}
-                  suppressForDrawer={
-                    Boolean(
-                      guestState.drawerPlayerId &&
-                        guestState.playerId === guestState.drawerPlayerId,
-                    )
-                  }
-                />
-              ) : null}
-              {guestState.phase === "matchEnded" ? (
-                <ScoreboardSummary
-                  players={guestState.players}
-                  localPlayerId={guestState.playerId}
-                  isHost={false}
-                />
-              ) : null}
-              {guestState.phase === "choosingWord" &&
-              guestState.playerId === guestState.drawerPlayerId ? (
-                <WordChoicePanel
-                  words={guestState.wordChoiceOffer?.words ?? null}
-                  isLoading={guestState.wordChoiceOffer == null}
-                  errorMessage={guestState.wordChoicePickError ?? null}
-                  onPick={guestChooseWord}
-                  disabled={guestTransport !== "live"}
-                  phaseDeadlineMs={guestState.phaseDeadlineMs}
-                  deadlineResetKey={
-                    guestState.matchRoundIndex !== undefined
-                      ? `${guestState.roomId}-${String(guestState.matchRoundIndex)}`
-                      : guestState.roomId
-                  }
-                />
-              ) : null}
-              {isMatchFlowPhase(guestState.phase) ? (
-                <div className="grid gap-4 lg:grid-cols-[1fr_minmax(280px,340px)] lg:items-start w-full max-w-4xl mx-auto">
-                  <MatchDrawingColumn
-                    phase={guestState.phase}
-                    localPlayerId={guestState.playerId}
-                    drawerPlayerId={guestState.drawerPlayerId}
-                    roomId={guestState.roomId}
-                    matchRoundIndex={guestState.matchRoundIndex}
-                    brushColor={brushColor}
-                    brushWidthPx={brushWidthPx}
-                    onBrushColorChange={setBrushColor}
-                    onBrushWidthChange={setBrushWidthPx}
-                    sendJsonLine={guestSendGameJsonLine}
-                    remoteCanvasCommits={guestState.remoteCanvasCommits}
-                    wsLive={guestTransport === "live"}
-                  />
-                  <MatchChatPanel
-                    localPlayerId={guestState.playerId}
-                    feed={guestState.chatFeed}
-                    onSend={guestSendChat}
-                    disabled={guestTransport !== "live"}
-                    closeGuessHint={guestState.closeGuessHint}
-                  />
-                </div>
-              ) : guestState.phase === "matchEnded" ? (
-                <div className="w-full max-w-lg mx-auto">
-                  <MatchChatPanel
-                    localPlayerId={guestState.playerId}
-                    feed={guestState.chatFeed}
-                    onSend={guestSendChat}
-                    disabled={guestTransport !== "live"}
-                    closeGuessHint={guestState.closeGuessHint}
-                  />
-                  <p className="text-sm text-base-content/70 mt-3">
-                    Match finished — scores are above. Wait for the host to play again.
-                  </p>
-                </div>
-              ) : null}
-
-              <div className="space-y-2 text-left w-full max-w-md mx-auto">
-                <span className="text-sm font-medium text-base-content/70">
-                  Players ({String(guestState.players.length)})
-                </span>
-                <LobbyPlayerRoster
-                  players={guestState.players}
-                  localPlayerId={guestState.playerId}
-                  maxPlayers={12}
-                  accent="#ff5a3c"
-                  onVoteKick={(targetPlayerId) => {
-                    if (guestTransport !== "live") return;
-                    guestSendGameJsonLine(
-                      serializeInitiateVoteKickCommand(guestState.roomCode, targetPlayerId),
-                    );
-                  }}
-                />
-              </div>
-              <div className="space-y-2">
-                <span className="text-sm font-medium text-base-content/70">Room code</span>
-                <p className="font-mono text-2xl tracking-widest bg-base-200 rounded-box px-3 py-3 border border-base-300">
-                  {guestState.roomCode}
-                </p>
-              </div>
-              <p className="text-sm text-base-content/70">
-                Players here:{" "}
-                <span className="font-semibold tabular-nums">{guestState.playerCount}</span>
-              </p>
-              <div className="card-actions flex-wrap justify-center gap-2">
-                <Link href="/" className="btn btn-ghost">
-                  Home
-                </Link>
-                <Link href="/lobby" className="btn btn-primary">
-                  Create a room
-                </Link>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
   }
 
 
@@ -803,23 +604,37 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
 
   return (
     <div className="min-h-screen flex flex-col bg-base-200">
-      <LobbyConnectionBanner
-        transport={guestTransport}
-        reason={guestConnectionReason}
-        errorMessage={bannerErrorDetail}
-        awaitingRoomHandshake={guestAwaitingHandshake}
-        onRetry={bannerOnRetry}
-        onReload={guestTransport === "blocked" ? reloadFullPage : undefined}
-      />
       <div className="flex flex-1 flex-col min-h-0">
         {connecting ? (
           <div className="flex flex-1 flex-col items-center justify-center p-8 text-center gap-4">
-            <p className="text-base-content/80 max-w-md">
-              Working on your join request — see the connection status above.
-            </p>
+            <p className="text-base-content/80 max-w-md">Working on your join request…</p>
           </div>
         ) : (
           <>
+            {guestTransport === "fatal" ||
+            guestTransport === "blocked" ||
+            guestTransport === "disconnected" ? (
+              <div
+                role="alert"
+                className="alert alert-warning m-4 flex-col sm:flex-row items-stretch gap-3"
+              >
+                <span className="min-w-0">
+                  {bannerErrorDetail ?? "Connection issue — check your network or try again."}
+                </span>
+                <div className="flex flex-wrap gap-2 shrink-0">
+                  {guestTransport === "fatal" || guestTransport === "disconnected" ? (
+                    <button type="button" className="btn btn-sm btn-primary" onClick={bumpGuestConnection}>
+                      Retry
+                    </button>
+                  ) : null}
+                  {guestTransport === "blocked" ? (
+                    <button type="button" className="btn btn-sm btn-outline" onClick={reloadFullPage}>
+                      Reload page
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
             {protocolErrorMsg ? (
               <p id={protocolErrId} className="sr-only">
                 {protocolErrorMsg}

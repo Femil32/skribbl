@@ -6,23 +6,16 @@ import {
   NICKNAME_MAX_GRAPHEMES,
   assertChatMessageLength,
   countGraphemes,
-  isMatchFlowPhase,
   sanitizeChatMessage,
   sanitizeDisplayName,
   type LobbyChatMessageEvent,
   type RoomPhase,
 } from "@skribbl/shared";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useHostCreateRoom, type LobbyVoteKickWireEvent } from "@/features/lobby/hooks/use-host-create-room";
-import { LobbyConnectionBanner } from "@/features/lobby/components/LobbyConnectionBanner";
 import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster";
-import { MatchDrawingColumn } from "@/features/game/components/MatchDrawingColumn";
-import { PhaseBar } from "@/features/match/components/PhaseBar";
-import { ScoreboardSummary } from "@/features/match/components/ScoreboardSummary";
-import { MatchHintFeed } from "@/features/match/components/MatchHintFeed";
-import { WordChoicePanel } from "@/features/match/components/WordChoicePanel";
-import { MatchChatPanel } from "@/features/match/components/MatchChatPanel";
 import {
   serializeCastVoteKickCommand,
   serializeInitiateVoteKickCommand,
@@ -47,6 +40,7 @@ const ACCENT = DR.accent.tomato;
 type ChatMessage = LobbyDrChatMessage;
 
 export function LobbyHostPage() {
+  const router = useRouter();
   const [nicknameRaw, setNicknameRaw] = useState("");
   const [avatarId, setAvatarId] = useState<AvatarPresetId>(
     DEFAULT_AVATAR_PRESET_ID,
@@ -75,8 +69,6 @@ export function LobbyHostPage() {
     expiresAtMs: number;
   } | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
-  const [brushColor, setBrushColor] = useState("#0f172a");
-  const [brushWidthPx, setBrushWidthPx] = useState(4);
 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatDraft, setChatDraft] = useState("");
@@ -112,14 +104,8 @@ export function LobbyHostPage() {
   const {
     state,
     transport,
-    connectionReason,
-    transportErrorMessage,
-    awaitingRoomHandshake,
     startMatch,
-    chooseWord,
-    returnToLobby,
     sendGameJsonLine,
-    sendChat,
     sendLobbyChat,
     leaveLobby,
   } = useHostCreateRoom({
@@ -140,6 +126,11 @@ export function LobbyHostPage() {
     if (typeof window !== "undefined") window.location.reload();
   }, []);
 
+  useEffect(() => {
+    if (state.status !== "lobby") return;
+    if (state.phase === "lobby") return;
+    router.replace("/game");
+  }, [state, router]);
 
   useEffect(() => {
     if (state.status !== "lobby") return;
@@ -229,20 +220,8 @@ export function LobbyHostPage() {
   // ─── Connecting state ────────────────────────────────────────────────────────
   if (state.status === "connecting") {
     return (
-      <div className="min-h-screen flex flex-col bg-base-200">
-        <LobbyConnectionBanner
-          transport={transport}
-          reason={connectionReason}
-          errorMessage={transportErrorMessage}
-          awaitingRoomHandshake={awaitingRoomHandshake}
-        />
-        <div className="flex flex-1 flex-col items-center justify-center p-8">
-          <div className="card bg-base-100 shadow-xl w-full max-w-lg">
-            <div className="card-body items-center text-center gap-4">
-              <p className="text-base-content/80">Setting up your lobby session…</p>
-            </div>
-          </div>
-        </div>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-base-200 p-8">
+        <p className="text-base-content/80">Setting up your lobby session…</p>
       </div>
     );
   }
@@ -259,31 +238,25 @@ export function LobbyHostPage() {
       );
     }
     return (
-      <div className="min-h-screen flex flex-col bg-base-200">
-        <LobbyConnectionBanner
-          transport={transport}
-          reason={connectionReason}
-          errorMessage={state.message}
-          awaitingRoomHandshake={awaitingRoomHandshake}
-          onRetry={
-            transport === "fatal" || transport === "disconnected"
-              ? bumpConnectionAttempt
-              : undefined
-          }
-          onReload={transport === "blocked" ? reloadFullPage : undefined}
-        />
-        <div className="flex flex-1 flex-col items-center justify-center p-8">
-          <div className="card bg-base-100 shadow-xl w-full max-w-lg">
-            <div className="card-body gap-4">
-              <h1 className="card-title text-2xl">Could not create room</h1>
-              <div className="card-actions justify-end">
-                <Link href="/" className="btn btn-ghost">
-                  Back home
-                </Link>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-base-200 p-8 gap-4">
+        <div className="card bg-base-100 shadow-xl w-full max-w-lg">
+          <div className="card-body gap-4">
+            <h1 className="card-title text-2xl">Could not create room</h1>
+            <p className="text-base-content/80">{state.message}</p>
+            <div className="card-actions justify-end flex-wrap gap-2">
+              <Link href="/" className="btn btn-ghost">
+                Back home
+              </Link>
+              {transport === "blocked" ? (
+                <button type="button" className="btn btn-outline btn-primary" onClick={reloadFullPage}>
+                  Reload page
+                </button>
+              ) : null}
+              {transport === "fatal" || transport === "disconnected" ? (
                 <button type="button" className="btn btn-primary" onClick={bumpConnectionAttempt}>
                   Try again
                 </button>
-              </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -294,20 +267,8 @@ export function LobbyHostPage() {
   // ─── Fallback: unknown status ─────────────────────────────────────────────
   if (state.status !== "lobby") {
     return (
-      <div className="min-h-screen flex flex-col bg-base-200">
-        <LobbyConnectionBanner
-          transport={transport}
-          reason={connectionReason}
-          errorMessage={transportErrorMessage}
-          awaitingRoomHandshake={awaitingRoomHandshake}
-        />
-        <div className="flex flex-1 flex-col items-center justify-center p-8">
-          <div className="card bg-base-100 shadow-xl w-full max-w-lg">
-            <div className="card-body items-center text-center gap-4">
-              <p className="text-base-content/80">Setting up your lobby session…</p>
-            </div>
-          </div>
-        </div>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-base-200 p-8">
+        <p className="text-base-content/80">Setting up your lobby session…</p>
       </div>
     );
   }
@@ -336,88 +297,10 @@ export function LobbyHostPage() {
     }
   }
 
-  // ─── Game-active phases: keep existing layout ─────────────────────────────
-  // DR: lobby-phase-only redesign — game/endgame phases use existing DaisyUI layout
-  if (isMatchFlowPhase(state.phase) || state.phase === "matchEnded") {
+  if (state.status === "lobby" && state.phase !== "lobby") {
     return (
-      <div className="min-h-screen flex flex-col bg-base-200">
-        <LobbyConnectionBanner
-          transport={transport}
-          reason={connectionReason}
-          errorMessage={transportErrorMessage}
-          awaitingRoomHandshake={awaitingRoomHandshake}
-          onRetry={transport === "disconnected" ? bumpConnectionAttempt : undefined}
-        />
-        <div className="flex flex-1 flex-col items-center justify-center p-8">
-          <div className={`card bg-base-100 shadow-xl w-full max-w-4xl`}>
-            <div className="card-body gap-6">
-              <PhaseBar
-                phase={state.phase}
-                players={state.players}
-                localPlayerId={state.playerId}
-                drawerPlayerId={state.drawerPlayerId}
-                matchRoundIndex={state.matchRoundIndex}
-                phaseDeadlineMs={state.phaseDeadlineMs}
-              />
-              {state.phase === "drawing" ? (
-                <MatchHintFeed
-                  rows={state.drawingHintRows}
-                  suppressForDrawer={
-                    Boolean(state.drawerPlayerId && state.playerId === state.drawerPlayerId)
-                  }
-                />
-              ) : null}
-              {state.phase === "matchEnded" ? (
-                <ScoreboardSummary
-                  players={state.players}
-                  localPlayerId={state.playerId}
-                  isHost
-                  onPlayAgain={returnToLobby}
-                  playAgainDisabled={transport !== "live"}
-                />
-              ) : null}
-              {state.phase === "choosingWord" &&
-              state.playerId === state.drawerPlayerId ? (
-                <WordChoicePanel
-                  words={state.wordChoiceOffer?.words ?? null}
-                  isLoading={state.wordChoiceOffer == null}
-                  errorMessage={state.wordChoicePickError ?? null}
-                  onPick={chooseWord}
-                  disabled={transport !== "live"}
-                  phaseDeadlineMs={state.phaseDeadlineMs}
-                  deadlineResetKey={
-                    state.matchRoundIndex !== undefined
-                      ? `${state.roomId}-${String(state.matchRoundIndex)}`
-                      : state.roomId
-                  }
-                />
-              ) : null}
-              <div className="grid gap-4 lg:grid-cols-[1fr_minmax(280px,340px)] lg:items-start">
-                <MatchDrawingColumn
-                  phase={state.phase}
-                  localPlayerId={state.playerId}
-                  drawerPlayerId={state.drawerPlayerId}
-                  roomId={state.roomId}
-                  matchRoundIndex={state.matchRoundIndex}
-                  brushColor={brushColor}
-                  brushWidthPx={brushWidthPx}
-                  onBrushColorChange={setBrushColor}
-                  onBrushWidthChange={setBrushWidthPx}
-                  sendJsonLine={sendGameJsonLine}
-                  remoteCanvasCommits={state.remoteCanvasCommits}
-                  wsLive={transport === "live"}
-                />
-                <MatchChatPanel
-                  localPlayerId={state.playerId}
-                  feed={state.chatFeed}
-                  onSend={sendChat}
-                  disabled={transport !== "live"}
-                  closeGuessHint={state.closeGuessHint}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
+      <div className="min-h-screen flex items-center justify-center bg-base-200 p-8">
+        <p className="text-base-content/80 text-center">Opening match…</p>
       </div>
     );
   }

@@ -84,6 +84,8 @@ export type GuestJoinLobbyState =
       /** Replay buffer (Story 3.5–3.6); cleared on lobby or new match round. */
       remoteCanvasCommits: CanvasReplayEvent[];
       drawingHintRows: MatchHintFeedRow[];
+      /** Drawer-only: word picked locally this round (UI). */
+      drawerLocalSecretWord: string | null;
       chatFeed: ChatFeedEvent[];
       closeGuessHint: { message: string; id: string } | null;
     }
@@ -396,6 +398,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
             wordChoicePickError: null,
             remoteCanvasCommits: [],
             drawingHintRows: [],
+            drawerLocalSecretWord: null,
             chatFeed: [],
             closeGuessHint: null,
           });
@@ -462,6 +465,11 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
               mp.matchRoundIndex !== undefined &&
               mp.matchRoundIndex !== prev.matchRoundIndex;
 
+            let drawerLocalSecretWord = prev.drawerLocalSecretWord;
+            if (mp.phase === "lobby" || mp.phase === "matchEnded" || roundBump) {
+              drawerLocalSecretWord = null;
+            }
+
             if (mp.phase === "lobby") {
               nextCommits = [];
               drawingHintRows = [];
@@ -486,6 +494,7 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
               wordChoicePickError,
               remoteCanvasCommits: nextCommits,
               drawingHintRows,
+              drawerLocalSecretWord,
               chatFeed,
               closeGuessHint,
             };
@@ -761,9 +770,15 @@ export function useGuestJoinRoom(args: UseGuestJoinRoomArgs): UseGuestJoinRoomRe
   const chooseWord = useCallback((choiceIndex: 0 | 1 | 2) => {
     const w = wsRef.current;
     if (!w || w.readyState !== WebSocket.OPEN) return;
-    setState((prev) =>
-      prev.status === "joined" ? { ...prev, wordChoicePickError: null } : prev,
-    );
+    setState((prev) => {
+      if (prev.status !== "joined") return prev;
+      const picked = prev.wordChoiceOffer?.words[choiceIndex];
+      return {
+        ...prev,
+        wordChoicePickError: null,
+        drawerLocalSecretWord: picked ?? null,
+      };
+    });
     try {
       w.send(serializeChooseWordCommand(choiceIndex));
     } catch {

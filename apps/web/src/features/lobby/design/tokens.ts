@@ -1,5 +1,38 @@
-// Doodle Royale design tokens — light theme only (no dark mode in MVP).
-// Ported from claude-design/skribbl/project/ui_kits/game/tokens.js
+// Doodle Royale design tokens — light + dark palettes from ui_kits/game/tokens.js
+
+export type DrPalette = {
+  bg: string;
+  panel: string;
+  panel2: string;
+  ink: string;
+  inkDim: string;
+  line: string;
+  soft: string;
+};
+
+export const DR_PALETTE_LIGHT: DrPalette = {
+  bg: "#fff7e8",
+  panel: "#fffdf6",
+  panel2: "#fdf3d8",
+  ink: "#1a1714",
+  inkDim: "rgba(26,23,20,.55)",
+  line: "#1a1714",
+  soft: "#f6ead0",
+};
+
+export const DR_PALETTE_DARK: DrPalette = {
+  bg: "#181613",
+  panel: "#221f1b",
+  panel2: "#2a2622",
+  ink: "#f5efe6",
+  inkDim: "rgba(245,239,230,.55)",
+  line: "#0a0908",
+  soft: "#332e28",
+};
+
+export function getDrPalette(isDark: boolean): DrPalette {
+  return isDark ? DR_PALETTE_DARK : DR_PALETTE_LIGHT;
+}
 
 export const DR = {
   font: {
@@ -8,15 +41,8 @@ export const DR = {
     body: "var(--font-bricolage), system-ui, sans-serif",
     mono: "var(--font-dm-mono), monospace",
   },
-  colors: {
-    bg: "#fff7e8",
-    panel: "#fffdf6",
-    panel2: "#fdf3d8",
-    ink: "#1a1714",
-    inkDim: "rgba(26,23,20,.55)",
-    line: "#1a1714",
-    soft: "#f6ead0",
-  },
+  /** Default warm light shell (landing, lobby) — use `getDrPalette` for match theme toggle. */
+  colors: DR_PALETTE_LIGHT,
   accent: {
     tomato: "#ff5a3c",
     canary: "#ffd23f",
@@ -37,8 +63,8 @@ export const DR = {
 } as const;
 
 // chunk(x, y) — flat chunky drop shadow used throughout the design system
-export function chunk(x = 4, y = 5, line = "#1a1714"): string {
-  return `${x}px ${y}px 0 0 ${line}`;
+export function chunk(x = 4, y = 5, line?: string): string {
+  return `${x}px ${y}px 0 0 ${line ?? "#1a1714"}`;
 }
 
 // Avatar face colors keyed by preset ID — matches the 6 design-system accent colors

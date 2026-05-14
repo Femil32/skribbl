@@ -87,6 +87,11 @@ export type HostLobbyState =
       remoteCanvasCommits: CanvasReplayEvent[];
       /** Bounded rows from **`drawingHintTick`** (Story 2.5); cleared leaving `drawing` or on round mismatch. */
       drawingHintRows: MatchHintFeedRow[];
+      /**
+       * Drawer-only: plaintext word the local player picked this round (client-held; used for UI).
+       * Cleared on lobby, match end, or round change.
+       */
+      drawerLocalSecretWord: string | null;
       /** Live chat tail (Epic 4); cleared when returning to pre-match `lobby`. */
       chatFeed: ChatFeedEvent[];
       /** Private proximity whisper (Story 7.1); not in chatFeed / hydrate. */
@@ -403,6 +408,7 @@ export function useHostCreateRoom(
             wordChoicePickError: null,
             remoteCanvasCommits: [],
             drawingHintRows: [],
+            drawerLocalSecretWord: null,
             chatFeed: [],
             closeGuessHint: null,
           });
@@ -463,12 +469,16 @@ export function useHostCreateRoom(
               mp.matchRoundIndex !== undefined &&
               mp.matchRoundIndex !== prev.matchRoundIndex;
 
+            let drawerLocalSecretWord = prev.drawerLocalSecretWord;
+            if (mp.phase === "lobby" || mp.phase === "matchEnded" || roundBump) {
+              drawerLocalSecretWord = null;
+            }
+
             if (mp.phase === "lobby") {
               nextCommits = [];
               drawingHintRows = [];
               chatFeed = [];
               closeGuessHint = null;
-              clearSession(); // clear only once server confirms lobby reset
             } else if (roundBump) {
               nextCommits = [];
               drawingHintRows = [];
@@ -488,6 +498,7 @@ export function useHostCreateRoom(
               wordChoicePickError,
               remoteCanvasCommits: nextCommits,
               drawingHintRows,
+              drawerLocalSecretWord,
               chatFeed,
               closeGuessHint,
               ...(mp.phase === "lobby" ? { isStartPending: false } : {}),
@@ -802,9 +813,15 @@ export function useHostCreateRoom(
   const chooseWord = useCallback((choiceIndex: 0 | 1 | 2) => {
     const w = wsRef.current;
     if (!w || w.readyState !== WebSocket.OPEN) return;
-    setState((prev) =>
-      prev.status === "lobby" ? { ...prev, wordChoicePickError: null } : prev,
-    );
+    setState((prev) => {
+      if (prev.status !== "lobby") return prev;
+      const picked = prev.wordChoiceOffer?.words[choiceIndex];
+      return {
+        ...prev,
+        wordChoicePickError: null,
+        drawerLocalSecretWord: picked ?? null,
+      };
+    });
     try {
       w.send(serializeChooseWordCommand(choiceIndex));
     } catch {
