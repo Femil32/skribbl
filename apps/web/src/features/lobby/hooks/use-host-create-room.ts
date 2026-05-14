@@ -146,6 +146,13 @@ const TERMINAL_PROTOCOL_CODES_AFTER_LOBBY = new Set([
   "TOKEN_MISMATCH",
 ]);
 
+/** SessionStorage reload tried `reconnectHost` but the room is gone — retry once with `createRoom`. */
+const STALE_HOST_STORAGE_RECOVER_CODES = new Set([
+  "HOST_SESSION_LOST",
+  "HOST_RECLAIM_DENIED",
+  "TOKEN_MISMATCH",
+]);
+
 /** Recoverable structured errors — server fault, not disconnect (Story 8.3 lobby chat). */
 const LOBBY_CHAT_RECOVERABLE = new Set([
   "RATE_LIMITED",
@@ -194,6 +201,7 @@ export function useHostCreateRoom(
     undefined,
   );
   const [awaitingHandshake, setAwaitingHandshake] = useState(false);
+  const [staleHostSessionRecoverGen, setStaleHostSessionRecoverGen] = useState(0);
 
   const reachedLobbyRef = useRef(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -528,6 +536,16 @@ export function useHostCreateRoom(
         case "error": {
           const err = parsed.data;
           if (!reachedLobbyRef.current) {
+            if (
+              pageReloadReconnectRef.current &&
+              STALE_HOST_STORAGE_RECOVER_CODES.has(err.code)
+            ) {
+              clearSession();
+              hostResumeContextRef.current = null;
+              pageReloadReconnectRef.current = false;
+              setStaleHostSessionRecoverGen((n) => n + 1);
+              return;
+            }
             setAwaitingHandshake(false);
             pageReloadReconnectRef.current = false;
             if (err.code === "ALREADY_CONNECTED") {
@@ -761,7 +779,7 @@ export function useHostCreateRoom(
       wsRef.current = null;
       w?.close();
     };
-  }, [wsUrl, shouldConnect, attemptId]);
+  }, [wsUrl, shouldConnect, attemptId, staleHostSessionRecoverGen]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const startMatch = useCallback(() => {

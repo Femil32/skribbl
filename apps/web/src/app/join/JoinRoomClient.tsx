@@ -8,7 +8,6 @@ import {
   DEFAULT_AVATAR_PRESET_ID,
   NICKNAME_MAX_GRAPHEMES,
   assertChatMessageLength,
-  avatarPresets,
   countGraphemes,
   isMatchFlowPhase,
   isValidRoomCodeForJoin,
@@ -20,12 +19,21 @@ import {
 import { messageForProtocolErrorCode } from "@/features/lobby/lib/protocol-error-message";
 import { useGuestJoinRoom } from "@/features/lobby/hooks/use-guest-join-room";
 import type { LobbyVoteKickWireEvent } from "@/features/lobby/hooks/use-host-create-room";
+import { useLobbySettingsSync } from "@/features/lobby/hooks/use-lobby-settings";
+import { useLobbySettingsStore } from "@/features/lobby/stores/lobby-settings-store";
 import {
   serializeCastVoteKickCommand,
   serializeInitiateVoteKickCommand,
 } from "@/lib/ws-client";
+import { buildRoomInviteUrl, resolvePublicWebOrigin } from "@/lib/invite-url";
+import {
+  clipboardFailureMessage,
+  copyToClipboard,
+} from "@/features/lobby/lib/lobby-dr-clipboard";
 import { LobbyConnectionBanner } from "@/features/lobby/components/LobbyConnectionBanner";
 import { LobbyPlayerRoster } from "@/features/lobby/components/LobbyPlayerRoster";
+import { LobbyDrWaitingRoom } from "@/features/lobby/components/LobbyDrWaitingRoom";
+import { CreateRoomForm } from "@/features/lobby/components/CreateRoomForm";
 import { MatchDrawingColumn } from "@/features/game/components/MatchDrawingColumn";
 import { PhaseBar } from "@/features/match/components/PhaseBar";
 import { ScoreboardSummary } from "@/features/match/components/ScoreboardSummary";
@@ -33,11 +41,15 @@ import { MatchHintFeed } from "@/features/match/components/MatchHintFeed";
 import { WordChoicePanel } from "@/features/match/components/WordChoicePanel";
 import { MatchChatPanel } from "@/features/match/components/MatchChatPanel";
 import { loadSession } from "@/features/lobby/lib/session-storage";
+import { DR, chunk } from "@/features/lobby/design/tokens";
+import { randomClientId } from "@/lib/random-client-id";
 
 const formatHintId = "join-room-code-format-hint";
 const protocolErrId = "join-room-protocol-error";
 const nicknameHintId = "join-room-nickname-hint";
 const nicknameErrId = "join-room-nickname-error";
+
+const JOIN_DR_ACCENT = DR.accent.tomato;
 
 function protocolErrorRelatesToRoomCode(code: string | undefined): boolean {
   if (code === undefined) return false;
@@ -64,10 +76,6 @@ function protocolErrorRelatesToNickname(code: string | undefined): boolean {
     default:
       return true;
   }
-}
-
-function protocolErrorRelatesToAvatar(code: string | undefined): boolean {
-  return code === "INVALID_AVATAR";
 }
 
 type JoinRoomClientProps = {
@@ -134,7 +142,8 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
   const [guestLobbyLines, setGuestLobbyLines] = useState<
     { id: string; who: string; text: string }[]
   >([]);
-  const [guestLobbySnack, setGuestLobbySnack] = useState<string | null>(null);
+  const [guestDrToast, setGuestDrToast] = useState<string | null>(null);
+  const [copyJoinError, setCopyJoinError] = useState<string | null>(null);
   const [guestVoteKickActive, setGuestVoteKickActive] = useState<{
     targetPlayerId: string;
     expiresAtMs: number;
@@ -142,26 +151,26 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
 
   const onGuestLobbyChatMessage = useCallback((ev: LobbyChatMessageEvent) => {
     setGuestLobbyLines((prev) =>
-      [...prev, { id: crypto.randomUUID(), who: ev.displayName, text: ev.message }].slice(-400),
+      [...prev, { id: randomClientId(), who: ev.displayName, text: ev.message }].slice(-400),
     );
   }, []);
 
   const onGuestLobbyProtocolNotice = useCallback((code: string) => {
-    setGuestLobbySnack(messageForProtocolErrorCode(code));
+    setGuestDrToast(messageForProtocolErrorCode(code));
   }, []);
 
   const onGuestLobbyVoteKick = useCallback((ev: LobbyVoteKickWireEvent) => {
     if (ev.type === "voteKickStarted") {
       setGuestVoteKickActive({ targetPlayerId: ev.targetPlayerId, expiresAtMs: ev.expiresAtMs });
-      setGuestLobbySnack("Vote kick started.");
+      setGuestDrToast("Vote kick started.");
       return;
     }
     if (ev.type === "voteKickResolved") {
       setGuestVoteKickActive(null);
-      if (ev.reason === "target_left") setGuestLobbySnack("Vote ended — target left.");
-      else if (ev.outcome === "kicked") setGuestLobbySnack("Player removed by vote.");
-      else if (ev.outcome === "expired") setGuestLobbySnack("Vote kick timed out.");
-      else setGuestLobbySnack("Vote kick did not pass.");
+      if (ev.reason === "target_left") setGuestDrToast("Vote ended — target left.");
+      else if (ev.outcome === "kicked") setGuestDrToast("Player removed by vote.");
+      else if (ev.outcome === "expired") setGuestDrToast("Vote kick timed out.");
+      else setGuestDrToast("Vote kick did not pass.");
       return;
     }
     setGuestVoteKickActive(null);
@@ -174,10 +183,10 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
   }, [joinGeneration]);
 
   useEffect(() => {
-    if (!guestLobbySnack) return;
-    const t = window.setTimeout(() => setGuestLobbySnack(null), 3200);
+    if (!guestDrToast) return;
+    const t = window.setTimeout(() => setGuestDrToast(null), 3200);
     return () => window.clearTimeout(t);
-  }, [guestLobbySnack]);
+  }, [guestDrToast]);
 
   const {
     state: guestState,
@@ -199,6 +208,12 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
     onLobbyProtocolNotice: onGuestLobbyProtocolNotice,
     onLobbyVoteKickEvent: onGuestLobbyVoteKick,
   });
+
+  const maxPlayersLobby = useLobbySettingsStore((s) => s.maxPlayers);
+  const { sendSettings: sendGuestRoomSettings } = useLobbySettingsSync(
+    guestSendGameJsonLine,
+    false,
+  );
 
   const bumpGuestConnection = () => {
     setJoinGeneration((n) => n + 1);
@@ -283,15 +298,6 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
       .filter(Boolean)
       .join(" ") || undefined;
 
-  const ariaAvatarPreset =
-    [
-      protocolErrorMsg && protocolErrorRelatesToAvatar(protocolCode)
-        ? protocolErrId
-        : null,
-    ]
-      .filter(Boolean)
-      .join(" ") || undefined;
-
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setManualCommitted(true);
@@ -307,6 +313,298 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
   }
 
   if (guestState.status === "joined") {
+    const publicOriginJoin =
+      resolvePublicWebOrigin() ||
+      (typeof window !== "undefined" ? window.location.origin : "");
+    const inviteUrlJoined = publicOriginJoin
+      ? buildRoomInviteUrl(guestState.roomCode, publicOriginJoin)
+      : `/join?code=${encodeURIComponent(guestState.roomCode)}`;
+
+    async function handleJoinDrCopy(label: "link" | "code", text: string) {
+      setCopyJoinError(null);
+      try {
+        await copyToClipboard(text);
+        setGuestDrToast(label === "link" ? "Link copied" : "Code copied");
+      } catch (err) {
+        setCopyJoinError(clipboardFailureMessage(err));
+      }
+    }
+
+    const sendGuestDrLobbyChat = () => {
+      const trimmed = joinLobbyDraft.trim();
+      if (trimmed === "" || guestTransport !== "live") return;
+      const sanitized = sanitizeChatMessage(trimmed);
+      if (sanitized === "") {
+        setGuestDrToast(messageForProtocolErrorCode("CHAT_EMPTY"));
+        return;
+      }
+      if (!assertChatMessageLength(sanitized).ok) {
+        setGuestDrToast(messageForProtocolErrorCode("MESSAGE_TOO_LONG"));
+        return;
+      }
+      guestSendChat(trimmed);
+      setJoinLobbyDraft("");
+    };
+
+    if (guestState.phase === "lobby") {
+      const hostPlayer = guestState.players.find((p) => p.isHost);
+      const CJ = DR.colors;
+      const ckj = (x = 4, y = 5) => chunk(x, y, CJ.line);
+      const calloutJoined = (
+        <div
+          style={{
+            background: CJ.panel2,
+            border: `2px solid ${CJ.line}`,
+            borderRadius: DR.radius.md,
+            padding: "14px 18px",
+            fontFamily: DR.font.body,
+            fontSize: 14,
+            lineHeight: 1.55,
+            color: CJ.ink,
+          }}
+        >
+          <strong>Joining someone else&apos;s room.</strong>{" "}
+          <span style={{ color: CJ.inkDim }}>Hosted by </span>
+          <span style={{ fontWeight: 800 }}>{hostPlayer?.displayName ?? "another player"}</span>
+          .
+          {" "}You&apos;re at the table as{" "}
+          <span style={{ fontWeight: 800 }}>{guestState.displayName}</span>
+          {" "}— chill in pre-game until the host presses start.
+        </div>
+      );
+
+      const guestSidebarFooterJoined = (
+        <>
+          <button
+            type="button"
+            onClick={() => handleJoinDrCopy("link", inviteUrlJoined)}
+            aria-label="Copy invite link"
+            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-primary"
+            style={{
+              background: CJ.panel,
+              border: `2px solid ${CJ.line}`,
+              borderRadius: DR.radius.lg,
+              padding: "10px 14px",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              cursor: "pointer",
+              width: "100%",
+              textAlign: "left",
+            }}
+          >
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: CJ.inkDim,
+                letterSpacing: ".18em",
+                textTransform: "uppercase",
+                flexShrink: 0,
+              }}
+            >
+              invite
+            </span>
+            <span
+              style={{
+                fontFamily: DR.font.mono,
+                fontSize: 11,
+                color: CJ.ink,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                flex: 1,
+              }}
+            >
+              {inviteUrlJoined}
+            </span>
+            <span
+              style={{
+                fontSize: 11,
+                color:
+                  guestDrToast === "Link copied" ? DR.semantic.success : CJ.inkDim,
+                flexShrink: 0,
+              }}
+            >
+              {guestDrToast === "Link copied" ? "✓" : "⧉"}
+            </span>
+          </button>
+          <p
+            style={{
+              fontSize: 12,
+              color: CJ.inkDim,
+              textAlign: "center",
+              margin: 0,
+            }}
+          >
+            Only the host can start — you&apos;ll jump in automatically.
+          </p>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 12,
+              justifyContent: "center",
+            }}
+          >
+            <Link
+              href="/"
+              style={{
+                border: `2.5px solid ${CJ.line}`,
+                borderRadius: 14,
+                background: "transparent",
+                color: CJ.ink,
+                padding: "10px 16px",
+                fontWeight: 800,
+                fontSize: 13,
+                fontFamily: DR.font.body,
+                textDecoration: "none",
+                display: "inline-flex",
+                alignItems: "center",
+              }}
+            >
+              Home
+            </Link>
+            <Link
+              href="/lobby"
+              style={{
+                border: `3px solid ${CJ.line}`,
+                borderRadius: 14,
+                background: JOIN_DR_ACCENT,
+                color: "#1a1714",
+                padding: "10px 16px",
+                fontWeight: 900,
+                fontSize: 13,
+                fontFamily: DR.font.display,
+                textDecoration: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                boxShadow: ckj(3, 4),
+              }}
+            >
+              Create a room →
+            </Link>
+          </div>
+        </>
+      );
+
+      return (
+        <>
+          {guestTransport !== "live" ? (
+            <LobbyConnectionBanner
+              transport={guestTransport}
+              reason={guestConnectionReason}
+              errorMessage={
+                guestTransport === "blocked" || guestTransport === "fatal"
+                  ? bannerErrorDetail
+                  : undefined
+              }
+              awaitingRoomHandshake={false}
+              onRetry={
+                guestTransport === "disconnected" ? bumpGuestConnection : undefined
+              }
+              onReload={guestTransport === "blocked" ? reloadFullPage : undefined}
+            />
+          ) : null}
+          <LobbyDrWaitingRoom
+            callout={calloutJoined}
+            roomCode={guestState.roomCode}
+            headerEyebrow={`Invitation · #${guestState.roomCode}`}
+            headerTitle={
+              hostPlayer ? `${hostPlayer.displayName}'s table` : "Private table"
+            }
+            localDisplayName={guestState.displayName}
+            accentHex={JOIN_DR_ACCENT}
+            toast={guestDrToast}
+            codeCopiedHighlight={guestDrToast === "Code copied"}
+            copyError={copyJoinError}
+            onCopyRoomCode={() => handleJoinDrCopy("code", guestState.roomCode)}
+            transportLive={guestTransport === "live"}
+            onLeaveLobby={() => guestLeaveLobby()}
+            chatMessages={guestLobbyLines.map((m) => ({
+              id: m.id,
+              who: m.who,
+              text: m.text,
+            }))}
+            chatDraft={joinLobbyDraft}
+            onChatDraftChange={setJoinLobbyDraft}
+            onSendLobbyChat={sendGuestDrLobbyChat}
+            chatSubmitDisabled={guestTransport !== "live"}
+            chatFooterNotice={undefined}
+            rulesIsHost={false}
+            sendRoomSettings={sendGuestRoomSettings}
+            playersPanel={
+              <>
+                <LobbyPlayerRoster
+                  players={guestState.players}
+                  localPlayerId={guestState.playerId}
+                  maxPlayers={maxPlayersLobby}
+                  accent={JOIN_DR_ACCENT}
+                  onVoteKick={(targetPlayerId) => {
+                    if (guestTransport !== "live") return;
+                    guestSendGameJsonLine(
+                      serializeInitiateVoteKickCommand(
+                        guestState.roomCode,
+                        targetPlayerId,
+                      ),
+                    );
+                  }}
+                />
+                {guestVoteKickActive ? (
+                  <div className="mt-3 rounded-box border border-base-300 bg-base-100/80 p-3 text-sm flex flex-col gap-2">
+                    <span className="font-semibold text-base-content/90">
+                      Kick vote active
+                    </span>
+                    {guestVoteKickActive.targetPlayerId === guestState.playerId ? (
+                      <span className="text-base-content/75">
+                        Others are voting on whether you stay.
+                      </span>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          disabled={guestTransport !== "live"}
+                          onClick={() =>
+                            guestSendGameJsonLine(
+                              serializeCastVoteKickCommand(
+                                guestState.roomCode,
+                                guestVoteKickActive.targetPlayerId,
+                                "yes",
+                              ),
+                            )
+                          }
+                        >
+                          Vote yes — remove
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-outline btn-sm"
+                          disabled={guestTransport !== "live"}
+                          onClick={() =>
+                            guestSendGameJsonLine(
+                              serializeCastVoteKickCommand(
+                                guestState.roomCode,
+                                guestVoteKickActive.targetPlayerId,
+                                "no",
+                              ),
+                            )
+                          }
+                        >
+                          Vote no — keep
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </>
+            }
+            sidebarFooter={guestSidebarFooterJoined}
+          />
+        </>
+      );
+    }
+
     return (
       <div className="min-h-screen flex flex-col bg-base-200">
         <LobbyConnectionBanner
@@ -339,23 +637,24 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                   ? "Match finished"
                   : isMatchFlowPhase(guestState.phase)
                     ? "Match in progress"
-                    : "You joined the room"}
+                    : "Waiting"}
               </h1>
               <p className="text-base-content/80">
                 {guestState.phase === "matchEnded" ? (
                   <>
-                    You are <span className="font-semibold">{guestState.displayName}</span> in
+                    You are{" "}
+                    <span className="font-semibold">{guestState.displayName}</span> in
                     this room. Final scores are below — wait for the host to play again.
                   </>
                 ) : isMatchFlowPhase(guestState.phase) ? (
                   <>
-                    You are <span className="font-semibold">{guestState.displayName}</span> in
+                    You are{" "}
+                    <span className="font-semibold">{guestState.displayName}</span> in
                     this room as a guest.
                   </>
                 ) : (
                   <>
-                    You are <span className="font-semibold">{guestState.displayName}</span> in
-                    the lobby as a guest — the host starts the match.
+                    Waiting for the host — you&apos;ll join the round when it begins.
                   </>
                 )}
               </p>
@@ -440,84 +739,7 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                     Match finished — scores are above. Wait for the host to play again.
                   </p>
                 </div>
-              ) : guestState.phase === "lobby" ? (
-                <div className="w-full max-w-md mx-auto flex flex-col gap-3">
-                  <section
-                    aria-label="Lobby chat"
-                    className="flex flex-col gap-2 border border-base-300 rounded-box p-4 bg-base-200/40 min-h-[200px]"
-                  >
-                    <h3 className="text-sm font-semibold text-base-content/80 text-left">Lobby chat</h3>
-                    <ul className="flex-1 overflow-y-auto max-h-[220px] text-sm space-y-2 text-left list-none pl-0 m-0">
-                      {guestLobbyLines.map((m) => (
-                        <li key={m.id} className="break-words">
-                          <span className="font-semibold">{m.who}:</span> {m.text}
-                        </li>
-                      ))}
-                      {guestLobbyLines.length === 0 ? (
-                        <li className="text-base-content/60 italic">
-                          Nobody has said hello yet — you can start the thread.
-                        </li>
-                      ) : null}
-                    </ul>
-                    {guestLobbySnack ? (
-                      <p className="text-warning text-xs text-center" role="status">
-                        {guestLobbySnack}
-                      </p>
-                    ) : null}
-                    <form
-                      className="flex gap-2 items-center"
-                      onSubmit={(e: FormEvent<HTMLFormElement>) => {
-                        e.preventDefault();
-                        const text = joinLobbyDraft.trim();
-                        if (text === "" || guestTransport !== "live") return;
-                        const sanitized = sanitizeChatMessage(text);
-                        if (sanitized === "") {
-                          setGuestLobbySnack(messageForProtocolErrorCode("CHAT_EMPTY"));
-                          return;
-                        }
-                        if (!assertChatMessageLength(sanitized).ok) {
-                          setGuestLobbySnack(messageForProtocolErrorCode("MESSAGE_TOO_LONG"));
-                          return;
-                        }
-                        guestSendChat(text);
-                        setJoinLobbyDraft("");
-                      }}
-                    >
-                      <input
-                        className="input input-bordered input-sm flex-1"
-                        aria-label="Lobby chat message"
-                        value={joinLobbyDraft}
-                        onChange={(e) => setJoinLobbyDraft(e.target.value)}
-                        maxLength={4096}
-                        disabled={guestTransport !== "live"}
-                        placeholder="Message the lobby…"
-                      />
-                      <button
-                        type="submit"
-                        className="btn btn-primary btn-sm shrink-0"
-                        disabled={guestTransport !== "live"}
-                      >
-                        Send
-                      </button>
-                    </form>
-                  </section>
-                  <p className="text-sm text-base-content/70 text-center">
-                    The host controls when the match starts.
-                  </p>
-                  <button
-                    type="button"
-                    className="btn btn-outline btn-sm w-full"
-                    disabled={guestTransport !== "live"}
-                    onClick={() => guestLeaveLobby()}
-                  >
-                    Leave lobby
-                  </button>
-                </div>
-              ) : (
-                <p className="text-sm text-base-content/70">
-                  Waiting for the host to begin. You will not have a Start control here.
-                </p>
-              )}
+              ) : null}
 
               <div className="space-y-2 text-left w-full max-w-md mx-auto">
                 <span className="text-sm font-medium text-base-content/70">
@@ -535,54 +757,9 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
                     );
                   }}
                 />
-                {guestState.phase === "lobby" && guestVoteKickActive ? (
-                  <div className="rounded-box border border-base-300 bg-base-200/60 p-3 text-sm flex flex-col gap-2">
-                    <span className="font-semibold">Kick vote active</span>
-                    {guestVoteKickActive.targetPlayerId === guestState.playerId ? (
-                      <span className="text-base-content/75">Others are voting on whether you stay.</span>
-                    ) : (
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-sm"
-                          disabled={guestTransport !== "live"}
-                          onClick={() =>
-                            guestSendGameJsonLine(
-                              serializeCastVoteKickCommand(
-                                guestState.roomCode,
-                                guestVoteKickActive.targetPlayerId,
-                                "yes",
-                              ),
-                            )
-                          }
-                        >
-                          Vote yes — remove
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-outline btn-sm"
-                          disabled={guestTransport !== "live"}
-                          onClick={() =>
-                            guestSendGameJsonLine(
-                              serializeCastVoteKickCommand(
-                                guestState.roomCode,
-                                guestVoteKickActive.targetPlayerId,
-                                "no",
-                              ),
-                            )
-                          }
-                        >
-                          Vote no — keep
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ) : null}
               </div>
               <div className="space-y-2">
-                <span className="text-sm font-medium text-base-content/70">
-                  Room code
-                </span>
+                <span className="text-sm font-medium text-base-content/70">Room code</span>
                 <p className="font-mono text-2xl tracking-widest bg-base-200 rounded-box px-3 py-3 border border-base-300">
                   {guestState.roomCode}
                 </p>
@@ -606,6 +783,8 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
     );
   }
 
+
+
   if (protocolCode === "ALREADY_CONNECTED") {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-base-200 p-8">
@@ -615,6 +794,12 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
       </div>
     );
   }
+
+  const nicknameFormError =
+    nickFieldError ??
+    (protocolErrorMsg && protocolErrorRelatesToNickname(protocolCode)
+      ? protocolErrorMsg
+      : null);
 
   return (
     <div className="min-h-screen flex flex-col bg-base-200">
@@ -626,136 +811,60 @@ export function JoinRoomClient({ initialQueryCode }: JoinRoomClientProps) {
         onRetry={bannerOnRetry}
         onReload={guestTransport === "blocked" ? reloadFullPage : undefined}
       />
-      <div className="flex flex-1 flex-col items-center justify-center p-8">
-        <div className="card bg-base-100 shadow-xl w-full max-w-lg">
-          <div className="card-body gap-4 text-center">
-            <h1 className="card-title text-2xl justify-center">Join a room</h1>
-            <p className="text-base-content/80">
-              Paste a code from an invite or type it, then choose how you appear.
+      <div className="flex flex-1 flex-col min-h-0">
+        {connecting ? (
+          <div className="flex flex-1 flex-col items-center justify-center p-8 text-center gap-4">
+            <p className="text-base-content/80 max-w-md">
+              Working on your join request — see the connection status above.
             </p>
-
-            {connecting ? (
-              <p className="text-base-content/80 py-6">
-                Working on your join request — see the connection status above.
+          </div>
+        ) : (
+          <>
+            {protocolErrorMsg ? (
+              <p id={protocolErrId} className="sr-only">
+                {protocolErrorMsg}
               </p>
-            ) : (
-              <form
-                onSubmit={handleSubmit}
-                className="flex flex-col gap-3 w-full max-w-sm mx-auto text-left"
-                noValidate
-              >
-                <label className="form-control w-full">
-                  <span className="label-text font-medium">Room code</span>
-                  <input
-                    type="text"
-                    name="roomCode"
-                    id="join-room-code-input"
-                    className="input input-bordered w-full font-mono"
-                    value={raw}
-                    onChange={(e) => setTypedRaw(e.target.value)}
-                    readOnly={urlCodeValid}
-                    placeholder="Paste or type the code"
-                    autoComplete="off"
-                    spellCheck={false}
-                    disabled={connecting}
-                    aria-invalid={Boolean(
-                      helperFormat ||
-                        (protocolErrorMsg &&
-                          protocolErrorRelatesToRoomCode(protocolCode)),
-                    )}
-                    aria-describedby={ariaCode}
-                  />
-                </label>
-
-                {helperFormat ? (
-                  <p id={formatHintId} className="text-sm text-base-content/70">
+            ) : null}
+            <CreateRoomForm
+              variant="join"
+              nicknameRaw={nicknameRaw}
+              onNicknameChange={setNicknameRaw}
+              avatarId={avatarId}
+              onAvatarChange={setAvatarId}
+              error={nicknameFormError}
+              onSubmit={handleSubmit}
+              nicknameInputId="join-room-nickname"
+              nicknameAriaDescribedBy={ariaNickname}
+              joinRoomCode={raw}
+              onJoinRoomCodeChange={(v) => setTypedRaw(v)}
+              joinRoomCodeReadOnly={urlCodeValid}
+              joinRoomCodeDisabled={connecting}
+              joinRoomCodeInvalid={Boolean(
+                helperFormat ||
+                  (protocolErrorMsg && protocolErrorRelatesToRoomCode(protocolCode)),
+              )}
+              joinRoomCodeInputId="join-room-code-input"
+              joinRoomCodeDescribedBy={ariaCode}
+              joinAfterCodeSlot={
+                helperFormat ? (
+                  <p
+                    id={formatHintId}
+                    style={{
+                      marginTop: 10,
+                      fontSize: 12,
+                      color: DR.colors.inkDim,
+                      fontFamily: DR.font.body,
+                      lineHeight: 1.4,
+                    }}
+                  >
                     {helperFormat}
                   </p>
-                ) : null}
-
-                <label className="form-control w-full">
-                  <span className="label-text font-medium">Display name</span>
-                  <input
-                    type="text"
-                    name="nickname"
-                    id="join-room-nickname"
-                    className="input input-bordered w-full"
-                    value={nicknameRaw}
-                    onChange={(e) => setNicknameRaw(e.target.value)}
-                    autoComplete="username"
-                    maxLength={128}
-                    disabled={connecting}
-                    aria-invalid={Boolean(
-                      nickFieldError ||
-                        (protocolErrorMsg &&
-                          protocolErrorRelatesToNickname(protocolCode)),
-                    )}
-                    aria-describedby={ariaNickname}
-                  />
-                </label>
-                <p id={nicknameHintId} className="text-sm text-base-content/70">
-                  Plain text only — everyone in the lobby will see this.
-                </p>
-                {nickFieldError ? (
-                  <p id={nicknameErrId} role="alert" className="text-sm text-warning">
-                    {nickFieldError}
-                  </p>
-                ) : null}
-
-                <div className="form-control w-full">
-                  <span className="label-text font-medium mb-2">Avatar</span>
-                  <div
-                    className="flex flex-wrap gap-2 justify-center sm:justify-start"
-                    role="group"
-                    aria-label="Avatar preset"
-                    aria-describedby={ariaAvatarPreset || undefined}
-                  >
-                    {avatarPresets.map((p) => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        className={`btn btn-sm gap-2 ${
-                          avatarId === p.id ? "btn-primary" : "btn-outline btn-primary"
-                        }`}
-                        aria-pressed={avatarId === p.id}
-                        onClick={() => setAvatarId(p.id)}
-                      >
-                        <span
-                          className="inline-block size-6 rounded-full border border-base-300 bg-linear-to-br from-primary/30 to-secondary/40"
-                          aria-hidden
-                        />
-                        {p.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {protocolErrorMsg ? (
-                  <p id={protocolErrId} className="sr-only">
-                    {protocolErrorMsg}
-                  </p>
-                ) : null}
-
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={!formatOk || connecting}
-                >
-                  Join room
-                </button>
-              </form>
-            )}
-
-            <div className="card-actions justify-center">
-              <Link href="/" className="btn btn-ghost">
-                Home
-              </Link>
-              <Link href="/lobby" className="btn btn-primary">
-                Create a room
-              </Link>
-            </div>
-          </div>
-        </div>
+                ) : null
+              }
+              submitDisabledExtra={!formatOk || connecting}
+            />
+          </>
+        )}
       </div>
     </div>
   );

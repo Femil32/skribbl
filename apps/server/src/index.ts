@@ -5,10 +5,13 @@ import { resolvePort } from "./config/game.js";
 const log = pino({ level: process.env.LOG_LEVEL ?? "info" });
 
 const port = resolvePort();
+/** Listen on all interfaces so LAN clients can use ws://<host-ip>:port (override with HOST=127.0.0.1). */
+const listenHost = process.env.HOST?.trim() || "0.0.0.0";
+
 createGameServer()
   .then(({ server }) => {
-    server.listen(port, () => {
-      log.info({ port }, "game server listening");
+    server.listen(port, listenHost, () => {
+      log.info({ port, host: listenHost }, "game server listening");
     });
   })
   .catch((err: unknown) => {

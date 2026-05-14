@@ -3,7 +3,7 @@
 import type { AvatarPresetId } from "@skribbl/shared";
 import { NICKNAME_MAX_GRAPHEMES } from "@skribbl/shared";
 import Link from "next/link";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 import { useState } from "react";
 import { DR, chunk, AVATAR_PRESET_COLORS } from "@/features/lobby/design/tokens";
 import { FaceSVG } from "@/features/lobby/components/primitives/FaceSVG";
@@ -40,21 +40,47 @@ function randomName(): string {
 }
 
 interface CreateRoomFormProps {
+  variant?: "create" | "join";
   nicknameRaw: string;
   onNicknameChange: (v: string) => void;
   avatarId: AvatarPresetId;
   onAvatarChange: (id: AvatarPresetId) => void;
   error: string | null;
   onSubmit: (e: FormEvent<HTMLFormElement>) => void;
+  /** Join: controlled room code (normalized display in UI). */
+  joinRoomCode?: string;
+  onJoinRoomCodeChange?: (v: string) => void;
+  joinRoomCodeReadOnly?: boolean;
+  joinRoomCodeDisabled?: boolean;
+  joinRoomCodeInvalid?: boolean;
+  joinRoomCodeInputId?: string;
+  joinRoomCodeDescribedBy?: string;
+  joinAfterCodeSlot?: ReactNode;
+  /** When set, disables primary submit regardless of nickname. */
+  submitDisabledExtra?: boolean;
+  nicknameInputId?: string;
+  nicknameAriaDescribedBy?: string;
 }
 
 export function CreateRoomForm({
+  variant = "create",
   nicknameRaw,
   onNicknameChange,
   avatarId,
   onAvatarChange,
   error,
   onSubmit,
+  joinRoomCode,
+  onJoinRoomCodeChange,
+  joinRoomCodeReadOnly,
+  joinRoomCodeDisabled,
+  joinRoomCodeInvalid,
+  joinRoomCodeInputId,
+  joinRoomCodeDescribedBy,
+  joinAfterCodeSlot,
+  submitDisabledExtra,
+  nicknameInputId,
+  nicknameAriaDescribedBy,
 }: CreateRoomFormProps) {
   const C = C_LIGHT;
   const [moodOverride, setMoodOverride] = useState<"smile" | "wink" | "sleepy" | null>(null);
@@ -72,12 +98,16 @@ export function CreateRoomForm({
     setTimeout(() => setSpinning(false), 450);
   };
 
+  const isJoin = variant === "join";
   const nameEmpty = !nicknameRaw.trim();
+  const primaryBlocked = Boolean(submitDisabledExtra) || nameEmpty;
 
   return (
     <div
       style={{
-        minHeight: "100vh",
+        ...(isJoin
+          ? { flex: 1, minHeight: 0 }
+          : { minHeight: "100vh" }),
         background: C.bg,
         backgroundImage: "radial-gradient(rgba(26,23,20,.07) 1.2px, transparent 1.5px)",
         backgroundSize: "22px 22px",
@@ -107,15 +137,56 @@ export function CreateRoomForm({
             fontSize: 11, fontWeight: 700, color: C.inkDim,
             letterSpacing: ".18em", textTransform: "uppercase",
           }}>
-            create a room
+            {isJoin ? "join a room" : "create a room"}
           </div>
           <h1 style={{
             margin: "6px 0 0", fontFamily: FONT.display,
             fontSize: 36, fontWeight: 900, letterSpacing: "-0.01em",
           }}>
-            print your badge.
+            {isJoin ? "claim your badge." : "print your badge."}
           </h1>
         </div>
+
+        {isJoin && joinRoomCode !== undefined && onJoinRoomCodeChange ? (
+          <div style={{ width: "100%", maxWidth: 460 }}>
+            <div style={{
+              fontSize: 10, fontWeight: 700, color: C.inkDim, letterSpacing: ".2em",
+              textTransform: "uppercase", fontFamily: FONT.mono,
+              marginBottom: 8,
+            }}
+            >
+              room code
+            </div>
+            <input
+              id={joinRoomCodeInputId ?? "join-form-room-code"}
+              type="text"
+              autoComplete="off"
+              spellCheck={false}
+              value={joinRoomCode}
+              onChange={(e) => onJoinRoomCodeChange(e.target.value)}
+              readOnly={joinRoomCodeReadOnly}
+              disabled={joinRoomCodeDisabled}
+              aria-invalid={joinRoomCodeInvalid}
+              aria-describedby={joinRoomCodeDescribedBy}
+              placeholder="paste invite code"
+              style={{
+                width: "100%",
+                padding: "12px 14px",
+                border: `3px solid ${joinRoomCodeInvalid ? DR.semantic.danger : C.line}`,
+                borderRadius: 14,
+                background: C.panel,
+                color: C.ink,
+                fontFamily: FONT.mono,
+                fontSize: 17,
+                fontWeight: 700,
+                letterSpacing: ".06em",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+            {joinAfterCodeSlot ?? null}
+          </div>
+        ) : null}
 
         {/* ID badge card */}
         <div style={{
@@ -147,7 +218,7 @@ export function CreateRoomForm({
             </div>
 
             {/* name column */}
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ flex: 1, minWidth: 0 }} suppressHydrationWarning>
               <div style={{
                 fontSize: 10, fontWeight: 700, color: C.inkDim, letterSpacing: ".2em",
                 textTransform: "uppercase", fontFamily: FONT.mono,
@@ -182,7 +253,7 @@ export function CreateRoomForm({
               </div>
 
               <input
-                id="create-room-nickname"
+                id={nicknameInputId ?? "create-room-nickname"}
                 name="nickname"
                 type="text"
                 autoComplete="username"
@@ -191,6 +262,7 @@ export function CreateRoomForm({
                 onChange={(e) => onNicknameChange(e.target.value)}
                 placeholder="type a handle"
                 aria-invalid={error !== null}
+                aria-describedby={nicknameAriaDescribedBy}
                 style={{
                   width: "100%", padding: "6px 0 8px", marginTop: 4,
                   border: "none",
@@ -201,12 +273,15 @@ export function CreateRoomForm({
                   boxSizing: "border-box",
                 }}
               />
-              <div style={{
+              <div
+                suppressHydrationWarning
+                style={{
                 marginTop: 6, fontSize: 11, color: error ? DR.semantic.danger : C.inkDim,
                 fontFamily: FONT.mono,
                 display: "flex", justifyContent: "space-between",
-              }}>
-                <span>{error ?? "lobby badge · host"}</span>
+              }}
+              >
+                <span>{error ?? (isJoin ? "guest badge · join" : "lobby badge · host")}</span>
                 <span>{nicknameRaw.length}/{NICKNAME_MAX_GRAPHEMES}</span>
               </div>
             </div>
@@ -271,13 +346,18 @@ export function CreateRoomForm({
             paddingTop: 12, borderTop: `2px dashed ${C.inkDim}`,
             fontFamily: FONT.mono, fontSize: 11, fontWeight: 600, color: C.inkDim,
           }}>
-            <span>ROOM ID · ····</span>
+            <span>
+              {isJoin
+                ? `ROOM · ${joinRoomCode?.trim() ? joinRoomCode : "······"}`
+                : "ROOM ID · ····"}
+            </span>
             <span style={{
               border: `2px solid ${C.line}`, padding: "3px 8px", borderRadius: 6,
               color: ACCENT_INK, transform: "rotate(-3deg)", background: ACCENT,
               fontWeight: 800,
-            }}>
-              HOST
+            }}
+            >
+              {isJoin ? "GUEST" : "HOST"}
             </span>
           </div>
         </div>
@@ -298,21 +378,41 @@ export function CreateRoomForm({
           </Link>
           <button
             type="submit"
+            disabled={primaryBlocked}
             style={{
               flex: 1,
               border: `3px solid ${C.line}`, borderRadius: 14,
-              background: nameEmpty ? C.soft : ACCENT, color: ACCENT_INK,
+              background: primaryBlocked ? C.soft : ACCENT, color: ACCENT_INK,
               padding: "14px 22px",
               fontFamily: FONT.display, fontWeight: 900, fontSize: 18, letterSpacing: ".02em",
-              boxShadow: nameEmpty ? "none" : chunk(5, 6),
-              cursor: nameEmpty ? "not-allowed" : "pointer",
-              opacity: nameEmpty ? 0.55 : 1,
+              boxShadow: primaryBlocked ? "none" : chunk(5, 6),
+              cursor: primaryBlocked ? "not-allowed" : "pointer",
+              opacity: primaryBlocked ? 0.55 : 1,
               transition: "background .15s, box-shadow .15s, opacity .15s",
             }}
           >
-            open the room →
+            {isJoin ? "join the table →" : "open the room →"}
           </button>
         </div>
+
+        {isJoin ? (
+          <div style={{ textAlign: "center", marginTop: -10 }}>
+            <Link
+              href="/lobby"
+              style={{
+                color: C.inkDim,
+                fontFamily: FONT.mono,
+                fontSize: 12,
+                fontWeight: 700,
+                letterSpacing: ".08em",
+                textTransform: "uppercase",
+                textDecoration: "underline",
+              }}
+            >
+              host instead · create a room
+            </Link>
+          </div>
+        ) : null}
       </form>
     </div>
   );
