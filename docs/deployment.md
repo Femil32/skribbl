@@ -37,13 +37,14 @@ This document summarizes **deployment conclusions** from architecture, implement
 
 Secrets and rate limits belong on the **server** only—never in `NEXT_PUBLIC_*`.
 
-**Redis:** The game server expects a working Redis (**`REDIS_URL`**, default provider `ioredis`). See [`docs/deployment-railway.md`](deployment-railway.md) for Railway Redis wiring.
+**Redis:** The game server expects a working Redis (**`REDIS_URL`**, default provider `ioredis`). See [`docs/deployment-railway.md`](deployment-railway.md) or [`docs/deployment-render.md`](deployment-render.md) (Render Key Value).
 
 ---
 
 ## Platform guides
 
 - **Railway:** step-by-step **two services + Redis** → [`docs/deployment-railway.md`](deployment-railway.md).
+- **Render:** full **Key Value + two Web Services** walkthrough → [`docs/deployment-render.md`](deployment-render.md).
 
 ---
 

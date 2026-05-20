@@ -92,6 +92,7 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const rafRef = useRef<number | null>(null);
     const appliedDprRef = useRef(1);
+    const canvasCssSizeRef = useRef<{ w: number; h: number }>({ w: 1, h: 1 });
 
     const strokeIdRef = useRef<string>("");
     const batchBufferRef = useRef<DrawingStrokePoint[]>([]);
@@ -136,6 +137,7 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
 
       const cssW = Math.max(1, wrapper.clientWidth);
       const cssH = Math.max(1, wrapper.clientHeight);
+      canvasCssSizeRef.current = { w: cssW, h: cssH };
       const nextW = Math.round(cssW * dpr);
       const nextH = Math.round(cssH * dpr);
 
@@ -312,6 +314,9 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
       const cssH = Math.max(1, wrapper.clientHeight);
       const dpr = appliedDprRef.current;
 
+      const scalePoints = (pts: DrawingStrokePoint[]) =>
+        pts.map((p) => ({ x: p.x * cssW, y: p.y * cssH }));
+
       while (remoteWatermarkRef.current < sortedRemoteCanvasCommits.length) {
         const evt = sortedRemoteCanvasCommits[remoteWatermarkRef.current];
         remoteWatermarkRef.current += 1;
@@ -324,7 +329,7 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
             evt.points,
             remoteBrushChunkTailRef.current,
           );
-          drawStrokePolylineOnContext(ctx, bridged, evt.color, evt.lineWidthPx);
+          drawStrokePolylineOnContext(ctx, scalePoints(bridged), evt.color, evt.lineWidthPx);
           continue;
         }
 
@@ -339,7 +344,7 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
             remoteEraserChunkTailRef.current.clear();
             break;
           case "fill":
-            applyFloodFillAtCssPoint(canvasEl, ctx, evt.op.x, evt.op.y, evt.op.color, dpr);
+            applyFloodFillAtCssPoint(canvasEl, ctx, evt.op.x * cssW, evt.op.y * cssH, evt.op.color, dpr);
             break;
           case "eraserChunk": {
             const bridged = connectRemoteChunkPoints(
@@ -347,7 +352,7 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
               evt.op.points,
               remoteEraserChunkTailRef.current,
             );
-            drawEraserPolylineOnContext(ctx, bridged, evt.op.lineWidthPx);
+            drawEraserPolylineOnContext(ctx, scalePoints(bridged), evt.op.lineWidthPx);
             break;
           }
         }
@@ -416,11 +421,12 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
             resolvedColor,
             appliedDprRef.current,
           );
+          const { w: cssW, h: cssH } = canvasCssSizeRef.current;
           const raw = serializeClientCommand({
             type: "drawingCanvasFill",
             roomId: strokeTransport.roomId,
-            x: p.x,
-            y: p.y,
+            x: p.x / cssW,
+            y: p.y / cssH,
             color: resolvedColor,
           });
           strokeTransport.sendJsonLine(raw);
@@ -446,7 +452,8 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
         lastRenderedRef.current = { x: p.x, y: p.y };
 
         if (strokeTransport) {
-          enqueueBatchPointForTransport({ x: p.x, y: p.y });
+          const { w: cssW, h: cssH } = canvasCssSizeRef.current;
+          enqueueBatchPointForTransport({ x: p.x / cssW, y: p.y / cssH });
         }
       },
       [
@@ -488,7 +495,8 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
               drawStrokePolylineOnContext(ctx, [prev, next], resolvedColor, resolvedWidth);
             }
           }
-          enqueueBatchPointForTransport(next);
+          const { w: cssW, h: cssH } = canvasCssSizeRef.current;
+          enqueueBatchPointForTransport({ x: next.x / cssW, y: next.y / cssH });
         } else if (prev) {
           if (isEraser) {
             drawEraserPolylineOnContext(ctx, [prev, next], resolvedWidth);
